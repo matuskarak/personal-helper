@@ -109,6 +109,10 @@ struct PreferencesView: View {
                     }
                     .padding(24)
                     .frame(maxWidth: .infinity, alignment: .leading)
+                    // ponytail: same ScrollView instance across tabs — without a fresh
+                    // identity per tab, scroll offset carries over (e.g. scrolled down in
+                    // a long tab, switch to a short one → blank until scroll resets itself).
+                    .id(selectedTab)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
