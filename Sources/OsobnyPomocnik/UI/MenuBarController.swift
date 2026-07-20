@@ -108,8 +108,12 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         }
         micSubmenuItem.submenu = sub
 
-        // Smart diktovanie checkmark
-        statusItem.menu?.item(withTag: 42)?.state = engine.smartAlwaysOn ? .on : .off
+        // Smart diktovanie — hidden for regular users while it's remotely disabled
+        // (feature-flags.json); dev mode always sees it for testing.
+        if let smartItem = statusItem.menu?.item(withTag: 42) {
+            smartItem.isHidden = !RemoteConfig.shared.smartDictationAllowed
+            smartItem.state = engine.smartAlwaysOn ? .on : .off
+        }
 
         // Usage — dictation on one line, TTS on the next
         let dictMins = Double(engine.totalSecondsRecorded) / 60

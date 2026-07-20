@@ -9,6 +9,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         AppLogger.markSection("Aplikácia spustená (PID \(ProcessInfo.processInfo.processIdentifier))")
         PermissionsChecker.shared.requestAllIfNeeded()
         _ = UpdaterController.shared // starts Sparkle's background update checks
+        _ = RemoteConfig.shared      // starts feature-flag fetch
         menuBarController = MenuBarController()
         setupHotkeys()
         startHotkeyManagerOrRetry()
@@ -118,7 +119,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             DictationIndicatorController.shared.show()
             Task { @MainActor in
                 do {
-                    try await engine.startRecording(smart: engine.smartAlwaysOn)
+                    let smart = engine.smartAlwaysOn && RemoteConfig.shared.smartDictationAllowed
+                    try await engine.startRecording(smart: smart)
                     DictationSounds.playStart()
                 } catch {
                     AppLogger.log("[AppDelegate] handleDictate — startRecording zlyhalo: \(error.localizedDescription)")
@@ -132,7 +134,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// Same flow as handleDictate, but captures screenshot + app context at start
     /// and rewrites the transcript for that context (Slack tone, AI prompt clarity, …) before inserting.
+    /// No-ops while Smart diktovanie is remotely disabled for this user (feature-flags.json) —
+    /// keeps the shortcut harmless instead of erroring for regular users.
     func handleSmartDictate() {
+        guard RemoteConfig.shared.smartDictationAllowed else {
+            AppLogger.log("[AppDelegate] handleSmartDictate — ignorované (smartDictationAllowed=false)")
+            return
+        }
         AppLogger.log("[AppDelegate] handleSmartDictate — skratka stlačená (isRecording: \(DictationEngine.shared.isRecording))")
         let engine = DictationEngine.shared
         if engine.isRecording {

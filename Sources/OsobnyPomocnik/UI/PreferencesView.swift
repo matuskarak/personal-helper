@@ -57,6 +57,7 @@ struct PreferencesView: View {
     @State private var dictation    = DictationEngine.shared
     @State private var profileStore = AppProfileStore.shared
     @State private var rewriteEngine = SmartRewriteEngine.shared
+    @State private var remoteConfig  = RemoteConfig.shared
     @State private var usageStore    = UsageStore.shared
     @State private var showOnboarding = false
     @State private var developerMode = DeveloperMode.isEnabled
@@ -234,10 +235,12 @@ struct PreferencesView: View {
 
             // Toggles
             card {
-                toggleRow(title: "Smart diktovanie",
-                          subtitle: "Pred vložením text prepíše AI s kontextom obrazovky",
-                          isOn: $dictation.smartAlwaysOn)
-                rowDivider
+                if remoteConfig.smartDictationAllowed {
+                    toggleRow(title: "Smart diktovanie",
+                              subtitle: "Pred vložením text prepíše AI s kontextom obrazovky",
+                              isOn: $dictation.smartAlwaysOn)
+                    rowDivider
+                }
                 toggleRow(title: "Live vkladanie",
                           subtitle: "Píše text do poľa priebežne počas diktovania",
                           isOn: $dictation.liveInsertEnabled)
@@ -348,56 +351,58 @@ struct PreferencesView: View {
                 .padding(16)
             }
 
-            // Smart rewrite model
-            card {
-                pickerRow(title: "Model Smart prepisu", selection: $smartModelInput) {
-                    Text("gpt-4o-mini (rýchly, odporúčaný)").tag("gpt-4o-mini")
-                    Text("gpt-4o (presnejší)").tag("gpt-4o")
-                    Text("gpt-4.1-mini").tag("gpt-4.1-mini")
-                    Text("gpt-4.1").tag("gpt-4.1")
-                }
-                .onChange(of: smartModelInput) { _, v in rewriteEngine.model = v }
-            }
-
-            // App profiles
-            card {
-                VStack(alignment: .leading, spacing: 0) {
-                    HStack {
-                        Text("Profily podľa aplikácie").font(.body)
-                        Spacer()
-                        Button("+ Pridať") { profileStore.addBlank() }
-                            .buttonStyle(.bordered).font(.caption)
-                        Button("Aktuálna appka") { addProfileFromFrontmostApp() }
-                            .buttonStyle(.bordered).font(.caption)
+            if remoteConfig.smartDictationAllowed {
+                // Smart rewrite model
+                card {
+                    pickerRow(title: "Model Smart prepisu", selection: $smartModelInput) {
+                        Text("gpt-4o-mini (rýchly, odporúčaný)").tag("gpt-4o-mini")
+                        Text("gpt-4o (presnejší)").tag("gpt-4o")
+                        Text("gpt-4.1-mini").tag("gpt-4.1-mini")
+                        Text("gpt-4.1").tag("gpt-4.1")
                     }
-                    .padding(.horizontal, 16).padding(.vertical, 12)
+                    .onChange(of: smartModelInput) { _, v in rewriteEngine.model = v }
+                }
 
-                    if !profileStore.profiles.isEmpty {
-                        rowDivider
-                        ForEach($profileStore.profiles) { $profile in
-                            DisclosureGroup(
-                                profile.displayName.isEmpty ? "Bez názvu" : profile.displayName
-                            ) {
-                                VStack(alignment: .leading, spacing: 8) {
-                                    TextField("Názov", text: $profile.displayName)
-                                    TextField("Bundle ID (napr. com.tinyspeck.slackmacgap)",
-                                              text: $profile.bundleID)
-                                    TextField("Kľúčové slovo v titulku (voliteľné)",
-                                              text: $profile.titleKeyword)
-                                    TextField("Instrukcie pre prepis", text: $profile.instructions,
-                                              axis: .vertical)
-                                        .lineLimit(2...4)
-                                    HStack {
-                                        Spacer()
-                                        Button("Odstrániť", role: .destructive) {
-                                            profileStore.remove(profile)
-                                        }.font(.caption)
-                                    }
-                                }
-                                .padding(.vertical, 8)
-                            }
-                            .padding(.horizontal, 16).padding(.vertical, 10)
+                // App profiles
+                card {
+                    VStack(alignment: .leading, spacing: 0) {
+                        HStack {
+                            Text("Profily podľa aplikácie").font(.body)
+                            Spacer()
+                            Button("+ Pridať") { profileStore.addBlank() }
+                                .buttonStyle(.bordered).font(.caption)
+                            Button("Aktuálna appka") { addProfileFromFrontmostApp() }
+                                .buttonStyle(.bordered).font(.caption)
+                        }
+                        .padding(.horizontal, 16).padding(.vertical, 12)
+
+                        if !profileStore.profiles.isEmpty {
                             rowDivider
+                            ForEach($profileStore.profiles) { $profile in
+                                DisclosureGroup(
+                                    profile.displayName.isEmpty ? "Bez názvu" : profile.displayName
+                                ) {
+                                    VStack(alignment: .leading, spacing: 8) {
+                                        TextField("Názov", text: $profile.displayName)
+                                        TextField("Bundle ID (napr. com.tinyspeck.slackmacgap)",
+                                                  text: $profile.bundleID)
+                                        TextField("Kľúčové slovo v titulku (voliteľné)",
+                                                  text: $profile.titleKeyword)
+                                        TextField("Instrukcie pre prepis", text: $profile.instructions,
+                                                  axis: .vertical)
+                                            .lineLimit(2...4)
+                                        HStack {
+                                            Spacer()
+                                            Button("Odstrániť", role: .destructive) {
+                                                profileStore.remove(profile)
+                                            }.font(.caption)
+                                        }
+                                    }
+                                    .padding(.vertical, 8)
+                                }
+                                .padding(.horizontal, 16).padding(.vertical, 10)
+                                rowDivider
+                            }
                         }
                     }
                 }
@@ -851,11 +856,13 @@ struct PreferencesView: View {
                     get: { ShortcutStore.shared.dictate },
                     set: { ShortcutStore.shared.dictate = $0 }
                 ))
-                rowDivider
-                shortcutRow("Smart diktovanie", Binding(
-                    get: { ShortcutStore.shared.smartDictate },
-                    set: { ShortcutStore.shared.smartDictate = $0 }
-                ))
+                if remoteConfig.smartDictationAllowed {
+                    rowDivider
+                    shortcutRow("Smart diktovanie", Binding(
+                        get: { ShortcutStore.shared.smartDictate },
+                        set: { ShortcutStore.shared.smartDictate = $0 }
+                    ))
+                }
                 rowDivider
                 shortcutRow("Čítať text", Binding(
                     get: { ShortcutStore.shared.readText },
