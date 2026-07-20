@@ -13,6 +13,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menuBarController = MenuBarController()
         setupHotkeys()
         startHotkeyManagerOrRetry()
+
+        if !UserDefaults.standard.bool(forKey: "onboarding.firstLaunchShown") {
+            UserDefaults.standard.set(true, forKey: "onboarding.firstLaunchShown")
+            OnboardingWindowController.shared.show()
+        }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
