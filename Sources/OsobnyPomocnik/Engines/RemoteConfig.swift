@@ -31,9 +31,16 @@ final class RemoteConfig {
     var smartDictationAllowed: Bool { smartDictationEnabled || DeveloperMode.isEnabled }
 
     func refresh() async {
-        guard let (data, response) = try? await URLSession.shared.data(from: Self.url),
-              (response as? HTTPURLResponse)?.statusCode == 200 else {
-            AppLogger.log("[RemoteConfig] refresh failed, keeping cached flags")
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await URLSession.shared.data(from: Self.url)
+        } catch {
+            AppLogger.log("[RemoteConfig] refresh failed: \(error) — keeping cached flags")
+            return
+        }
+        guard (response as? HTTPURLResponse)?.statusCode == 200 else {
+            AppLogger.log("[RemoteConfig] refresh failed: status \((response as? HTTPURLResponse)?.statusCode ?? -1) — keeping cached flags")
             return
         }
         apply(data)
