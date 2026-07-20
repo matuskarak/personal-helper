@@ -8,6 +8,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         AppLogger.markSection("Aplikácia spustená (PID \(ProcessInfo.processInfo.processIdentifier))")
         PermissionsChecker.shared.requestAllIfNeeded()
+        _ = UpdaterController.shared // starts Sparkle's background update checks
         menuBarController = MenuBarController()
         setupHotkeys()
         startHotkeyManagerOrRetry()

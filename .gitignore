@@ -5,3 +5,5 @@
 backup-*/
 backup_*.zip
 .claude/settings.local.json
+.sparkle-tools/
+releases/

@@ -32,5 +32,15 @@
     <string>Osobný pomocník potrebuje rozpoznávanie reči pre diktovanie textu.</string>
     <key>NSScreenCaptureUsageDescription</key>
     <string>Osobný pomocník potrebuje zachytiť obrazovku pre funkciu OCR.</string>
+
+    <!-- Sparkle auto-update -->
+    <key>SUFeedURL</key>
+    <string>https://raw.githubusercontent.com/matuskarak/personal-helper/master/appcast.xml</string>
+    <key>SUPublicEDKey</key>
+    <string>R930xyv6GbHOg1AxfMEPRzRT0rKaONSBTkLek64x1b0=</string>
+    <key>SUEnableAutomaticChecks</key>
+    <true/>
+    <key>SUScheduledCheckInterval</key>
+    <integer>86400</integer>
 </dict>
 </plist>

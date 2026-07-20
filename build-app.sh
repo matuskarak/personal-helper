@@ -39,6 +39,16 @@ mkdir -p "$BUNDLE/Contents/Resources"
 cp "$BINARY" "$BUNDLE/Contents/MacOS/$APP_NAME"
 cp "$INFO_PLIST" "$BUNDLE/Contents/Info.plist"
 
+# Sparkle.framework je dynamický — zabaľ ho a nasmeruj naň rpath.
+SPARKLE_FRAMEWORK=$(find .build/artifacts/sparkle -maxdepth 4 -iname "Sparkle.framework" -type d | head -1)
+if [ -n "$SPARKLE_FRAMEWORK" ]; then
+    echo "📦 Vkladám Sparkle.framework…"
+    mkdir -p "$BUNDLE/Contents/Frameworks"
+    rm -rf "$BUNDLE/Contents/Frameworks/Sparkle.framework"
+    cp -R "$SPARKLE_FRAMEWORK" "$BUNDLE/Contents/Frameworks/"
+    install_name_tool -add_rpath "@executable_path/../Frameworks" "$BUNDLE/Contents/MacOS/$APP_NAME" 2>/dev/null || true
+fi
+
 echo "✍️  Podpisujem (OsobnyPomocnikDev) s entitlements…"
 codesign \
     --sign "OsobnyPomocnikDev" \

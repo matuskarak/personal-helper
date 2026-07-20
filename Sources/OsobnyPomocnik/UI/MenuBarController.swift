@@ -60,6 +60,9 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         menu.addItem(NSMenuItem(title: "Nastavenia…", action: #selector(openPreferences), keyEquivalent: ",")
             .configured { $0.target = self })
 
+        menu.addItem(NSMenuItem(title: "Skontrolovať aktualizácie…", action: #selector(checkForUpdates), keyEquivalent: "")
+            .configured { $0.target = self })
+
         menu.addItem(.separator())
 
         menu.addItem(NSMenuItem(title: "Ukončiť", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
@@ -180,6 +183,11 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         preferencesWindowController?.showWindow(nil)
         preferencesWindowController?.window?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    @objc private func checkForUpdates() {
+        NSApp.activate(ignoringOtherApps: true)
+        UpdaterController.shared.checkForUpdates()
     }
 
     /// Developer-mode helper — relaunches the .app bundle and quits this instance,
