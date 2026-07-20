@@ -61,6 +61,8 @@ struct PreferencesView: View {
     @State private var usageStore    = UsageStore.shared
     @State private var showOnboarding = false
     @State private var developerMode = DeveloperMode.isEnabled
+    @State private var accessCodeInput = ""
+    @State private var accessCodeSaved = false
     @State private var pillFollowsField = PillPosition.followFocusedField
     @State private var usagePeriod: UsagePeriod = .today
     @State private var chartMetric: ChartMetric = .timeSaved
@@ -129,12 +131,15 @@ struct PreferencesView: View {
             rateInput        = rateString(tts.rate)
             smartModelInput  = rewriteEngine.model
             inputDevices     = AudioDeviceManager.inputDevices()
+            accessCodeInput  = remoteConfig.accessCode
+            accessCodeSaved  = true
             // Normalise legacy "minimal" → "low" (removed from new segmented control)
             if dictation.transcriptionDelay == "minimal" { dictation.transcriptionDelay = "low" }
             if google.hasAPIKey { Task { await loadGoogleVoices() } }
         }
         .onChange(of: apiKeyInput)    { _, _ in apiKeySaved    = false }
         .onChange(of: openAIKeyInput) { _, _ in openAIKeySaved = false }
+        .onChange(of: accessCodeInput) { _, _ in accessCodeSaved = false }
     }
 
     // MARK: - Sidebar
@@ -968,6 +973,24 @@ struct PreferencesView: View {
                     get: { developerMode },
                     set: { developerMode = $0; DeveloperMode.isEnabled = $0 }
                 ))
+            }
+
+            card {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Prístupový kód").font(.body.bold())
+                    Text("Ak ti niekto poslal prístupový kód, vlož ho sem — odomkne funkcie, ktoré ti povolil.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    HStack {
+                        TextField("napr. jano-x7k2", text: $accessCodeInput)
+                            .textFieldStyle(.roundedBorder)
+                        Button(accessCodeSaved ? "Uložené ✓" : "Uložiť") {
+                            remoteConfig.accessCode = accessCodeInput
+                            accessCodeSaved = true
+                        }
+                        .buttonStyle(.borderedProminent)
+                    }
+                }
+                .padding(16)
             }
         }
     }
