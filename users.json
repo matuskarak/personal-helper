@@ -1,4 +1,3 @@
 {
-  "default": { "smartDictationEnabled": false },
-  "test-code-123": { "smartDictationEnabled": true }
+  "default": { "smartDictationEnabled": false }
 }
