@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleName</key>
+    <string>Osobný pomocník</string>
+    <key>CFBundleDisplayName</key>
+    <string>Osobný pomocník</string>
+    <key>CFBundleIdentifier</key>
+    <string>sk.matuskarak.osobny-pomocnik</string>
+    <key>CFBundleVersion</key>
+    <string>1</string>
+    <key>CFBundleShortVersionString</key>
+    <string>0.1.0</string>
+    <key>CFBundleExecutable</key>
+    <string>OsobnyPomocnik</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+
+    <!-- Hide from Dock; show only in menu bar -->
+    <key>LSUIElement</key>
+    <true/>
+
+    <!-- Minimum macOS version -->
+    <key>LSMinimumSystemVersion</key>
+    <string>14.0</string>
+
+    <!-- Privacy usage descriptions -->
+    <key>NSMicrophoneUsageDescription</key>
+    <string>Osobný pomocník potrebuje mikrofón pre diktovanie textu.</string>
+    <key>NSSpeechRecognitionUsageDescription</key>
+    <string>Osobný pomocník potrebuje rozpoznávanie reči pre diktovanie textu.</string>
+    <key>NSScreenCaptureUsageDescription</key>
+    <string>Osobný pomocník potrebuje zachytiť obrazovku pre funkciu OCR.</string>
+</dict>
+</plist>
