@@ -19,6 +19,9 @@ struct OnboardingView: View {
     @State private var apiKeyTestResult: String?
     @State private var googleKeyInput = ""
     @State private var googleKeySaved = false
+    @State private var remoteConfig = RemoteConfig.shared
+    @State private var accessCodeInput = ""
+    @State private var accessCodeSaved = false
 
     var allGranted: Bool { axGranted && micGranted && speechGranted }
 
@@ -138,6 +141,22 @@ struct OnboardingView: View {
 
             Divider()
 
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Prístupový kód (voliteľné)").font(.body.bold())
+                Text("Ak ti niekto poslal prístupový kód, vlož ho sem — odomkne funkcie, ktoré ti povolil.")
+                    .font(.caption).foregroundStyle(.secondary)
+                HStack {
+                    TextField("napr. jano-x7k2", text: $accessCodeInput).textFieldStyle(.roundedBorder)
+                    Button(accessCodeSaved ? "Uložené ✓" : "Uložiť") {
+                        remoteConfig.accessCode = accessCodeInput
+                        accessCodeSaved = true
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
+            }
+
+            Divider()
+
             HStack {
                 Button("Skontrolovať znova") { refresh() }
                     .buttonStyle(.bordered)
@@ -155,9 +174,12 @@ struct OnboardingView: View {
             openAIKeySaved = dictation.hasOpenAIKey
             googleKeyInput = google.apiKey
             googleKeySaved = google.hasAPIKey
+            accessCodeInput = remoteConfig.accessCode
+            accessCodeSaved = true
         }
         .onChange(of: openAIKeyInput) { _, _ in openAIKeySaved = false }
         .onChange(of: googleKeyInput) { _, _ in googleKeySaved = false }
+        .onChange(of: accessCodeInput) { _, _ in accessCodeSaved = false }
         }
     }
 
