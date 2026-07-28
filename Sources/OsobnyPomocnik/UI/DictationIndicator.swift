@@ -220,7 +220,17 @@ struct DictationIndicatorView: View {
     private static let levelTicker = Timer.publish(every: 0.07, on: .main, in: .common).autoconnect()
 
     var body: some View {
-        pillContent
+        // A real Button (not onTapGesture) is required here: with isMovableByWindowBackground
+        // on, plain content's mouseDownCanMoveWindow stays true and the window-drag machinery
+        // swallows the click before any gesture recognizer sees it. Buttons are the one thing
+        // AppKit reliably excludes from that, so clicking dismisses while dragging elsewhere
+        // on the pill still works.
+        Button {
+            DictationIndicatorController.shared.hide(from: "tap")
+        } label: {
+            pillContent
+        }
+        .buttonStyle(.plain)
             .onReceive(Self.levelTicker) { _ in
                 levelHistory[historyIndex] = engine.audioLevel
                 historyIndex = (historyIndex + 1) % levelHistory.count
