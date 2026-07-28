@@ -613,70 +613,99 @@ struct PreferencesView: View {
     private var microphoneTab: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Mikrofón").font(.title2.bold())
+            Text("Zoraď mikrofóny podľa dôležitosti — pri štarte diktovania appka použije prvý pripojený z tohto poradia. Ak nie je pripojený žiadny, použije systémový mikrofón.")
+                .font(.caption).foregroundStyle(.secondary)
 
-            let selectedUID   = dictation.selectedInputDeviceUID
-            let availableUIDs = Set(inputDevices.map { $0.uid })
-            let selectedMissing = selectedUID != nil && !availableUIDs.contains(selectedUID!)
+            let deviceByUID   = Dictionary(uniqueKeysWithValues: inputDevices.map { ($0.uid, $0) })
+            let resolvedUID   = dictation.resolvedInputDeviceUID()
+            let unprioritized = inputDevices.filter { !dictation.micPriority.contains($0.uid) }
 
-            if selectedMissing, let uid = selectedUID {
-                let name = savedDeviceName(uid)
-                warningBanner(
-                    "\(name) nie je pripojený. Pripoj zariadenie alebo vyber iný mikrofón."
-                )
+            if !dictation.micPriority.isEmpty {
+                card {
+                    List {
+                        ForEach(dictation.micPriority, id: \.self) { uid in
+                            let device = deviceByUID[uid]
+                            let connected = device != nil
+                            HStack(spacing: 14) {
+                                Image(systemName: "line.3.horizontal")
+                                    .font(.caption).foregroundStyle(.tertiary)
+                                Image(systemName: connected ? deviceIcon(device!.name) : "mic.slash")
+                                    .font(.system(size: 13)).foregroundStyle(.secondary)
+                                    .frame(width: 18)
+                                Text(device?.name ?? savedDeviceName(uid))
+                                    .font(uid == resolvedUID ? .body.bold() : .body)
+                                if uid == resolvedUID {
+                                    Text("aktívny").font(.caption2).foregroundStyle(accent)
+                                        .padding(.horizontal, 6).padding(.vertical, 2)
+                                        .background(Capsule().fill(accent.opacity(0.12)))
+                                }
+                                Spacer()
+                                HStack(spacing: 5) {
+                                    Circle().fill(connected ? greenDot : Color.secondary.opacity(0.45))
+                                        .frame(width: 6, height: 6)
+                                    Text(connected ? "Pripojené" : "Nedostupné")
+                                        .font(.caption).foregroundStyle(connected ? greenDot : Color.secondary)
+                                }
+                                Button {
+                                    dictation.micPriority.removeAll { $0 == uid }
+                                } label: {
+                                    Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                            .padding(.vertical, 4)
+                            .listRowSeparator(.hidden)
+                            .listRowBackground(Color.clear)
+                        }
+                        .onMove { indices, newOffset in
+                            dictation.micPriority.move(fromOffsets: indices, toOffset: newOffset)
+                        }
+                    }
+                    .listStyle(.plain)
+                    .scrollContentBackground(.hidden)
+                    .frame(height: CGFloat(dictation.micPriority.count) * 40 + 16)
+                    .padding(.horizontal, 4)
+                }
             }
 
-            card {
-                micRow(name: "Systémový (predvolený)", icon: "waveform",
-                       connected: true, selected: selectedUID == nil) {
-                    dictation.selectedInputDeviceUID = nil
-                }
-                ForEach(inputDevices) { device in
-                    Divider().padding(.leading, 50)
-                    micRow(name: device.name, icon: deviceIcon(device.name),
-                           connected: true, selected: selectedUID == device.uid) {
-                        dictation.selectedInputDeviceUID = device.uid
+            if !unprioritized.isEmpty {
+                card {
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text(dictation.micPriority.isEmpty ? "Dostupné zariadenia" : "Pridať do poradia")
+                            .font(.caption).foregroundStyle(.secondary)
+                            .padding(.horizontal, 16).padding(.top, 12).padding(.bottom, 4)
+                        ForEach(unprioritized) { device in
+                            Divider().padding(.leading, 50)
+                            Button {
+                                dictation.micPriority.append(device.uid)
+                            } label: {
+                                HStack(spacing: 14) {
+                                    Image(systemName: "plus.circle")
+                                        .font(.system(size: 13)).foregroundStyle(accent)
+                                        .frame(width: 18)
+                                    Image(systemName: deviceIcon(device.name))
+                                        .font(.system(size: 13)).foregroundStyle(.secondary)
+                                    Text(device.name)
+                                    Spacer()
+                                }
+                                .padding(.horizontal, 16).padding(.vertical, 13)
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                        }
                     }
                 }
-                if selectedMissing, let uid = selectedUID {
-                    Divider().padding(.leading, 50)
-                    micRow(name: savedDeviceName(uid), icon: "mic.circle",
-                           connected: false, selected: true) { }
-                }
             }
 
-            Button("Obnoviť zoznam") { inputDevices = AudioDeviceManager.inputDevices() }
-                .buttonStyle(.bordered).font(.caption)
-        }
-    }
-
-    private func micRow(name: String, icon: String, connected: Bool,
-                        selected: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            HStack(spacing: 14) {
-                Image(systemName: selected ? "record.circle.fill" : "circle")
-                    .font(.system(size: 16))
-                    .foregroundStyle(selected ? accent : Color.secondary)
-                Image(systemName: icon)
-                    .font(.system(size: 13))
-                    .foregroundStyle(Color.secondary)
-                    .frame(width: 18)
-                Text(name)
-                    .font(selected ? .body.bold() : .body)
-                    .foregroundStyle(.primary)
-                Spacer()
-                HStack(spacing: 5) {
-                    Circle()
-                        .fill(connected ? greenDot : Color.secondary.opacity(0.45))
-                        .frame(width: 6, height: 6)
-                    Text(connected ? "Pripojené" : "Nedostupné")
-                        .font(.caption)
-                        .foregroundStyle(connected ? greenDot : Color.secondary)
+            HStack {
+                Button("Obnoviť zoznam") { inputDevices = AudioDeviceManager.inputDevices() }
+                    .buttonStyle(.bordered).font(.caption)
+                if !dictation.micPriority.isEmpty {
+                    Button("Vymazať poradie") { dictation.micPriority = [] }
+                        .buttonStyle(.bordered).font(.caption).foregroundStyle(.red)
                 }
             }
-            .padding(.horizontal, 16).padding(.vertical, 13)
-            .background(selected ? accent.opacity(0.07) : .clear)
         }
-        .buttonStyle(.plain)
     }
 
     private func deviceIcon(_ name: String) -> String {
