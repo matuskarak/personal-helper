@@ -721,14 +721,16 @@ struct PreferencesView: View {
                 Text("Prečítaj nahlas zobrazenú vetu — appka skontroluje hlasitosť, šum na pozadí a či prepis sedí s tým, čo si povedal.")
                     .font(.caption).foregroundStyle(.secondary)
 
+                // Reference sentence stays visible for the whole test — it needs to be
+                // readable WHILE recording, not just before/after.
+                Text("„\(micTest.referenceText)“")
+                    .font(.callout.italic())
+                    .padding(12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(RoundedRectangle(cornerRadius: 8).fill(accent.opacity(0.06)))
+
                 switch micTest.phase {
                 case .idle, .done, .failed:
-                    Text("„\(micTest.referenceText)“")
-                        .font(.callout.italic())
-                        .padding(12)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(RoundedRectangle(cornerRadius: 8).fill(accent.opacity(0.06)))
-
                     if case .failed(let msg) = micTest.phase {
                         Text(msg).font(.caption).foregroundStyle(.red)
                     }
