@@ -240,6 +240,22 @@ final class DictationEngine {
         return micPriority.first(where: available.contains)
     }
 
+    /// Same thresholds as MicTestEngine's verdict, minus the transcript-accuracy part —
+    /// nil when everything looks fine (we only want to interrupt with a notice on a
+    /// real problem, not congratulate a working mic mid-dictation).
+    private static func qualityWarning(from s: (peakDBFS: Double, clippingPercent: Double, snrDB: Double?)) -> String? {
+        if s.clippingPercent > 0.5 {
+            return "⚠️ Zvuk je skreslený — zníž vstupnú hlasitosť mikrofónu v Nastaveniach zvuku."
+        }
+        if s.peakDBFS < -35 {
+            return "⚠️ Mikrofón je veľmi potichu — priblíž sa k nemu alebo zvýš vstupnú hlasitosť."
+        }
+        if let snr = s.snrDB, snr < 15 {
+            return "⚠️ V pozadí je výrazný šum — skús tichšie prostredie."
+        }
+        return nil
+    }
+
     // Audio
     private let audioEngine = AVAudioEngine()
     private let pcm16Format = AVAudioFormat(
@@ -369,6 +385,7 @@ final class DictationEngine {
 
         AppLogger.markSection("nové diktovanie")
         chunkCounter.reset()
+        qualityMonitor.reset()
         tapRestartCount = 0
         tapNeedsReinstall = false
         let micAuth = AVCaptureDevice.authorizationStatus(for: .audio)
@@ -678,6 +695,14 @@ final class DictationEngine {
                        let lastDelta = self.lastDeltaDate {
                         self.isWaitingForServer = -lastDelta.timeIntervalSinceNow > 5.0
                     }
+
+                    // Passive quality check — fires once, ~15s into the session.
+                    if let snapshot = qualityMonitor.consumeIfReady() {
+                        if let warning = Self.qualityWarning(from: snapshot) {
+                            self.showNotice(warning)
+                        }
+                    }
+
                     try? await Task.sleep(for: .milliseconds(50))
                 }
                 self?.audioLevel = 0
@@ -1180,6 +1205,74 @@ private final class ChunkCounter: @unchecked Sendable {
 }
 private let chunkCounter = ChunkCounter()
 
+/// Passive audio-quality check over the first ~15s of a session — peak level,
+/// clipping, and a noise-floor/SNR estimate (same heuristic as MicTestEngine, minus
+/// the transcript-accuracy part since there's no reference sentence during real
+/// dictation). Fed from convertChunk on the realtime thread; evaluated once from the
+/// MainActor level-poll loop so a quiet/noisy mic gets flagged mid-session instead of
+/// only being visible after the fact via a standalone test.
+private final class DictationQualityMonitor: @unchecked Sendable {
+    private let lock = NSLock()
+    private var windowStart: Date?
+    private var frameRMS: [Float] = []
+    private var peak: Float = 0
+    private var clippedSamples = 0
+    private var totalSamples = 0
+    private var ready = false
+    private let windowDuration: TimeInterval = 15
+    private let maxFrames = 600 // ~15s worth of chunk-sized frames — bounded, cheap
+
+    func reset() {
+        lock.lock()
+        windowStart = nil; frameRMS.removeAll(); peak = 0
+        clippedSamples = 0; totalSamples = 0; ready = false
+        lock.unlock()
+    }
+
+    func recordChunk(ptr: UnsafePointer<Int16>, count: Int) {
+        lock.lock(); defer { lock.unlock() }
+        guard !ready, count > 0 else { return }
+        let now = Date()
+        if windowStart == nil { windowStart = now }
+
+        var sumSquares: Float = 0
+        var localPeak: Float = 0
+        var localClipped = 0
+        for i in 0..<count {
+            let f = Float(ptr[i]) / Float(Int16.max)
+            let a = abs(f)
+            if a > localPeak { localPeak = a }
+            if a >= 0.999 { localClipped += 1 }
+            sumSquares += f * f
+        }
+        if frameRMS.count < maxFrames { frameRMS.append(sqrt(sumSquares / Float(count))) }
+        if localPeak > peak { peak = localPeak }
+        clippedSamples += localClipped
+        totalSamples += count
+
+        if let start = windowStart, now.timeIntervalSince(start) >= windowDuration {
+            ready = true
+        }
+    }
+
+    /// Non-nil exactly once — the caller (MainActor poll loop) consumes it and moves on.
+    func consumeIfReady() -> (peakDBFS: Double, clippingPercent: Double, snrDB: Double?)? {
+        lock.lock(); defer { lock.unlock() }
+        guard ready else { return nil }
+        ready = false // consumed — never fires again this session
+        let peakDBFS = 20 * log10(Double(max(peak, 1e-6)))
+        let clippingPercent = totalSamples > 0 ? Double(clippedSamples) / Double(totalSamples) * 100 : 0
+        guard frameRMS.count >= 5 else { return (peakDBFS, clippingPercent, nil) }
+        let sorted = frameRMS.sorted()
+        let bucket = max(1, sorted.count / 5)
+        let noiseFloor = sorted.prefix(bucket).reduce(0, +) / Float(bucket)
+        let voicePeak  = sorted.suffix(bucket).reduce(0, +) / Float(bucket)
+        let snrDB = 20 * log10(Double(max(voicePeak, 1e-6)) / Double(max(noiseFloor, 1e-6)))
+        return (peakDBFS, clippingPercent, snrDB)
+    }
+}
+private let qualityMonitor = DictationQualityMonitor()
+
 /// Thread-safe holder for the current mic level (0...1, normalized). Updated from
 /// the realtime audio thread (cheap lock+write only); read by a MainActor polling
 /// loop in DictationEngine so the UI never touches @Observable state cross-thread.
@@ -1260,6 +1353,7 @@ private func convertChunk(
         if mag > maxAmp { maxAmp = mag }
     }
     chunkCounter.recordSent(byteCount: frameCount * 2, maxAmplitude: maxAmp)
+    qualityMonitor.recordChunk(ptr: ptr, count: frameCount)
     // Normal speech rarely exceeds ~10-30% of full digital scale, so a raw linear
     // ratio barely moves the UI. Apply a perceptual (sqrt) curve + gain so typical
     // speaking volume visibly animates the equalizer.
