@@ -234,12 +234,17 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         }
     }
 
+    /// Surfaces a standalone message in the same floating pill used during dictation,
+    /// instead of a blocking NSAlert dialog — keeps one consistent notice style app-wide.
     func showError(_ message: String) {
-        let alert = NSAlert()
-        alert.messageText = "Osobný pomocník"
-        alert.informativeText = message
-        alert.alertStyle = .warning
-        alert.runModal()
+        // Order matters: show() must mount the pill *before* notice changes, otherwise
+        // the view's onChange(of: notice) — which drives the auto-hide timer — never fires.
+        DictationIndicatorController.shared.show()
+        // Give the pill's view a moment to actually mount before notice changes —
+        // otherwise onChange(of: notice) has no prior render to diff against and never fires.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+            DictationEngine.shared.showNotice(message)
+        }
     }
 }
 

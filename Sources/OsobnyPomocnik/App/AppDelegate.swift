@@ -80,7 +80,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         AppLogger.log("[AppDelegate] handleReadText — skratka stlačená")
         guard let text = await TextExtractor.shared.extractSelected(), !text.isEmpty else {
             AppLogger.log("[AppDelegate] handleReadText — žiadny text na pasteboarde")
-            menuBarController?.showError("Nie je označený žiadny text.")
+            menuBarController?.showError("⚠️ Nie je označený žiadny text.")
             return
         }
         AppLogger.log("[AppDelegate] handleReadText — text získaný (\(text.count) znakov), spúšťam TTS")
@@ -129,9 +129,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     DictationSounds.playStart()
                 } catch {
                     AppLogger.log("[AppDelegate] handleDictate — startRecording zlyhalo: \(error.localizedDescription)")
-                    DictationIndicatorController.shared.hide()
-                    let msg = engine.connectionError ?? error.localizedDescription
-                    menuBarController?.showError(msg)
+                    // Pill is already showing (from show() above) — just surface the reason in it.
+                    if engine.connectionError == nil {
+                        menuBarController?.showError("⚠️ \(error.localizedDescription)")
+                    }
                 }
             }
         }
@@ -159,9 +160,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     DictationSounds.playStart()
                 } catch {
                     AppLogger.log("[AppDelegate] handleSmartDictate — startRecording zlyhalo: \(error.localizedDescription)")
-                    DictationIndicatorController.shared.hide()
-                    let msg = engine.connectionError ?? error.localizedDescription
-                    menuBarController?.showError(msg)
+                    if engine.connectionError == nil {
+                        menuBarController?.showError("⚠️ \(error.localizedDescription)")
+                    }
                 }
             }
         }
@@ -207,7 +208,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func handleInsertFromMemory() {
         AppLogger.log("[AppDelegate] handleInsertFromMemory — skratka stlačená")
         guard let text = DictationMemoryStore.shared.consume() else {
-            menuBarController?.showError("Pamäť diktovania je prázdna.")
+            menuBarController?.showError("⚠️ Pamäť diktovania je prázdna.")
             return
         }
         TextInserter.shared.insert(text)
