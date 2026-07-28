@@ -225,12 +225,19 @@ final class DictationEngine {
         }
     }
 
-    // Selected microphone — persistent device UID; nil = system default
-    var selectedInputDeviceUID: String? {
-        didSet {
-            if let v = selectedInputDeviceUID { UserDefaults.standard.set(v, forKey: "dictation.inputDeviceUID") }
-            else                              { UserDefaults.standard.removeObject(forKey: "dictation.inputDeviceUID") }
-        }
+    // Microphone priority order — persistent device UIDs, most preferred first.
+    // At recording start we walk the list and use the first one that's currently
+    // connected; if none are, or the list is empty, we fall back to system default.
+    var micPriority: [String] {
+        didSet { UserDefaults.standard.set(micPriority, forKey: "dictation.micPriority") }
+    }
+
+    /// First priority-list device that's currently connected, or nil (→ system default)
+    /// if the list is empty or none of its devices are present right now.
+    func resolvedInputDeviceUID() -> String? {
+        guard !micPriority.isEmpty else { return nil }
+        let available = Set(AudioDeviceManager.inputDevices().map(\.uid))
+        return micPriority.first(where: available.contains)
     }
 
     // Audio
@@ -288,7 +295,16 @@ final class DictationEngine {
 
     private init() {
         self.totalSecondsRecorded   = UserDefaults.standard.integer(forKey: "whisper.usage.seconds")
-        self.selectedInputDeviceUID = UserDefaults.standard.string(forKey: "dictation.inputDeviceUID")
+        // Migrate the old single-device pick into a one-item priority list.
+        // didSet doesn't fire for assignments inside this initializer, so persist explicitly.
+        if let legacyUID = UserDefaults.standard.string(forKey: "dictation.inputDeviceUID") {
+            let migrated = [legacyUID]
+            self.micPriority = migrated
+            UserDefaults.standard.set(migrated, forKey: "dictation.micPriority")
+            UserDefaults.standard.removeObject(forKey: "dictation.inputDeviceUID")
+        } else {
+            self.micPriority = UserDefaults.standard.stringArray(forKey: "dictation.micPriority") ?? []
+        }
         self.openAIKey              = UserDefaults.standard.string(forKey: "openai.dictation.key") ?? ""
         self.transcriptionDelay     = UserDefaults.standard.string(forKey: "whisper.delay") ?? "low"
         self.transcriptionMode      = TranscriptionMode(rawValue: UserDefaults.standard.string(forKey: "dictation.mode") ?? "") ?? .realtime
@@ -366,7 +382,7 @@ final class DictationEngine {
         let inputFormat: AVAudioFormat
         let converter: AVAudioConverter
 
-        if let uid = selectedInputDeviceUID {
+        if let uid = resolvedInputDeviceUID() {
             // Explicit device selected — ONLY use DeviceCapture, never AVAudioEngine fallback.
             // Falling back to AVAudioEngine when BT device is in a bad state can block
             // audioEngine.start() for 30+ seconds, freezing the UI.

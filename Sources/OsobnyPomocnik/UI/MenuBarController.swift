@@ -88,22 +88,36 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     private func refreshDynamicItems() {
         let engine = DictationEngine.shared
         let devices = AudioDeviceManager.inputDevices()
-        let selectedUID = engine.selectedInputDeviceUID
+        let resolvedUID = engine.resolvedInputDeviceUID()
 
-        // Rebuild mic submenu
+        // Rebuild mic submenu — devices ordered by priority (rank shown), then any
+        // other connected devices not yet prioritized. Clicking one makes it #1;
+        // clicking "Systémový" clears the whole priority list.
         let sub = NSMenu()
         let sysItem = NSMenuItem(title: "Systémový (predvolený)", action: #selector(selectMicSystem), keyEquivalent: "")
         sysItem.target = self
-        sysItem.state = selectedUID == nil ? .on : .off
+        sysItem.state = resolvedUID == nil ? .on : .off
         sub.addItem(sysItem)
 
         if !devices.isEmpty { sub.addItem(.separator()) }
 
-        for dev in devices {
+        let deviceByUID = Dictionary(uniqueKeysWithValues: devices.map { ($0.uid, $0) })
+        let prioritized = engine.micPriority.compactMap { deviceByUID[$0] }
+        let rest = devices.filter { !engine.micPriority.contains($0.uid) }
+
+        for (index, dev) in prioritized.enumerated() {
+            let item = NSMenuItem(title: "\(index + 1). \(dev.name)", action: #selector(selectMic(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = dev.uid
+            item.state = dev.uid == resolvedUID ? .on : .off
+            sub.addItem(item)
+        }
+        if !prioritized.isEmpty && !rest.isEmpty { sub.addItem(.separator()) }
+        for dev in rest {
             let item = NSMenuItem(title: dev.name, action: #selector(selectMic(_:)), keyEquivalent: "")
             item.target = self
             item.representedObject = dev.uid
-            item.state = dev.uid == selectedUID ? .on : .off
+            item.state = dev.uid == resolvedUID ? .on : .off
             sub.addItem(item)
         }
         micSubmenuItem.submenu = sub
@@ -139,12 +153,16 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     // MARK: - Mic selection
 
     @objc private func selectMicSystem() {
-        DictationEngine.shared.selectedInputDeviceUID = nil
+        DictationEngine.shared.micPriority = []
     }
 
+    /// Makes the clicked device the top priority (moves it to the front, no duplicates).
     @objc private func selectMic(_ sender: NSMenuItem) {
         guard let uid = sender.representedObject as? String else { return }
-        DictationEngine.shared.selectedInputDeviceUID = uid
+        var priority = DictationEngine.shared.micPriority
+        priority.removeAll { $0 == uid }
+        priority.insert(uid, at: 0)
+        DictationEngine.shared.micPriority = priority
     }
 
     // MARK: - Actions
