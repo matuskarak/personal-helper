@@ -58,6 +58,7 @@ struct PreferencesView: View {
     @State private var profileStore = AppProfileStore.shared
     @State private var rewriteEngine = SmartRewriteEngine.shared
     @State private var remoteConfig  = RemoteConfig.shared
+    @State private var micTest       = MicTestEngine.shared
     @State private var usageStore    = UsageStore.shared
     @State private var showOnboarding = false
     @State private var developerMode = DeveloperMode.isEnabled
@@ -705,6 +706,113 @@ struct PreferencesView: View {
                         .buttonStyle(.bordered).font(.caption).foregroundStyle(.red)
                 }
             }
+
+            micTestCard
+        }
+    }
+
+    // MARK: - Mic test
+
+    @ViewBuilder
+    private var micTestCard: some View {
+        card {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Test mikrofónu").font(.body.bold())
+                Text("Prečítaj nahlas zobrazenú vetu — appka skontroluje hlasitosť, šum na pozadí a či prepis sedí s tým, čo si povedal.")
+                    .font(.caption).foregroundStyle(.secondary)
+
+                switch micTest.phase {
+                case .idle, .done, .failed:
+                    Text("„\(micTest.referenceText)“")
+                        .font(.callout.italic())
+                        .padding(12)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(RoundedRectangle(cornerRadius: 8).fill(accent.opacity(0.06)))
+
+                    if case .failed(let msg) = micTest.phase {
+                        Text(msg).font(.caption).foregroundStyle(.red)
+                    }
+                    if let r = micTest.result {
+                        micTestResultView(r)
+                    }
+                    Button(micTest.result == nil ? "Spustiť test (6 s)" : "Skúsiť znova") {
+                        micTest.startTest()
+                    }
+                    .buttonStyle(.borderedProminent).tint(accent)
+
+                case .recording(let secondsLeft):
+                    HStack(spacing: 12) {
+                        MicEqualizerView(isActive: true, tint: .blue)
+                        Text("Nahrávam… \(secondsLeft)s").foregroundStyle(.secondary)
+                        Spacer()
+                        Button("Zrušiť") { micTest.cancel() }.buttonStyle(.bordered)
+                    }
+
+                case .analyzing:
+                    HStack(spacing: 12) {
+                        ProgressView().controlSize(.small)
+                        Text("Analyzujem nahrávku…").foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .padding(16)
+        }
+    }
+
+    @ViewBuilder
+    private func micTestResultView(_ r: MicTestEngine.Result) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Circle().fill(verdictColor(r.verdict)).frame(width: 8, height: 8)
+                Text(verdictLabel(r.verdict)).font(.body.bold()).foregroundStyle(verdictColor(r.verdict))
+            }
+            HStack(spacing: 20) {
+                metricStat("Hlasitosť (peak)", String(format: "%.0f dBFS", r.peakDBFS))
+                if let snr = r.snrDB {
+                    metricStat("Šum (SNR)", String(format: "%.0f dB", snr))
+                }
+                if r.clippingPercent > 0.05 {
+                    metricStat("Skreslenie", String(format: "%.1f%%", r.clippingPercent))
+                }
+                if let match = r.matchPercent {
+                    metricStat("Zhoda prepisu", String(format: "%.0f%%", match))
+                }
+            }
+            ForEach(r.suggestions, id: \.self) { s in
+                HStack(alignment: .top, spacing: 6) {
+                    Text("•").foregroundStyle(.secondary)
+                    Text(s).font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            if let t = r.transcript {
+                Text("Prepis: „\(t)“").font(.caption2).foregroundStyle(.tertiary)
+            }
+        }
+        .padding(12)
+        .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.04)))
+    }
+
+    private func metricStat(_ label: String, _ value: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(value).font(.callout.monospacedDigit().bold())
+            Text(label).font(.caption2).foregroundStyle(.secondary)
+        }
+    }
+
+    private func verdictColor(_ v: MicTestEngine.Verdict) -> Color {
+        switch v {
+        case .excellent, .good: greenDot
+        case .marginal: .orange
+        case .poor: .red
+        }
+    }
+
+    private func verdictLabel(_ v: MicTestEngine.Verdict) -> String {
+        switch v {
+        case .excellent: "Výborné"
+        case .good: "Dobré"
+        case .marginal: "Priemerné"
+        case .poor: "Slabé"
         }
     }
 
