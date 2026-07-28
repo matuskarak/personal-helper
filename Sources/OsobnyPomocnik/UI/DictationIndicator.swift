@@ -142,7 +142,7 @@ final class DictationIndicatorController: NSWindowController, NSWindowDelegate {
 
 // MARK: - Mic with built-in level equalizer
 
-private struct MicEqualizerView: View {
+struct MicEqualizerView: View {
     let isActive: Bool
     let tint: Color    // caller decides based on voice detection
 
