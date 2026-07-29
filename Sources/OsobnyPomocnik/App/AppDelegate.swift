@@ -188,8 +188,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
-        DictationHistoryStore.shared.log(text)
-
         guard !engine.didLiveInsert else {
             AppLogger.log("[AppDelegate] \(label) — live-insert dokončený (fallback path)")
             DictationIndicatorController.shared.hide()

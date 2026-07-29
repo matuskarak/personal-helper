@@ -802,6 +802,7 @@ final class DictationEngine {
         if !dictatedText.isEmpty {
             let model = transcriptionMode == .realtime ? "gpt-realtime-whisper" : batchModel
             UsageStore.shared.logDictation(seconds: elapsed, text: dictatedText, model: model)
+            DictationHistoryStore.shared.log(dictatedText)
         }
         return result
     }
