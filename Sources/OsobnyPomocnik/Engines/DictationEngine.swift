@@ -270,7 +270,7 @@ final class DictationEngine {
     private let maxReconnectAttempts = 4
 
     private var accumulatedText         = ""
-    private var recordingStartDate:     Date?
+    private(set) var recordingStartDate: Date?  // also drives the pill's live elapsed-time counter
 
     // Live-insert state (realtime mode only)
     var liveInsertEnabled: Bool {

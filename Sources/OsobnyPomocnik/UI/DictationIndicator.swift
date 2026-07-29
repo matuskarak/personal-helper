@@ -279,13 +279,27 @@ struct DictationIndicatorView: View {
             }
     }
 
+    /// Elapsed recording time — SwiftUI's built-in timer-style Text ticks on its own,
+    /// no polling/Timer needed.
+    @ViewBuilder
+    private var elapsedTimeLabel: some View {
+        if let start = engine.recordingStartDate {
+            Text(start, style: .timer)
+                .font(.system(size: 9).monospacedDigit())
+                .foregroundStyle(.secondary)
+        }
+    }
+
     @ViewBuilder
     private var pillContent: some View {
         if isCompact {
             // Live-insert mode: just the equalizer bubble — transcript is in the field
-            MicEqualizerView(isActive: engine.isRecording, tint: equalizerTint)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 10)
+            VStack(spacing: 3) {
+                MicEqualizerView(isActive: engine.isRecording, tint: equalizerTint)
+                elapsedTimeLabel
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
         } else {
             HStack(spacing: 12) {
                 if engine.isRewriting {
@@ -322,7 +336,10 @@ struct DictationIndicatorView: View {
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 } else {
-                    MicEqualizerView(isActive: engine.isRecording, tint: equalizerTint)
+                    VStack(spacing: 2) {
+                        MicEqualizerView(isActive: engine.isRecording, tint: equalizerTint)
+                        elapsedTimeLabel
+                    }
 
                     if engine.liveText.isEmpty {
                         if engine.isWaitingForServer {

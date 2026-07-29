@@ -7,13 +7,14 @@ import Charts
 struct PreferencesView: View {
 
     enum Tab: CaseIterable, Hashable {
-        case dictation, reading, microphone, usage, shortcuts, about
+        case dictation, reading, microphone, usage, history, shortcuts, about
         var label: String {
             switch self {
             case .dictation:  "Diktovanie"
             case .reading:    "Čítanie"
             case .microphone: "Mikrofón"
             case .usage:      "Prehľad"
+            case .history:    "História"
             case .shortcuts:  "Skratky"
             case .about:      "O aplikácii"
             }
@@ -24,6 +25,7 @@ struct PreferencesView: View {
             case .reading:    "chart.bar"
             case .microphone: "record.circle"
             case .usage:      "clock.arrow.circlepath"
+            case .history:    "doc.text.magnifyingglass"
             case .shortcuts:  "keyboard"
             case .about:      "info.circle"
             }
@@ -60,6 +62,7 @@ struct PreferencesView: View {
     @State private var remoteConfig  = RemoteConfig.shared
     @State private var micTest       = MicTestEngine.shared
     @State private var usageStore    = UsageStore.shared
+    @State private var historyStore  = DictationHistoryStore.shared
     @State private var showOnboarding = false
     @State private var developerMode = DeveloperMode.isEnabled
     @State private var accessCodeInput = ""
@@ -106,6 +109,7 @@ struct PreferencesView: View {
                         case .reading:    readingTab
                         case .microphone: microphoneTab
                         case .usage:      usageTab
+                        case .history:    historyTab
                         case .shortcuts:  shortcutsTab
                         case .about:      aboutTab
                         }
@@ -828,6 +832,72 @@ struct PreferencesView: View {
     private func savedDeviceName(_ uid: String) -> String {
         let parts = uid.split(separator: ":").map(String.init)
         return parts.count >= 3 ? parts[2] : uid
+    }
+
+    // MARK: - História
+
+    private static let historyDateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "d. M. HH:mm"
+        return f
+    }()
+
+    private var historyTab: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("História diktovania").font(.title2.bold())
+            Text("Posledné nadiktované texty — len lokálne, uchovávané max. 30 dní alebo posledných 200 položiek. Keďže sem môže padnúť čokoľvek, čo nadiktuješ, históriu môžeš kedykoľvek celú vymazať.")
+                .font(.caption).foregroundStyle(.secondary)
+
+            if historyStore.entries.isEmpty {
+                card {
+                    Text("Zatiaľ žiadna história.")
+                        .font(.callout).foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                        .padding(24)
+                }
+            } else {
+                card {
+                    VStack(spacing: 0) {
+                        ForEach(Array(historyStore.entries.reversed().enumerated()), id: \.element.id) { index, entry in
+                            if index > 0 { rowDivider }
+                            historyRow(entry)
+                        }
+                    }
+                }
+                Button("Vymazať históriu") { historyStore.clearAll() }
+                    .buttonStyle(.bordered).font(.caption).foregroundStyle(.red)
+            }
+        }
+    }
+
+    private func historyRow(_ entry: DictationHistoryEntry) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(Self.historyDateFormatter.string(from: entry.date))
+                    .font(.caption2).foregroundStyle(.tertiary)
+                Text(entry.text)
+                    .font(.callout)
+                    .lineLimit(3)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            Button {
+                TextInserter.shared.insert(entry.text)
+            } label: {
+                Image(systemName: "arrow.right.doc.on.clipboard")
+            }
+            .buttonStyle(.bordered)
+            .help("Vložiť do aktívneho poľa")
+            Button {
+                historyStore.delete(entry.id)
+            } label: {
+                Image(systemName: "trash")
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+            .help("Vymazať túto položku")
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
     }
 
     // MARK: - Prehľad (usage)
