@@ -8,6 +8,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
 
     // Placeholders refreshed in menuWillOpen
     private var micSubmenuItem      = NSMenuItem(title: "Mikrofón", action: nil, keyEquivalent: "")
+    private var historySubmenuItem  = NSMenuItem(title: "História diktovania", action: nil, keyEquivalent: "")
     private var dictUsageItem       = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     private var ttsUsageItem        = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     private var restartItem         = NSMenuItem(title: "", action: nil, keyEquivalent: "")
@@ -42,6 +43,10 @@ final class MenuBarController: NSObject, NSMenuDelegate {
 
         menu.addItem(NSMenuItem(title: "Vložiť z pamäte", action: #selector(insertFromMemory), keyEquivalent: "v")
             .configured { $0.keyEquivalentModifierMask = [.control, .option]; $0.target = self })
+
+        // History submenu — populated in menuWillOpen
+        historySubmenuItem.submenu = NSMenu()
+        menu.addItem(historySubmenuItem)
 
         menu.addItem(.separator())
 
@@ -122,6 +127,29 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         }
         micSubmenuItem.submenu = sub
 
+        // History submenu — most recent first, click to insert at the current focus.
+        let historyMenu = NSMenu()
+        let recentHistory = DictationHistoryStore.shared.entries.suffix(10).reversed()
+        if recentHistory.isEmpty {
+            let empty = NSMenuItem(title: "Zatiaľ žiadna história", action: nil, keyEquivalent: "")
+            empty.isEnabled = false
+            historyMenu.addItem(empty)
+        } else {
+            for entry in recentHistory {
+                let oneLine = entry.text.replacingOccurrences(of: "\n", with: " ")
+                let preview = oneLine.count > 60 ? String(oneLine.prefix(60)) + "…" : oneLine
+                let item = NSMenuItem(title: preview, action: #selector(insertHistoryEntry(_:)), keyEquivalent: "")
+                item.target = self
+                item.representedObject = entry.text
+                historyMenu.addItem(item)
+            }
+            historyMenu.addItem(.separator())
+            let clearItem = NSMenuItem(title: "Vymazať históriu", action: #selector(clearHistory), keyEquivalent: "")
+            clearItem.target = self
+            historyMenu.addItem(clearItem)
+        }
+        historySubmenuItem.submenu = historyMenu
+
         // Smart diktovanie — hidden for regular users while it's remotely disabled
         // (feature-flags.json); dev mode always sees it for testing.
         if let smartItem = statusItem.menu?.item(withTag: 42) {
@@ -186,6 +214,15 @@ final class MenuBarController: NSObject, NSMenuDelegate {
 
     @objc private func insertFromMemory() {
         (NSApp.delegate as? AppDelegate)?.handleInsertFromMemory()
+    }
+
+    @objc private func insertHistoryEntry(_ sender: NSMenuItem) {
+        guard let text = sender.representedObject as? String else { return }
+        TextInserter.shared.insert(text)
+    }
+
+    @objc private func clearHistory() {
+        DictationHistoryStore.shared.clearAll()
     }
 
     @objc private func openPreferences() {
