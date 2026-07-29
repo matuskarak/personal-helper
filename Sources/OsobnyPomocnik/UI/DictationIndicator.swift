@@ -293,8 +293,10 @@ struct DictationIndicatorView: View {
     @ViewBuilder
     private var pillContent: some View {
         if isCompact {
-            // Live-insert mode: just the equalizer bubble — transcript is in the field
-            VStack(spacing: 3) {
+            // Live-insert mode: just the equalizer bubble — transcript is in the field.
+            // Timer sits beside it, not stacked below — stacking made this column taller
+            // than the row and threw off the pill's vertical centering.
+            HStack(spacing: 6) {
                 MicEqualizerView(isActive: engine.isRecording, tint: equalizerTint)
                 elapsedTimeLabel
             }
@@ -336,7 +338,9 @@ struct DictationIndicatorView: View {
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 } else {
-                    VStack(spacing: 2) {
+                    // Timer beside the equalizer, not stacked below it — stacking made
+                    // this column taller than the row and broke the pill's vertical centering.
+                    HStack(spacing: 6) {
                         MicEqualizerView(isActive: engine.isRecording, tint: equalizerTint)
                         elapsedTimeLabel
                     }
