@@ -293,13 +293,12 @@ struct DictationIndicatorView: View {
     @ViewBuilder
     private var pillContent: some View {
         if isCompact {
-            // Live-insert mode: just the equalizer bubble — transcript is in the field.
-            // Timer sits beside it, not stacked below — stacking made this column taller
-            // than the row and threw off the pill's vertical centering.
-            HStack(spacing: 6) {
+            // Live-insert mode: just the equalizer bubble — transcript is in the field
+            VStack(spacing: 3) {
                 MicEqualizerView(isActive: engine.isRecording, tint: equalizerTint)
                 elapsedTimeLabel
             }
+            .frame(maxHeight: .infinity, alignment: .center)
             .padding(.horizontal, 12)
             .padding(.vertical, 10)
         } else {
@@ -338,12 +337,15 @@ struct DictationIndicatorView: View {
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 } else {
-                    // Timer beside the equalizer, not stacked below it — stacking made
-                    // this column taller than the row and broke the pill's vertical centering.
-                    HStack(spacing: 6) {
+                    // frame(maxHeight: .infinity, alignment: .center) pins this block to the
+                    // vertical middle of the row regardless of the sibling's height (e.g. the
+                    // multi-line liveText box) — HStack's default centering isn't enough once
+                    // this stack (equalizer + timer) isn't the tallest child anymore.
+                    VStack(spacing: 2) {
                         MicEqualizerView(isActive: engine.isRecording, tint: equalizerTint)
                         elapsedTimeLabel
                     }
+                    .frame(maxHeight: .infinity, alignment: .center)
 
                     if engine.liveText.isEmpty {
                         if engine.isWaitingForServer {
