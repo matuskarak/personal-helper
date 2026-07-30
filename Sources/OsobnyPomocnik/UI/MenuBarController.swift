@@ -8,9 +8,6 @@ final class MenuBarController: NSObject, NSMenuDelegate {
 
     // Placeholders refreshed in menuWillOpen
     private var micSubmenuItem      = NSMenuItem(title: "Mikrofón", action: nil, keyEquivalent: "")
-    // Groups History + Quality one level under the Diktovanie/Smart diktovanie toggles above,
-    // instead of floating at the top level where they read as unrelated to dictation.
-    private var dictationSubmenuItem = NSMenuItem(title: "História a kvalita", action: nil, keyEquivalent: "")
     private var historySubmenuItem  = NSMenuItem(title: "História diktovania", action: nil, keyEquivalent: "")
     private var restartItem         = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     private var diagnosticsItem     = NSMenuItem(title: "", action: nil, keyEquivalent: "")
@@ -43,12 +40,12 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         menu.addItem(NSMenuItem(title: "Smart diktovanie", action: #selector(toggleSmartAlwaysOn), keyEquivalent: "g")
             .configured { $0.keyEquivalentModifierMask = [.command, .shift]; $0.target = self; $0.tag = 42 })
 
-        // History + Quality submenu — one level under dictation, populated in menuWillOpen.
-        dictationSubmenuItem.submenu = NSMenu()
-        menu.addItem(dictationSubmenuItem)
-
         menu.addItem(NSMenuItem(title: "Vložiť z pamäte", action: #selector(insertFromMemory), keyEquivalent: "v")
             .configured { $0.keyEquivalentModifierMask = [.control, .option]; $0.target = self })
+
+        // History submenu — populated in menuWillOpen
+        historySubmenuItem.submenu = NSMenu()
+        menu.addItem(historySubmenuItem)
 
         menu.addItem(.separator())
 
@@ -157,14 +154,6 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         }
         historySubmenuItem.submenu = historyMenu
 
-        // "Diktovanie" submenu (one level under the toggles above): nests History as its own
-        // submenu, plus a leaf that jumps straight to the Kvalita tab in Preferences.
-        let dictationMenu = NSMenu()
-        dictationMenu.addItem(historySubmenuItem)
-        dictationMenu.addItem(NSMenuItem(title: "Kvalita diktovania", action: #selector(openQualityTab), keyEquivalent: "")
-            .configured { $0.target = self })
-        dictationSubmenuItem.submenu = dictationMenu
-
         // Smart diktovanie — hidden for regular users while it's remotely disabled
         // (feature-flags.json); dev mode always sees it for testing.
         if let smartItem = statusItem.menu?.item(withTag: 42) {
@@ -229,18 +218,6 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     }
 
     @objc private func openPreferences() {
-        showPreferences(tab: nil)
-    }
-
-    @objc private func openQualityTab() {
-        showPreferences(tab: .quality)
-    }
-
-    private func showPreferences(tab: PreferencesView.Tab?) {
-        // The window (and its SwiftUI content) is created once and reused — reused, not
-        // rebuilt, so a jump-to-tab request has to go through PreferencesNavigation rather
-        // than an init parameter, which would only apply on the very first open.
-        if let tab { PreferencesNavigation.pendingTab = tab }
         if preferencesWindowController == nil {
             let window = NSWindow(
                 contentRect: NSRect(x: 0, y: 0, width: 720, height: 520),
