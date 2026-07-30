@@ -256,23 +256,19 @@ struct DictationIndicatorView: View {
             .shadow(color: .black.opacity(0.22), radius: 12, y: 5)
             .padding(10)
             .animation(.easeInOut(duration: 0.2), value: isCompact)
+            // Errors no longer auto-dismiss. A 3 s window meant a failure the user wasn't
+            // looking at (pill centred on another screen, attention on the text field) vanished
+            // before it was ever read. It stays until the pill is clicked away.
             .onChange(of: engine.connectionError) { _, err in
-                AppLogger.log("[Indicator] connectionError changed → \(err ?? "nil") | isRecording=\(engine.isRecording)")
-                guard err != nil else { return }
-                Task {
-                    try? await Task.sleep(for: .seconds(3))
-                    // Guard: a new session may have started and cleared the error — don't hide it.
-                    guard engine.connectionError != nil else {
-                        AppLogger.log("[Indicator] connectionError auto-hide cancelled — error already cleared (new session started)")
-                        return
-                    }
-                    AppLogger.log("[Indicator] connectionError auto-hide firing (3s elapsed) | isRecording=\(engine.isRecording)")
-                    DictationIndicatorController.shared.hide(from: "connectionError-onChange")
-                }
+                AppLogger.log("[Indicator] connectionError changed → \(err ?? "nil") | isRecording=\(engine.isRecording) (sticky — waits for click)")
             }
             .onChange(of: engine.notice) { _, notice in
-                AppLogger.log("[Indicator] notice changed → \(notice ?? "nil") | isRecording=\(engine.isRecording)")
+                AppLogger.log("[Indicator] notice changed → \(notice ?? "nil") | isRecording=\(engine.isRecording) sticky=\(engine.noticeIsSticky)")
                 guard notice != nil else { return }
+                // Sticky notices are the ones that report a failed action ("no field selected —
+                // saved to memory"); those must survive until acknowledged. Only advisory ones
+                // fade on their own.
+                guard !engine.noticeIsSticky else { return }
                 Task {
                     try? await Task.sleep(for: .seconds(4))
                     guard engine.notice != nil else {
@@ -299,6 +295,14 @@ struct DictationIndicatorView: View {
             .onChange(of: engine.btNegotiating) { _, neg in
                 AppLogger.log("[Indicator] btNegotiating → \(neg)")
             }
+    }
+
+    /// Shown under any message that waits for acknowledgement — without it a pill that
+    /// no longer disappears on its own just reads as stuck.
+    private var dismissHint: some View {
+        Text("Klikni na zatvorenie")
+            .font(.system(size: 9))
+            .foregroundStyle(.tertiary)
     }
 
     /// Elapsed recording time — SwiftUI's built-in timer-style Text ticks on its own,
@@ -339,20 +343,26 @@ struct DictationIndicatorView: View {
                     Image(systemName: "exclamationmark.triangle.fill")
                         .foregroundStyle(.orange)
                         .frame(width: 18)
-                    Text(err)
-                        .font(.caption)
-                        .foregroundStyle(.red)
-                        .lineLimit(3)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(err)
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                            .lineLimit(3)
+                        dismissHint
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 } else if let notice = engine.notice {
                     Image(systemName: "tray.and.arrow.down.fill")
                         .foregroundStyle(.orange)
                         .frame(width: 18)
-                    Text(notice)
-                        .font(.caption)
-                        .foregroundStyle(.primary)
-                        .lineLimit(3)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(notice)
+                            .font(.caption)
+                            .foregroundStyle(.primary)
+                            .lineLimit(3)
+                        if engine.noticeIsSticky { dismissHint }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 } else if !engine.isMicReady {
                     ProgressView().controlSize(.small)
                     Text(engine.btNegotiating ? "Inicializujem Bluetooth…" : "Pripájam mikrofón…")

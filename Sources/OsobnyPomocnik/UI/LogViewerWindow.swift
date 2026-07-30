@@ -87,7 +87,10 @@ private struct LogViewerView: View {
     }
 
     private func clear() {
-        try? "".write(to: AppLogger.logFileURL, atomically: true, encoding: .utf8)
+        // Must go through AppLogger: an atomic write here swapped the inode while AppLogger
+        // still held an open FileHandle on the unlinked original, so every later log line
+        // went into a deleted file — logging silently died until the app was restarted.
+        AppLogger.clear()
         content = ""
     }
 }
