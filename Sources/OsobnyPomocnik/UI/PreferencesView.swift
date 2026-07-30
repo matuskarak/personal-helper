@@ -182,30 +182,14 @@ struct PreferencesView: View {
         .frame(width: 190)
     }
 
-    /// `showsDisclosure` reserves a chevron that toggles `dictationExpanded` independently of
-    /// selecting the row — clicking "Diktovanie" itself still just navigates there, same as
-    /// every other row; only the chevron expands/collapses its children.
+    /// `showsDisclosure` adds a chevron after the label that toggles `dictationExpanded`
+    /// independently of selecting the row — it's a separate button, a sibling of the
+    /// navigation button rather than nested inside it, so clicking "Diktovanie" itself still
+    /// just navigates there, same as every other row.
     /// `indent` renders History/Kvalita one step in, so they read as belonging to Diktovanie.
     private func sidebarRow(_ tab: Tab, indent: Bool = false, showsDisclosure: Bool = false) -> some View {
         HStack(spacing: 4) {
-            if showsDisclosure {
-                Button {
-                    withAnimation(.easeInOut(duration: 0.15)) { dictationExpanded.toggle() }
-                } label: {
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 9, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                        .rotationEffect(.degrees(dictationExpanded ? 90 : 0))
-                        .frame(width: 14, height: 20)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .onHover { hovering in
-                    if hovering { NSCursor.pointingHand.push() } else { NSCursor.pop() }
-                }
-            } else if indent {
-                Spacer().frame(width: 14)
-            }
+            if indent { Spacer().frame(width: 14) }
 
             Button { selectedTab = tab } label: {
                 HStack(spacing: 10) {
@@ -220,6 +204,9 @@ struct PreferencesView: View {
                 }
                 .padding(.horizontal, 10)
                 .padding(.vertical, indent ? 6 : 7)
+                // ponytail: `accent` stands in as the one accent color across the whole UI
+                // until the app has real branding — this highlight is meant to move with it,
+                // not be its own one-off color.
                 .background(
                     RoundedRectangle(cornerRadius: 7)
                         .fill(selectedTab == tab ? accent.opacity(0.12) : .clear)
@@ -237,11 +224,24 @@ struct PreferencesView: View {
             .onHover { hovering in
                 if hovering { NSCursor.pointingHand.push() } else { NSCursor.pop() }
             }
+
+            if showsDisclosure {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.15)) { dictationExpanded.toggle() }
+                } label: {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .rotationEffect(.degrees(dictationExpanded ? 90 : 0))
+                        .frame(width: 20, height: 20)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .onHover { hovering in
+                    if hovering { NSCursor.pointingHand.push() } else { NSCursor.pop() }
+                }
+            }
         }
-        // Every other top-level row (Čítanie, Mikrofón, …) has no chevron/indent spacer of
-        // its own, so without this its icon would start 14pt to the left of Diktovanie's —
-        // this padding is what keeps every row's icon aligned in one column.
-        .padding(.leading, tab == .dictation || indent ? 0 : 14)
     }
 
     // MARK: - Shared components
