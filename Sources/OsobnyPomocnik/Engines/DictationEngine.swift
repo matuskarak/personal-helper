@@ -152,9 +152,13 @@ final class DictationEngine {
     // finish their handshake — this lets the indicator show "connecting" instead
     // of implying the mic is already listening.
     private(set) var isMicReady = false
-    // True when DeviceCapture IO proc is running but HFP negotiation hasn't delivered
-    // real audio yet (buffers are all zeros). UI shows "Inicializujem Bluetooth…".
+    // True only while an actual Bluetooth link is negotiating and hasn't delivered real
+    // audio yet (buffers are all zeros). UI shows "Inicializujem Bluetooth…".
     private(set) var btNegotiating = false
+    // Transport traits of the capture device, read once at session start — a wired mic
+    // must not be treated (or labelled) as a link that needs warming up.
+    private var captureNeedsWarmup = false
+    private var captureIsBluetooth = false
     // AVAudioEngine path only — restart guard for ConfigChange / tap invalidation.
     private var tapRestartCount = 0
     private var tapNeedsReinstall = false
@@ -417,7 +421,9 @@ final class DictationEngine {
                 connectionError = "Mikrofón '\(device.name)' nie je dostupný. Skontroluj pripojenie."
                 throw DictationError.audioSetupFailed
             }
-            AppLogger.log("[DictationEngine] DeviceCapture path: '\(device.name)' \(capture.format.sampleRate)Hz \(capture.format.channelCount)ch")
+            captureNeedsWarmup = device.needsLinkWarmup
+            captureIsBluetooth = device.isBluetooth
+            AppLogger.log("[DictationEngine] DeviceCapture path: '\(device.name)' \(capture.format.sampleRate)Hz \(capture.format.channelCount)ch transport=\(device.transportFourCC) warmup=\(captureNeedsWarmup)")
             guard let conv = AVAudioConverter(from: capture.format, to: pcm16Format) else {
                 AppLogger.log("[DictationEngine] ⚠️ AVAudioConverter failed for DeviceCapture format")
                 throw DictationError.audioSetupFailed
@@ -427,8 +433,11 @@ final class DictationEngine {
             deviceCapture = capture
 
         } else {
-            // System default — AVAudioEngine path.
+            // System default — AVAudioEngine path. AVAudioEngine only starts delivering
+            // once the route is up, so there's no warmup window to wait out here.
             deviceCapture = nil
+            captureNeedsWarmup = false
+            captureIsBluetooth = false
             AppLogger.log("[DictationEngine] Using system default microphone")
             audioEngine.reset()
             let inputNode = audioEngine.inputNode
@@ -636,16 +645,23 @@ final class DictationEngine {
 
                     if !self.isMicReady, chunkCounter.sent > 0 {
                         let hasAudio = chunkCounter.hasRealAudio
-                        // DeviceCapture (BT/Continuity): HFP negotiation delivers zeroed buffers.
-                        // Wait for non-zero amplitude, or give up after 3s so silent sessions work.
-                        let btWaitExpired = self.deviceCapture != nil && -dcProcStart.timeIntervalSinceNow > 3.0
-                        if self.deviceCapture == nil || hasAudio || btWaitExpired {
+                        // Only BT/Continuity links deliver zeroed buffers while negotiating, so
+                        // only those need to wait for actual amplitude (capped at 3s so a silent
+                        // session still works). A wired or built-in mic that's producing chunks is
+                        // already live — silence there just means the user hasn't started talking,
+                        // and waiting on it both delayed the pill and mislabelled a USB mic as
+                        // "Inicializujem Bluetooth…".
+                        let warmingUp = self.captureNeedsWarmup && !hasAudio
+                            && -dcProcStart.timeIntervalSinceNow <= 3.0
+                        if !warmingUp {
+                            let timedOut = self.captureNeedsWarmup && !hasAudio
                             self.isMicReady = true
                             self.btNegotiating = false
-                            AppLogger.log("[DictationEngine] Mic ready — first chunk flowed\(btWaitExpired && !hasAudio ? " (3s timeout, audio silent)" : "")")
+                            AppLogger.log("[DictationEngine] Mic ready — first chunk flowed\(timedOut ? " (3s warmup timeout, audio silent)" : "")")
                         } else {
-                            // Chunks flowing but all zeros — BT HFP still negotiating
-                            self.btNegotiating = true
+                            // Chunks flowing but all zeros — link still negotiating. Only claim
+                            // "Bluetooth" when it genuinely is one.
+                            self.btNegotiating = self.captureIsBluetooth
                         }
                     }
 
@@ -1160,6 +1176,8 @@ final class DictationEngine {
         }
         isRecording    = false
         btNegotiating  = false
+        captureNeedsWarmup = false
+        captureIsBluetooth = false
         levelPollTask?.cancel()
         levelPollTask = nil
         audioLevel = 0
