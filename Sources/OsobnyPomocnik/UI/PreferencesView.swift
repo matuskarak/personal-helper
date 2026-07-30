@@ -7,7 +7,7 @@ import Charts
 struct PreferencesView: View {
 
     enum Tab: CaseIterable, Hashable {
-        case dictation, reading, microphone, usage, history, shortcuts, about
+        case dictation, reading, microphone, usage, history, quality, shortcuts, about
         var label: String {
             switch self {
             case .dictation:  "Diktovanie"
@@ -15,6 +15,7 @@ struct PreferencesView: View {
             case .microphone: "Mikrofón"
             case .usage:      "Prehľad"
             case .history:    "História"
+            case .quality:    "Kvalita"
             case .shortcuts:  "Skratky"
             case .about:      "O aplikácii"
             }
@@ -26,6 +27,7 @@ struct PreferencesView: View {
             case .microphone: "record.circle"
             case .usage:      "clock.arrow.circlepath"
             case .history:    "doc.text.magnifyingglass"
+            case .quality:    "chart.line.uptrend.xyaxis"
             case .shortcuts:  "keyboard"
             case .about:      "info.circle"
             }
@@ -110,6 +112,7 @@ struct PreferencesView: View {
                         case .microphone: microphoneTab
                         case .usage:      usageTab
                         case .history:    historyTab
+                        case .quality:    qualityTab
                         case .shortcuts:  shortcutsTab
                         case .about:      aboutTab
                         }
@@ -402,6 +405,15 @@ struct PreferencesView: View {
                                                   text: $profile.bundleID)
                                         TextField("Kľúčové slovo v titulku (voliteľné)",
                                                   text: $profile.titleKeyword)
+                                        HStack {
+                                            Text("Typ cieľa").font(.callout)
+                                            Picker("", selection: $profile.category) {
+                                                ForEach(AppCategory.allCases, id: \.self) { cat in
+                                                    Text(cat.label).tag(cat)
+                                                }
+                                            }
+                                            .labelsHidden()
+                                        }
                                         TextField("Instrukcie pre prepis", text: $profile.instructions,
                                                   axis: .vertical)
                                             .lineLimit(2...4)
@@ -898,6 +910,242 @@ struct PreferencesView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
+    }
+
+    // MARK: - Kvalita diktovania
+
+    /// Only entries logged since quality tracking shipped carry metrics — older history
+    /// has no numbers to show, so everything here is computed off this filtered list.
+    private var analyzedEntries: [(entry: DictationHistoryEntry, metrics: DictationMetrics)] {
+        historyStore.entries.compactMap { e in e.metrics.map { (entry: e, metrics: $0) } }
+    }
+
+    private func ratingColor(_ rating: DictationQualityEngine.Rating) -> Color {
+        switch rating {
+        case .good: greenDot
+        case .fair: warnFG
+        case .poor: .red
+        }
+    }
+
+    private var qualityTab: some View {
+        let analyzed = analyzedEntries
+        return VStack(alignment: .leading, spacing: 16) {
+            Text("Kvalita diktovania").font(.title2.bold())
+            Text("Vyhodnotené lokálne z tvojej histórie diktovania — nič sa neposiela nikam von a nič to nestojí. Ukazuje, ako naozaj diktuješ, aby si sa v tom mohol zlepšovať.")
+                .font(.caption).foregroundStyle(.secondary)
+
+            if analyzed.isEmpty {
+                card {
+                    VStack(spacing: 6) {
+                        Text("Zatiaľ nemáme dosť dát.").font(.callout)
+                        Text("Metriky sa počítajú až pri nových diktovaniach — staršie záznamy v histórii ich neobsahujú.")
+                            .font(.caption).foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(24)
+                }
+            } else {
+                qualitySummaryCard(analyzed)
+                topFillersCard(analyzed)
+                perAppCard(analyzed)
+                recentDictationsCard(analyzed)
+            }
+        }
+    }
+
+    private func qualitySummaryCard(
+        _ analyzed: [(entry: DictationHistoryEntry, metrics: DictationMetrics)]
+    ) -> some View {
+        let paced = analyzed.filter { $0.metrics.wordsPerMinute > 0 }
+        let avgWPM = paced.isEmpty ? 0
+            : Int((Double(paced.map(\.metrics.wordsPerMinute).reduce(0, +)) / Double(paced.count)).rounded())
+        let avgFillers = paced.isEmpty ? 0
+            : paced.map(\.metrics.fillersPerMinute).reduce(0, +) / Double(paced.count)
+
+        return card {
+            HStack(spacing: 0) {
+                statTile(value: "\(analyzed.count)", label: "diktovaní", color: .primary)
+                Divider().frame(height: 44)
+                statTile(value: String(format: "%.1f", avgFillers), label: "výplňových slov / min",
+                         color: ratingColor(DictationQualityEngine.fillerRating(perMinute: avgFillers)))
+                Divider().frame(height: 44)
+                statTile(value: avgWPM > 0 ? "\(avgWPM)" : "–", label: "slov / min",
+                         color: ratingColor(DictationQualityEngine.paceRating(wpm: avgWPM)))
+            }
+            .padding(.vertical, 16)
+        }
+    }
+
+    private func statTile(value: String, label: String, color: Color) -> some View {
+        VStack(spacing: 3) {
+            Text(value).font(.system(size: 24, weight: .semibold)).foregroundStyle(color)
+            Text(label).font(.caption2).foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private func topFillersCard(
+        _ analyzed: [(entry: DictationHistoryEntry, metrics: DictationMetrics)]
+    ) -> some View {
+        var totals: [String: Int] = [:]
+        for item in analyzed {
+            for (word, count) in item.metrics.fillers { totals[word, default: 0] += count }
+        }
+        let top = totals.sorted { $0.value == $1.value ? $0.key < $1.key : $0.value > $1.value }.prefix(5)
+
+        return card {
+            VStack(alignment: .leading, spacing: 0) {
+                Text("Najčastejšie výplňové slová")
+                    .font(.body).padding(.horizontal, 16).padding(.vertical, 12)
+                rowDivider
+                if top.isEmpty {
+                    Text("Žiadne — čisté diktovanie.")
+                        .font(.callout).foregroundStyle(.secondary)
+                        .padding(.horizontal, 16).padding(.vertical, 12)
+                } else {
+                    ForEach(Array(top.enumerated()), id: \.element.key) { index, pair in
+                        if index > 0 { rowDivider }
+                        HStack {
+                            Text("„\(pair.key)”").font(.callout)
+                            Spacer()
+                            Text("\(pair.value)×").font(.callout.monospacedDigit())
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding(.horizontal, 16).padding(.vertical, 10)
+                    }
+                }
+            }
+        }
+    }
+
+    private func perAppCard(
+        _ analyzed: [(entry: DictationHistoryEntry, metrics: DictationMetrics)]
+    ) -> some View {
+        // Group by the app we dictated into — the whole point is seeing that you speak
+        // differently to ChatGPT than to Slack.
+        var groups: [String: (count: Int, fillerRateSum: Double, paced: Int, category: AppCategory)] = [:]
+        for item in analyzed {
+            let key = item.entry.appName.isEmpty ? "Neznáma appka" : item.entry.appName
+            var g = groups[key] ?? (0, 0, 0, item.entry.category)
+            g.count += 1
+            if item.metrics.wordsPerMinute > 0 {
+                g.fillerRateSum += item.metrics.fillersPerMinute
+                g.paced += 1
+            }
+            groups[key] = g
+        }
+        let rows = groups.sorted { $0.value.count > $1.value.count }
+
+        return card {
+            VStack(alignment: .leading, spacing: 0) {
+                Text("Podľa aplikácie")
+                    .font(.body).padding(.horizontal, 16).padding(.vertical, 12)
+                rowDivider
+                ForEach(Array(rows.enumerated()), id: \.element.key) { index, pair in
+                    if index > 0 { rowDivider }
+                    let avg = pair.value.paced > 0 ? pair.value.fillerRateSum / Double(pair.value.paced) : 0
+                    HStack(spacing: 12) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(pair.key).font(.callout)
+                            Text(pair.value.category.label)
+                                .font(.caption2).foregroundStyle(.tertiary)
+                        }
+                        Spacer()
+                        Text("\(pair.value.count)× diktovanie")
+                            .font(.caption).foregroundStyle(.secondary)
+                        if pair.value.paced > 0 {
+                            Text(String(format: "%.1f fill./min", avg))
+                                .font(.caption.monospacedDigit())
+                                .foregroundStyle(ratingColor(DictationQualityEngine.fillerRating(perMinute: avg)))
+                        }
+                    }
+                    .padding(.horizontal, 16).padding(.vertical, 10)
+                }
+            }
+        }
+    }
+
+    private func recentDictationsCard(
+        _ analyzed: [(entry: DictationHistoryEntry, metrics: DictationMetrics)]
+    ) -> some View {
+        let recent = Array(analyzed.reversed().prefix(15))
+        return card {
+            VStack(alignment: .leading, spacing: 0) {
+                Text("Posledné diktovania")
+                    .font(.body).padding(.horizontal, 16).padding(.vertical, 12)
+                rowDivider
+                ForEach(Array(recent.enumerated()), id: \.element.entry.id) { index, item in
+                    if index > 0 { rowDivider }
+                    qualityDetailRow(item.entry, item.metrics)
+                }
+            }
+        }
+    }
+
+    private func qualityDetailRow(_ entry: DictationHistoryEntry, _ m: DictationMetrics) -> some View {
+        DisclosureGroup {
+            VStack(alignment: .leading, spacing: 10) {
+                metricLine("Slov", "\(m.wordCount)")
+                if m.wordsPerMinute > 0 {
+                    metricLine("Tempo", "\(m.wordsPerMinute) slov/min",
+                               color: ratingColor(DictationQualityEngine.paceRating(wpm: m.wordsPerMinute)))
+                }
+                metricLine("Výplňové slová", m.fillerCount == 0 ? "žiadne"
+                    : "\(m.fillerCount) (\(m.fillers.sorted { $0.value > $1.value }.map(\.key).joined(separator: ", ")))",
+                           color: m.fillerCount == 0 ? nil
+                            : ratingColor(DictationQualityEngine.fillerRating(perMinute: m.fillersPerMinute)))
+                if m.avgSentenceWords > 0 {
+                    metricLine("Priemerná veta", "\(m.avgSentenceWords) slov")
+                }
+                if m.repeatedSentenceStarts > 0 {
+                    metricLine("Opakované začiatky viet", "\(m.repeatedSentenceStarts)", color: warnFG)
+                }
+                if let ratio = m.rewriteDistanceRatio {
+                    metricLine("Smart prepis zmenil", "\(Int((ratio * 100).rounded())) % textu",
+                               color: ratio > 0.5 ? warnFG : nil)
+                }
+
+                Divider()
+                Text("Nadiktované").font(.caption2).foregroundStyle(.tertiary)
+                Text(entry.text).font(.callout).textSelection(.enabled)
+                if let rewritten = entry.rewrittenText, !rewritten.isEmpty {
+                    Text("Po Smart prepise").font(.caption2).foregroundStyle(.tertiary)
+                    Text(rewritten).font(.callout).textSelection(.enabled)
+                }
+            }
+            .padding(.vertical, 8)
+        } label: {
+            HStack(spacing: 8) {
+                Text(Self.historyDateFormatter.string(from: entry.date))
+                    .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                if !entry.appName.isEmpty {
+                    Text(entry.appName).font(.caption).foregroundStyle(.tertiary)
+                }
+                Spacer()
+                if m.fillerCount > 0 {
+                    Text("\(m.fillerCount) fill.")
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(ratingColor(DictationQualityEngine.fillerRating(perMinute: m.fillersPerMinute)))
+                }
+                if m.wordsPerMinute > 0 {
+                    Text("\(m.wordsPerMinute) wpm")
+                        .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                }
+            }
+        }
+        .padding(.horizontal, 16).padding(.vertical, 10)
+    }
+
+    private func metricLine(_ label: String, _ value: String, color: Color? = nil) -> some View {
+        HStack(alignment: .top) {
+            Text(label).font(.caption).foregroundStyle(.secondary)
+            Spacer()
+            Text(value).font(.caption).foregroundStyle(color ?? .primary)
+                .multilineTextAlignment(.trailing)
+        }
     }
 
     // MARK: - Prehľad (usage)

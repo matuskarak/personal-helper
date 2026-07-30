@@ -273,35 +273,13 @@ final class MicTestEngine {
 
     // MARK: - Word-level accuracy vs reference sentence
 
+    // Normalizer + edit distance live in DictationQualityEngine — same job, one copy.
     private static func wordMatchPercent(reference: String, transcript: String) -> Double {
-        let ref = normalizeWords(reference)
-        let hyp = normalizeWords(transcript)
+        let ref = DictationQualityEngine.normalizeWords(reference)
+        let hyp = DictationQualityEngine.normalizeWords(transcript)
         guard !ref.isEmpty else { return 0 }
-        let distance = wordLevenshtein(ref, hyp)
+        let distance = DictationQualityEngine.wordLevenshtein(ref, hyp)
         return max(0, 1 - Double(distance) / Double(ref.count)) * 100
-    }
-
-    private static func normalizeWords(_ s: String) -> [String] {
-        s.lowercased()
-         .folding(options: .diacriticInsensitive, locale: Locale(identifier: "sk"))
-         .components(separatedBy: CharacterSet.alphanumerics.inverted)
-         .filter { !$0.isEmpty }
-    }
-
-    private static func wordLevenshtein(_ a: [String], _ b: [String]) -> Int {
-        if a.isEmpty { return b.count }
-        if b.isEmpty { return a.count }
-        var dp = Array(0...b.count)
-        for i in 1...a.count {
-            var prev = dp[0]
-            dp[0] = i
-            for j in 1...b.count {
-                let temp = dp[j]
-                dp[j] = a[i - 1] == b[j - 1] ? prev : 1 + min(prev, dp[j], dp[j - 1])
-                prev = temp
-            }
-        }
-        return dp[b.count]
     }
 
     // MARK: - Verdict
