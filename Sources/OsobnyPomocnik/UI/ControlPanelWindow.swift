@@ -46,7 +46,10 @@ final class ControlPanelWindowController: NSWindowController, NSWindowDelegate {
         w.isMovableByWindowBackground = true
         w.hasShadow = false
         w.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-        w.contentView = NSHostingView(rootView: ControlPanelView())
+        // Plain NSWindow (not a nonactivating panel), so without first-mouse the pause/stop
+        // controls needed a throwaway click each time focus was elsewhere — which is most of
+        // the time, since the user is reading in another app.
+        w.contentView = FirstMouseHostingView(rootView: ControlPanelView())
         super.init(window: w)
         w.delegate = self
     }

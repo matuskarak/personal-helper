@@ -12,6 +12,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     private var dictUsageItem       = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     private var ttsUsageItem        = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     private var restartItem         = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+    private var diagnosticsItem     = NSMenuItem(title: "", action: nil, keyEquivalent: "")
 
     override init() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
@@ -72,12 +73,18 @@ final class MenuBarController: NSObject, NSMenuDelegate {
 
         menu.addItem(NSMenuItem(title: "Ukončiť", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
 
-        // Alternate item — replaces "Ukončiť" in the menu while ⌥ is held. Only
-        // shown when Developer mode is on (toggled in refreshDynamicItems).
+        // Developer-only items, shown/hidden in refreshDynamicItems.
+        // ponytail: these used to be `isAlternate` items revealed by holding ⌥, but an
+        // alternate must share the key equivalent of the item above it — "" vs ⌘Q on
+        // "Ukončiť" — so AppKit ignored the pairing and drew them as ordinary rows. Plain
+        // show/hide is what the ⌥ trick was approximating anyway, and it's predictable.
+        diagnosticsItem = NSMenuItem(title: "Diagnostika — zobraziť log…", action: #selector(openLogViewer), keyEquivalent: "")
+        diagnosticsItem.target = self
+        diagnosticsItem.isHidden = true
+        menu.addItem(diagnosticsItem)
+
         restartItem = NSMenuItem(title: "Reštartovať aplikáciu", action: #selector(restartApp), keyEquivalent: "")
         restartItem.target = self
-        restartItem.isAlternate = true
-        restartItem.keyEquivalentModifierMask = [.option]
         restartItem.isHidden = true
         menu.addItem(restartItem)
 
@@ -87,7 +94,12 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     // MARK: - NSMenuDelegate
 
     nonisolated func menuWillOpen(_ menu: NSMenu) {
-        Task { @MainActor in self.refreshDynamicItems() }
+        // Must run synchronously: AppKit lays the menu out as soon as this returns, so a
+        // `Task { @MainActor in … }` applied its isHidden/title changes too late and the
+        // first open always showed the previous state — which is why "Reštartovať aplikáciu"
+        // stayed visible with Developer mode off. menuWillOpen is always called on the main
+        // thread, so assuming isolation here is safe.
+        MainActor.assumeIsolated { refreshDynamicItems() }
     }
 
     private func refreshDynamicItems() {
@@ -157,25 +169,32 @@ final class MenuBarController: NSObject, NSMenuDelegate {
             smartItem.state = engine.smartAlwaysOn ? .on : .off
         }
 
-        // Usage — dictation on one line, TTS on the next
+        // Usage — dictation on one line, TTS on the next. Leads with time saved rather than
+        // minutes recorded: minutes spent is an input, the saved time is the point.
+        let currency = AppCurrency.selected
         let dictMins = Double(engine.totalSecondsRecorded) / 60
         let dictCost = dictMins * engine.costPerMinute
-        dictUsageItem.title = String(format: "Diktovanie: %.1f min (~$%.3f)", dictMins, dictCost)
+        dictUsageItem.title = "Diktovanie: ušetrené \(UsageStore.savedTimeText(UsageStore.shared.thisMonth))"
+            + " (~\(currency.format(usd: dictCost)))"
 
         let tts = TTSEngine.shared
         if tts.mode == .googleCloud {
             let chars = Double(GoogleCloudTTSEngine.shared.totalCharactersUsed)
             let voice = GoogleCloudTTSEngine.shared.selectedVoiceName
-            let ratePerChar: Double = voice.contains("Chirp3-HD") || voice.contains("Chirp-HD") ? 0.00016
-                                    : (voice.contains("WaveNet") || voice.contains("Neural2"))  ? 0.000016
-                                    : 0.000004
-            ttsUsageItem.title = String(format: "Čítanie: ~$%.3f", chars * ratePerChar)
+            let cost  = chars * Pricing.googleTTSUSDPerChar(voice: voice)
+            ttsUsageItem.title = "Čítanie: ~\(currency.format(usd: cost))"
             ttsUsageItem.isHidden = false
         } else {
             ttsUsageItem.isHidden = true
         }
 
-        restartItem.isHidden = !DeveloperMode.isEnabled
+        let dev = DeveloperMode.isEnabled
+        restartItem.isHidden     = !dev
+        diagnosticsItem.isHidden = !dev
+    }
+
+    @objc private func openLogViewer() {
+        LogViewerWindowController.shared.show()
     }
 
     // MARK: - Mic selection
@@ -235,7 +254,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
             )
             window.title = "Nastavenia"
             window.center()
-            window.contentView = NSHostingView(rootView: PreferencesView())
+            window.contentView = FirstMouseHostingView(rootView: PreferencesView())
             window.isReleasedWhenClosed = false
             preferencesWindowController = NSWindowController(window: window)
         }
