@@ -147,6 +147,10 @@ struct PreferencesView: View {
             accessCodeSaved  = true
             loggingEnabled   = AppLogger.isEnabled
             refreshLogSize()
+            if let tab = PreferencesNavigation.pendingTab {
+                selectedTab = tab
+                PreferencesNavigation.pendingTab = nil
+            }
             // Normalise legacy "minimal" → "low" (removed from new segmented control)
             if dictation.transcriptionDelay == "minimal" { dictation.transcriptionDelay = "low" }
             if google.hasAPIKey { Task { await loadGoogleVoices() } }
@@ -178,9 +182,19 @@ struct PreferencesView: View {
                         RoundedRectangle(cornerRadius: 7)
                             .fill(selectedTab == tab ? accent.opacity(0.12) : .clear)
                     )
+                    // Without this, .buttonStyle(.plain) only hit-tests the actual rendered
+                    // content (the icon + text), not the transparent space the Spacer() fills
+                    // out to the row's edge — so clicking the highlighted-looking area next to
+                    // the label silently did nothing. This is what made the sidebar feel like
+                    // it needed two or three clicks: most clicks were landing on "empty" pixels
+                    // that were never part of the hit region.
+                    .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .focusEffectDisabled()
+                .onHover { hovering in
+                    if hovering { NSCursor.pointingHand.push() } else { NSCursor.pop() }
+                }
             }
             Spacer()
         }
@@ -1617,6 +1631,16 @@ enum LaunchAtLogin {
             } catch { print("[LaunchAtLogin] \(error)") }
         }
     }
+}
+
+// MARK: - Preferences navigation
+
+/// One-shot "open on this tab" request. The Preferences window is created once and reused
+/// (showWindow just re-orders it front), so a menu item that wants to land on a specific tab
+/// can't do it via an init parameter — that would only take effect on the very first open.
+@MainActor
+enum PreferencesNavigation {
+    static var pendingTab: PreferencesView.Tab?
 }
 
 // MARK: - Developer mode
