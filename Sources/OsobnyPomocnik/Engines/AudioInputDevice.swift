@@ -6,7 +6,32 @@ struct AudioInputDevice: Identifiable, Hashable, Sendable {
     let id: AudioDeviceID
     let uid: String
     let name: String
-    let transportType: UInt32 // kept for diagnostics/logging only — not used to block selection
+    let transportType: UInt32 // also decides whether to expect a link-warmup delay (see below)
+
+    /// Bluetooth and Continuity mics negotiate the audio link before real samples flow,
+    /// delivering zeroed buffers meanwhile — so for those, "chunks are arriving" isn't
+    /// enough to call the mic live. Wired/built-in/virtual devices have no such handshake:
+    /// chunks arriving at all means it's live, and silence just means nobody spoke yet.
+    var needsLinkWarmup: Bool {
+        transportType == kAudioDeviceTransportTypeBluetooth
+            || transportType == kAudioDeviceTransportTypeBluetoothLE
+            || transportType == kAudioDeviceTransportTypeContinuityCaptureWired
+            || transportType == kAudioDeviceTransportTypeContinuityCaptureWireless
+    }
+
+    /// True only for a real Bluetooth link — gates the "Inicializujem Bluetooth…" label
+    /// so a USB mic never claims to be doing Bluetooth setup.
+    var isBluetooth: Bool {
+        transportType == kAudioDeviceTransportTypeBluetooth
+            || transportType == kAudioDeviceTransportTypeBluetoothLE
+    }
+
+    /// Transport as its original four-char code ('usb ', 'blue', 'bltn'…) for logging.
+    var transportFourCC: String {
+        let b = [UInt8((transportType >> 24) & 0xff), UInt8((transportType >> 16) & 0xff),
+                 UInt8((transportType >> 8) & 0xff), UInt8(transportType & 0xff)]
+        return String(bytes: b, encoding: .ascii) ?? "????"
+    }
 }
 
 /// Enumerates Core Audio input devices and applies a selected one to an AVAudioEngine's input unit.
