@@ -8,6 +8,10 @@ struct PreferencesView: View {
 
     enum Tab: CaseIterable, Hashable {
         case dictation, reading, microphone, usage, history, quality, shortcuts, about
+
+        // Sidebar row order for the flat (top-level) items — .history and .quality are
+        // rendered separately, nested under .dictation, so they're excluded here.
+        static let topLevel: [Tab] = [.dictation, .reading, .microphone, .usage, .shortcuts, .about]
         var label: String {
             switch self {
             case .dictation:  "Diktovanie"
@@ -56,6 +60,9 @@ struct PreferencesView: View {
     }
 
     @State private var selectedTab: Tab = .dictation
+    // Collapsed by default — expanded on demand, or automatically if the current tab is
+    // one of its children (so History/Kvalita never end up hidden behind a chevron).
+    @State private var dictationExpanded = false
     @State private var tts          = TTSEngine.shared
     @State private var google       = GoogleCloudTTSEngine.shared
     @State private var dictation    = DictationEngine.shared
@@ -147,10 +154,7 @@ struct PreferencesView: View {
             accessCodeSaved  = true
             loggingEnabled   = AppLogger.isEnabled
             refreshLogSize()
-            if let tab = PreferencesNavigation.pendingTab {
-                selectedTab = tab
-                PreferencesNavigation.pendingTab = nil
-            }
+            if selectedTab == .history || selectedTab == .quality { dictationExpanded = true }
             // Normalise legacy "minimal" → "low" (removed from new segmented control)
             if dictation.transcriptionDelay == "minimal" { dictation.transcriptionDelay = "low" }
             if google.hasAPIKey { Task { await loadGoogleVoices() } }
@@ -164,36 +168,11 @@ struct PreferencesView: View {
 
     private var sidebar: some View {
         VStack(alignment: .leading, spacing: 2) {
-            ForEach(Tab.allCases, id: \.self) { tab in
-                Button { selectedTab = tab } label: {
-                    HStack(spacing: 10) {
-                        Image(systemName: tab.icon)
-                            .font(.system(size: 13.5))
-                            .foregroundStyle(selectedTab == tab ? accent : Color.secondary)
-                            .frame(width: 18)
-                        Text(tab.label)
-                            .font(.system(size: 13.5))
-                            .foregroundStyle(selectedTab == tab ? accent : Color.primary)
-                        Spacer()
-                    }
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 7)
-                    .background(
-                        RoundedRectangle(cornerRadius: 7)
-                            .fill(selectedTab == tab ? accent.opacity(0.12) : .clear)
-                    )
-                    // Without this, .buttonStyle(.plain) only hit-tests the actual rendered
-                    // content (the icon + text), not the transparent space the Spacer() fills
-                    // out to the row's edge — so clicking the highlighted-looking area next to
-                    // the label silently did nothing. This is what made the sidebar feel like
-                    // it needed two or three clicks: most clicks were landing on "empty" pixels
-                    // that were never part of the hit region.
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .focusEffectDisabled()
-                .onHover { hovering in
-                    if hovering { NSCursor.pointingHand.push() } else { NSCursor.pop() }
+            ForEach(Tab.topLevel, id: \.self) { tab in
+                sidebarRow(tab, showsDisclosure: tab == .dictation)
+                if tab == .dictation && dictationExpanded {
+                    sidebarRow(.history, indent: true)
+                    sidebarRow(.quality, indent: true)
                 }
             }
             Spacer()
@@ -201,6 +180,68 @@ struct PreferencesView: View {
         .padding(.horizontal, 10)
         .padding(.top, 20)
         .frame(width: 190)
+    }
+
+    /// `showsDisclosure` reserves a chevron that toggles `dictationExpanded` independently of
+    /// selecting the row — clicking "Diktovanie" itself still just navigates there, same as
+    /// every other row; only the chevron expands/collapses its children.
+    /// `indent` renders History/Kvalita one step in, so they read as belonging to Diktovanie.
+    private func sidebarRow(_ tab: Tab, indent: Bool = false, showsDisclosure: Bool = false) -> some View {
+        HStack(spacing: 4) {
+            if showsDisclosure {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.15)) { dictationExpanded.toggle() }
+                } label: {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .rotationEffect(.degrees(dictationExpanded ? 90 : 0))
+                        .frame(width: 14, height: 20)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .onHover { hovering in
+                    if hovering { NSCursor.pointingHand.push() } else { NSCursor.pop() }
+                }
+            } else if indent {
+                Spacer().frame(width: 14)
+            }
+
+            Button { selectedTab = tab } label: {
+                HStack(spacing: 10) {
+                    Image(systemName: tab.icon)
+                        .font(.system(size: indent ? 12 : 13.5))
+                        .foregroundStyle(selectedTab == tab ? accent : Color.secondary)
+                        .frame(width: indent ? 15 : 18)
+                    Text(tab.label)
+                        .font(.system(size: indent ? 12.5 : 13.5))
+                        .foregroundStyle(selectedTab == tab ? accent : Color.primary)
+                    Spacer()
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, indent ? 6 : 7)
+                .background(
+                    RoundedRectangle(cornerRadius: 7)
+                        .fill(selectedTab == tab ? accent.opacity(0.12) : .clear)
+                )
+                // Without this, .buttonStyle(.plain) only hit-tests the actual rendered
+                // content (the icon + text), not the transparent space the Spacer() fills
+                // out to the row's edge — so clicking the highlighted-looking area next to
+                // the label silently did nothing. This is what made the sidebar feel like
+                // it needed two or three clicks: most clicks were landing on "empty" pixels
+                // that were never part of the hit region.
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .focusEffectDisabled()
+            .onHover { hovering in
+                if hovering { NSCursor.pointingHand.push() } else { NSCursor.pop() }
+            }
+        }
+        // Every other top-level row (Čítanie, Mikrofón, …) has no chevron/indent spacer of
+        // its own, so without this its icon would start 14pt to the left of Diktovanie's —
+        // this padding is what keeps every row's icon aligned in one column.
+        .padding(.leading, tab == .dictation || indent ? 0 : 14)
     }
 
     // MARK: - Shared components
@@ -1631,16 +1672,6 @@ enum LaunchAtLogin {
             } catch { print("[LaunchAtLogin] \(error)") }
         }
     }
-}
-
-// MARK: - Preferences navigation
-
-/// One-shot "open on this tab" request. The Preferences window is created once and reused
-/// (showWindow just re-orders it front), so a menu item that wants to land on a specific tab
-/// can't do it via an init parameter — that would only take effect on the very first open.
-@MainActor
-enum PreferencesNavigation {
-    static var pendingTab: PreferencesView.Tab?
 }
 
 // MARK: - Developer mode
