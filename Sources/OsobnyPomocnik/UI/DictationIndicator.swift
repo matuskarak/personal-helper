@@ -145,6 +145,10 @@ final class DictationIndicatorController: NSWindowController, NSWindowDelegate {
 struct MicEqualizerView: View {
     let isActive: Bool
     let tint: Color    // caller decides based on voice detection
+    // When nil, reads DictationEngine.shared.audioLevel (the real dictation pill).
+    // Callers with their own audio pipeline (e.g. the mic test, which records
+    // independently of DictationEngine) pass their own level so the bars actually move.
+    var level: Float? = nil
 
     private static let barCount = 4
     private static let maxBarHeight: CGFloat = 15
@@ -179,7 +183,7 @@ struct MicEqualizerView: View {
                 heights = Array(repeating: 3, count: Self.barCount)
                 return
             }
-            let base = CGFloat(DictationEngine.shared.audioLevel) * Self.maxBarHeight
+            let base = CGFloat(level ?? DictationEngine.shared.audioLevel) * Self.maxBarHeight
             heights = (0..<Self.barCount).map { _ in
                 max(3, min(Self.maxBarHeight, base * CGFloat.random(in: 0.55...1.2)))
             }
