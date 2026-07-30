@@ -17,6 +17,7 @@ final class MicTestEngine {
 
     enum Phase: Equatable {
         case idle
+        case preparing(secondsLeft: Int)
         case recording(secondsLeft: Int)
         case analyzing
         case done
@@ -55,19 +56,25 @@ final class MicTestEngine {
     private var captureSampleRate: Double = 24_000
     private let sampleStore = MicTestSampleStore()
     private var testTask: Task<Void, Never>?
+    private var levelPollTask: Task<Void, Never>?
 
     private init() {}
 
-    func startTest(durationSeconds: Int = 6) {
+    // ponytail: 9s (was 6s) — the reference sentences run ~5-7s read at a natural pace,
+    // and the old duration left no margin, cutting the tail off mid-sentence and tanking
+    // the transcript-match score. The prep countdown adds further reaction-time margin.
+    func startTest(durationSeconds: Int = 9, prepSeconds: Int = 2) {
         guard phase == .idle || isTerminal(phase) else { return }
         referenceText = Self.referenceSentences.randomElement() ?? Self.referenceSentences[0]
         result = nil
         sampleStore.reset()
-        testTask = Task { await runTest(durationSeconds: durationSeconds) }
+        testTask = Task { await runTest(durationSeconds: durationSeconds, prepSeconds: prepSeconds) }
     }
 
     func cancel() {
         testTask?.cancel()
+        levelPollTask?.cancel()
+        liveLevel = 0
         teardownCapture()
         phase = .idle
     }
@@ -80,7 +87,17 @@ final class MicTestEngine {
 
     // MARK: - Recording
 
-    private func runTest(durationSeconds: Int) async {
+    private func runTest(durationSeconds: Int, prepSeconds: Int) async {
+        // Give the user a beat to get ready to read before the mic actually starts —
+        // previously recording began the instant the button was clicked, so the first
+        // words were often missed or the tail got cut off within the fixed window.
+        for remaining in stride(from: prepSeconds, through: 1, by: -1) {
+            if Task.isCancelled { return }
+            phase = .preparing(secondsLeft: remaining)
+            try? await Task.sleep(for: .seconds(1))
+        }
+        if Task.isCancelled { return }
+
         do {
             try setupCapture()
         } catch {
@@ -88,11 +105,21 @@ final class MicTestEngine {
             return
         }
 
+        testLevelHolder.update(0)
+        levelPollTask = Task { @MainActor [weak self] in
+            while let self, !Task.isCancelled {
+                self.liveLevel = testLevelHolder.current
+                try? await Task.sleep(for: .milliseconds(50))
+            }
+        }
+
         for remaining in stride(from: durationSeconds, through: 1, by: -1) {
             if Task.isCancelled { teardownCapture(); return }
             phase = .recording(secondsLeft: remaining)
             try? await Task.sleep(for: .seconds(1))
         }
+        levelPollTask?.cancel()
+        liveLevel = 0
         teardownCapture()
         if Task.isCancelled { return }
 
@@ -141,6 +168,7 @@ final class MicTestEngine {
             capture.onBuffer = { [captureSampleRate = self.captureSampleRate] buffer in
                 store.appendFloat(buffer: buffer)
                 store.appendPCM16(buffer: buffer, inputSampleRate: captureSampleRate, converter: converter, pcm16Format: pcm16Format)
+                Self.updateLiveLevel(buffer)
             }
             guard capture.start() else { throw MicTestError.setupFailed }
             deviceCapture = capture
@@ -155,10 +183,26 @@ final class MicTestEngine {
             inputNode.installTap(onBus: 0, bufferSize: 2048, format: fmt) { [captureSampleRate = self.captureSampleRate] buffer, _ in
                 store.appendFloat(buffer: buffer)
                 store.appendPCM16(buffer: buffer, inputSampleRate: captureSampleRate, converter: converter, pcm16Format: pcm16Format)
+                Self.updateLiveLevel(buffer)
             }
             try engine.start()
             systemTap = engine
         }
+    }
+
+    // Same perceptual (sqrt) curve DictationEngine uses for its equalizer, so the mic
+    // test's bars feel consistent with the real dictation pill. Runs on the audio
+    // capture thread — only touches the lock-protected holder, nothing @MainActor.
+    nonisolated private static func updateLiveLevel(_ buffer: AVAudioPCMBuffer) {
+        guard let ptr = buffer.floatChannelData?.pointee else { return }
+        let frameCount = Int(buffer.frameLength)
+        var peak: Float = 0
+        for i in 0..<frameCount {
+            let a = abs(ptr[i])
+            if a > peak { peak = a }
+        }
+        let perceptual = min(1, sqrt(peak) * 1.6)
+        testLevelHolder.update(perceptual)
     }
 
     private func teardownCapture() {
@@ -326,6 +370,18 @@ final class MicTestEngine {
         return (verdict, suggestions)
     }
 }
+
+/// Thread-safe holder for the mic test's live level meter — same lock-holder pattern
+/// as DictationEngine's AudioLevelHolder (capture-thread writes, MainActor loop reads).
+/// A separate instance because MicTestEngine records through its own independent
+/// pipeline, not through DictationEngine.
+private final class TestLevelHolder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value: Float = 0
+    func update(_ v: Float) { lock.lock(); value = v; lock.unlock() }
+    var current: Float { lock.lock(); defer { lock.unlock() }; return value }
+}
+private let testLevelHolder = TestLevelHolder()
 
 /// Thread-safe accumulator for the mic test's raw audio — same lock-holder pattern
 /// as DictationEngine's ChunkCounter/BatchAudioBuffer. Stores both native-format

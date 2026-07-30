@@ -753,14 +753,22 @@ struct PreferencesView: View {
                     if let r = micTest.result {
                         micTestResultView(r)
                     }
-                    Button(micTest.result == nil ? "Spustiť test (6 s)" : "Skúsiť znova") {
+                    Button(micTest.result == nil ? "Spustiť test" : "Skúsiť znova") {
                         micTest.startTest()
                     }
                     .buttonStyle(.borderedProminent).tint(accent)
 
+                case .preparing(let secondsLeft):
+                    HStack(spacing: 12) {
+                        MicEqualizerView(isActive: false, tint: .secondary)
+                        Text("Priprav sa… \(secondsLeft)s").foregroundStyle(.secondary)
+                        Spacer()
+                        Button("Zrušiť") { micTest.cancel() }.buttonStyle(.bordered)
+                    }
+
                 case .recording(let secondsLeft):
                     HStack(spacing: 12) {
-                        MicEqualizerView(isActive: true, tint: .blue)
+                        MicEqualizerView(isActive: true, tint: .blue, level: micTest.liveLevel)
                         Text("Nahrávam… \(secondsLeft)s").foregroundStyle(.secondary)
                         Spacer()
                         Button("Zrušiť") { micTest.cancel() }.buttonStyle(.bordered)
