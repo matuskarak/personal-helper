@@ -71,7 +71,13 @@ private struct LogViewerView: View {
             }
         }
         .onAppear { load() }
-        .onReceive(Self.ticker) { _ in if autoRefresh { load() } }
+        // ponytail: the visibility check matters — isReleasedWhenClosed is false and the
+        // ticker is a static autoconnect() publisher, so closing the window otherwise leaves
+        // this re-reading up to 80 KB off disk every second for the rest of the app's life.
+        .onReceive(Self.ticker) { _ in
+            guard autoRefresh, LogViewerWindowController.shared.window?.isVisible == true else { return }
+            load()
+        }
     }
 
     private func load() {

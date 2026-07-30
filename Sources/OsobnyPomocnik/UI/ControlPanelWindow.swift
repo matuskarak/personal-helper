@@ -145,9 +145,15 @@ private struct VoiceWaveView: View {
         }
         .frame(width: 28, height: 18)
         .onReceive(ticker) { _ in
-            heights = isActive
-                ? (0..<Self.barCount).map { _ in CGFloat.random(in: 4...17) }
-                : Self.flatHeights
+            guard isActive else {
+                // ponytail: same trap as the dictation pill's equalizer — this window's
+                // hosting view outlives any single playback, so re-assigning the identical
+                // flat array kept invalidating @State (and re-laying-out the panel) forever
+                // while nothing was being read aloud.
+                if heights != Self.flatHeights { heights = Self.flatHeights }
+                return
+            }
+            heights = (0..<Self.barCount).map { _ in CGFloat.random(in: 4...17) }
         }
         .onChange(of: isActive) { _, active in
             if !active {
