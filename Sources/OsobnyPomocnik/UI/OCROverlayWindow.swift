@@ -35,7 +35,9 @@ final class OCROverlayWindowController: NSWindowController {
             self?.onRectSelected?(cgRect)
         }
         overlayView = view
-        window?.contentView = NSHostingView(rootView: view)
+        // First-mouse matters most here: the region selection *starts* with a mouseDown, so
+        // a swallowed first click meant the drag silently didn't begin.
+        window?.contentView = FirstMouseHostingView(rootView: view)
         window?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
 

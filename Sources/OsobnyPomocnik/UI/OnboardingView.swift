@@ -252,7 +252,7 @@ final class OnboardingWindowController: NSWindowController {
         window.center()
         window.isReleasedWhenClosed = false
         super.init(window: window)
-        window.contentView = NSHostingView(rootView: OnboardingView(onClose: { [weak self] in
+        window.contentView = FirstMouseHostingView(rootView: OnboardingView(onClose: { [weak self] in
             self?.window?.close()
         }))
     }

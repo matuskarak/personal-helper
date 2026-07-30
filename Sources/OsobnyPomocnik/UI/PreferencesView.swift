@@ -68,6 +68,7 @@ struct PreferencesView: View {
     @State private var showOnboarding = false
     @State private var developerMode = DeveloperMode.isEnabled
     @State private var loggingEnabled = AppLogger.isEnabled
+    @State private var currency = AppCurrency.selected
     @State private var logSizeBytes = 0
     @State private var exportedLogName: String?
     @State private var accessCodeInput = ""
@@ -282,17 +283,41 @@ struct PreferencesView: View {
             // Režim + VAD
             card {
                 pickerRow(title: "Režim", selection: $dictation.transcriptionMode) {
-                    Text("Realtime (živý náhľad)").tag(DictationEngine.TranscriptionMode.realtime)
-                    Text("Po nahraní (presnejší, lacnejší)").tag(DictationEngine.TranscriptionMode.batch)
+                    Text("Realtime (živý náhľad) — \(Pricing.perMinuteLabel(realtime: true))")
+                        .tag(DictationEngine.TranscriptionMode.realtime)
+                    Text("Po nahraní (presnejší, lacnejší)")
+                        .tag(DictationEngine.TranscriptionMode.batch)
                 }
                 if dictation.transcriptionMode == .batch {
                     rowDivider
                     pickerRow(title: "Model", selection: $dictation.batchModel) {
-                        Text("gpt-4o-mini-transcribe (odporúčaný)").tag("gpt-4o-mini-transcribe")
-                        Text("gpt-4o-transcribe (najpresnejší)").tag("gpt-4o-transcribe")
-                        Text("whisper-1").tag("whisper-1")
+                        ForEach(DictationEngine.batchModels, id: \.self) { model in
+                            Text("\(model)\(Self.modelNote(model)) — \(Pricing.perMinuteLabel(realtime: false, batchModel: model))")
+                                .tag(model)
+                        }
                     }
                 }
+                rowDivider
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Mena pre ceny").font(.body)
+                        Text("Ceny sú orientačné, podľa cenníka OpenAI (\(Pricing.ratesCheckedOn)). Prepočet z dolárov je fixný, nie podľa aktuálneho kurzu.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Picker("", selection: Binding(
+                        get: { currency },
+                        set: { currency = $0; AppCurrency.selected = $0 }
+                    )) {
+                        ForEach(AppCurrency.allCases, id: \.self) { c in
+                            Text(c.label).tag(c)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(width: 180)
+                    .labelsHidden()
+                }
+                .padding(.horizontal, 16).padding(.vertical, 12)
                 rowDivider
                 HStack(alignment: .top) {
                     VStack(alignment: .leading, spacing: 2) {
@@ -443,7 +468,7 @@ struct PreferencesView: View {
             let dictMins = Double(dictation.totalSecondsRecorded) / 60
             let dictCost = dictMins * dictation.costPerMinute
             HStack {
-                Text(String(format: "Využité tento mesiac: %.1f min (~$%.3f)", dictMins, dictCost))
+                Text(String(format: "Využité tento mesiac: %.1f min (~%@)", dictMins, currency.format(usd: dictCost)))
                     .font(.caption).foregroundStyle(.secondary)
                 Spacer()
                 Button("Resetovať") { dictation.resetUsageCounter() }
@@ -618,8 +643,8 @@ struct PreferencesView: View {
                                  : (voice.contains("WaveNet") || voice.contains("Neural2"))  ? 0.000016
                                  : 0.000004
                 HStack {
-                    Text(String(format: "Znaky tento mesiac: %d (~$%.3f)",
-                                google.totalCharactersUsed, chars * rate))
+                    Text(String(format: "Znaky tento mesiac: %d (~%@)",
+                                google.totalCharactersUsed, currency.format(usd: chars * rate)))
                         .font(.caption).foregroundStyle(.secondary)
                     Spacer()
                     Button("Resetovať") { google.resetCharacterCount() }
@@ -1301,27 +1326,19 @@ struct PreferencesView: View {
     }
 
     private func dictationCostString(_ seconds: Int) -> String {
-        String(format: "~$%.3f", Double(seconds) / 60 * dictation.costPerMinute)
+        "~" + currency.format(usd: Double(seconds) / 60 * dictation.costPerMinute)
     }
 
     private func readingCostString(_ chars: Int) -> String {
-        let voice = google.selectedVoiceName
-        let rate: Double = voice.contains("Chirp3-HD") || voice.contains("Chirp-HD") ? 0.00016
-                          : (voice.contains("WaveNet") || voice.contains("Neural2"))  ? 0.000016
-                          : 0.000004
-        return String(format: "~$%.3f", Double(chars) * rate)
+        let rate = Pricing.googleTTSUSDPerChar(voice: google.selectedVoiceName)
+        return "~" + currency.format(usd: Double(chars) * rate)
     }
 
     /// ponytail: closed-form estimate, no real playback-duration tracking —
     /// dictation compares actual seconds to a 40wpm typing baseline; reading
     /// compares a 120wpm manual-reading baseline to a 180wpm TTS-listening baseline.
     private func timeSavedString(_ s: UsageStore.Summary) -> String {
-        let dictationSavedMin = max(0, Double(s.dictationWords) / 40.0 - Double(s.dictationSeconds) / 60.0)
-        let readingSavedMin   = Double(s.readingWords) / 360.0
-        let totalMin = dictationSavedMin + readingSavedMin
-        if totalMin < 1 { return String(format: "%.0f s", totalMin * 60) }
-        if totalMin < 60 { return String(format: "%.0f min", totalMin) }
-        return String(format: "%.1f h", totalMin / 60)
+        UsageStore.savedTimeText(s)
     }
 
     // MARK: - Skratky
@@ -1396,11 +1413,11 @@ struct PreferencesView: View {
             card {
                 externalLinkRow("GitHub",
                     url: URL(string: "https://github.com")!)
-                rowDivider
-                externalLinkRow("Nahlásiť chybu",
-                    url: URL(string: "https://github.com/issues")!)
             }
 
+            // Only with Developer mode on — normal use doesn't need it, and it's the switch
+            // to tell someone to flip when their problem needs looking into.
+            if developerMode {
             card {
                 VStack(alignment: .leading, spacing: 0) {
                     VStack(alignment: .leading, spacing: 4) {
@@ -1442,6 +1459,7 @@ struct PreferencesView: View {
                         .padding(.horizontal, 16).padding(.vertical, 10)
                     }
                 }
+            }
             }
 
             card {
@@ -1496,6 +1514,14 @@ struct PreferencesView: View {
     }
 
     private func refreshLogSize() { logSizeBytes = AppLogger.fileSizeBytes }
+
+    private static func modelNote(_ model: String) -> String {
+        switch model {
+        case "gpt-4o-mini-transcribe": return " (odporúčaný)"
+        case "gpt-4o-transcribe":      return " (najpresnejší)"
+        default:                       return ""
+        }
+    }
 
     /// Desktop + reveal in Finder rather than a save panel: for the target audience a
     /// predictable, one-click destination beats navigating a file dialog.

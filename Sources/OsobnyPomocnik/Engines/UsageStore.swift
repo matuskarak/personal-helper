@@ -88,6 +88,19 @@ final class UsageStore {
         var readingChars     = 0
     }
 
+    /// Estimated time saved versus doing it by hand: dictation compares actual recording
+    /// time against a 40 wpm typing baseline; reading compares a 120 wpm manual-reading
+    /// baseline against 180 wpm listening (hence words / 360).
+    /// Lives here rather than in a view so the Prehľad tab and the menu bar can't drift apart.
+    static func savedTimeText(_ s: Summary) -> String {
+        let dictationSavedMin = max(0, Double(s.dictationWords) / 40.0 - Double(s.dictationSeconds) / 60.0)
+        let readingSavedMin   = Double(s.readingWords) / 360.0
+        let totalMin = dictationSavedMin + readingSavedMin
+        if totalMin < 1  { return String(format: "%.0f s", totalMin * 60) }
+        if totalMin < 60 { return String(format: "%.0f min", totalMin) }
+        return String(format: "%.1f h", totalMin / 60)
+    }
+
     private func summary(for range: DateInterval) -> Summary {
         var s = Summary()
         for e in events where range.contains(e.date) {

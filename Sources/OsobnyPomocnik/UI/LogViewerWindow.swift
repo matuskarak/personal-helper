@@ -15,7 +15,7 @@ final class LogViewerWindowController: NSWindowController {
         )
         window.title = "Log — Osobný pomocník"
         window.center()
-        window.contentView = NSHostingView(rootView: LogViewerView())
+        window.contentView = FirstMouseHostingView(rootView: LogViewerView())
         window.isReleasedWhenClosed = false
         super.init(window: window)
     }
