@@ -67,6 +67,9 @@ struct PreferencesView: View {
     @State private var historyStore  = DictationHistoryStore.shared
     @State private var showOnboarding = false
     @State private var developerMode = DeveloperMode.isEnabled
+    @State private var loggingEnabled = AppLogger.isEnabled
+    @State private var logSizeBytes = 0
+    @State private var exportedLogName: String?
     @State private var accessCodeInput = ""
     @State private var accessCodeSaved = false
     @State private var pillFollowsField = PillPosition.followFocusedField
@@ -141,6 +144,8 @@ struct PreferencesView: View {
             inputDevices     = AudioDeviceManager.inputDevices()
             accessCodeInput  = remoteConfig.accessCode
             accessCodeSaved  = true
+            loggingEnabled   = AppLogger.isEnabled
+            refreshLogSize()
             // Normalise legacy "minimal" → "low" (removed from new segmented control)
             if dictation.transcriptionDelay == "minimal" { dictation.transcriptionDelay = "low" }
             if google.hasAPIKey { Task { await loadGoogleVoices() } }
@@ -1397,23 +1402,46 @@ struct PreferencesView: View {
             }
 
             card {
-                HStack {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Súbor záznamu").font(.body.bold())
-                        Text("~/Library/Logs/OsobnyPomocnik/app.log")
+                VStack(alignment: .leading, spacing: 0) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Diagnostika").font(.body.bold())
+                        Text("Keď niečo nefunguje: nechaj zapnutý záznam, zopakuj problém a klikni na „Pripraviť na poslanie“. Vznikne súbor, ktorý sa dá priložiť k správe.")
                             .font(.caption).foregroundStyle(.secondary)
                     }
-                    Spacer()
-                    if developerMode {
-                        Button("Zobraziť log") { LogViewerWindowController.shared.show() }
+                    .padding(.horizontal, 16).padding(.top, 13).padding(.bottom, 2)
+
+                    toggleRow(title: "Zapisovať diagnostický záznam",
+                              subtitle: loggingEnabled
+                                ? "Zapnuté — veľkosť súboru: \(logSizeText)"
+                                : "Vypnuté — nové udalosti sa nezaznamenávajú",
+                              isOn: Binding(
+                        get: { loggingEnabled },
+                        set: { loggingEnabled = $0; AppLogger.isEnabled = $0; refreshLogSize() }
+                    ))
+                    rowDivider
+
+                    HStack(spacing: 8) {
+                        Text("Súbor záznamu").font(.body)
+                        Spacer()
+                        Button("Pripraviť na poslanie") { exportLogToDesktop() }
+                            .buttonStyle(.borderedProminent).tint(accent)
+                            .help("Uloží kópiu na plochu a označí ju vo Finderi")
+                        Button("Zobraziť") { LogViewerWindowController.shared.show() }
                             .buttonStyle(.bordered)
+                        Button("Vymazať") { AppLogger.clear(); refreshLogSize(); exportedLogName = nil }
+                            .buttonStyle(.bordered).foregroundStyle(.red)
                     }
-                    Button("Otvoriť vo Finderi") {
-                        NSWorkspace.shared.activateFileViewerSelecting([AppLogger.logFileURL])
+                    .padding(.horizontal, 16).padding(.vertical, 12)
+
+                    if let name = exportedLogName {
+                        rowDivider
+                        HStack(spacing: 6) {
+                            Image(systemName: "checkmark.circle.fill").foregroundStyle(greenDot)
+                            Text("Uložené na plochu: \(name)").font(.caption)
+                        }
+                        .padding(.horizontal, 16).padding(.vertical, 10)
                     }
-                    .buttonStyle(.bordered)
                 }
-                .padding(.horizontal, 16).padding(.vertical, 13)
             }
 
             card {
@@ -1433,7 +1461,7 @@ struct PreferencesView: View {
 
             card {
                 toggleRow(title: "Developer mode",
-                          subtitle: "Zobrazí vývojárske nástroje (log viewer, reštart z menu bar ikonky podržaním ⌥)",
+                          subtitle: "Vývojárske nástroje: reštart aplikácie z menu bar ikonky (podržaním ⌥) a funkcie vo vývoji. Na poslanie záznamu ho zapínať netreba.",
                           isOn: Binding(
                     get: { developerMode },
                     set: { developerMode = $0; DeveloperMode.isEnabled = $0 }
@@ -1458,6 +1486,27 @@ struct PreferencesView: View {
                 .padding(16)
             }
         }
+    }
+
+    // MARK: - Diagnostics helpers
+
+    private var logSizeText: String {
+        logSizeBytes < 1024 ? "\(logSizeBytes) B"
+            : ByteCountFormatter.string(fromByteCount: Int64(logSizeBytes), countStyle: .file)
+    }
+
+    private func refreshLogSize() { logSizeBytes = AppLogger.fileSizeBytes }
+
+    /// Desktop + reveal in Finder rather than a save panel: for the target audience a
+    /// predictable, one-click destination beats navigating a file dialog.
+    private func exportLogToDesktop() {
+        guard let desktop = FileManager.default.urls(for: .desktopDirectory, in: .userDomainMask).first,
+              let url = AppLogger.exportCopy(to: desktop) else {
+            exportedLogName = nil
+            return
+        }
+        exportedLogName = url.lastPathComponent
+        NSWorkspace.shared.activateFileViewerSelecting([url])
     }
 
     @ViewBuilder

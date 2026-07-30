@@ -24,18 +24,74 @@ enum AppLogger {
         return dir.appendingPathComponent("app.log")
     }()
 
+    // Full date, not just time — the log spans days and rotates, so bare timestamps made
+    // it impossible to tell whether a line was from this run or last week.
     private static let formatter: DateFormatter = {
         let f = DateFormatter()
-        f.dateFormat = "HH:mm:ss.SSS"
+        f.dateFormat = "yyyy-MM-dd HH:mm:ss.SSS"
         return f
     }()
 
+    private static let enabledKey = "log.enabled"
+
+    /// Diagnostic logging switch, surfaced in Nastavenia → O aplikácii. Defaults to ON so a
+    /// problem a user hits is already captured — asking them to enable logging and then
+    /// reproduce the bug loses the very event worth looking at. Crash handlers stay
+    /// installed either way; they cost nothing until the process actually dies.
+    static var isEnabled: Bool {
+        get {
+            // registerDefaults isn't used anywhere else in the app, so default-true is
+            // expressed as "absent means on" rather than a separate registration step.
+            UserDefaults.standard.object(forKey: enabledKey) as? Bool ?? true
+        }
+        set {
+            UserDefaults.standard.set(newValue, forKey: enabledKey)
+            // Write through the switch itself so the file always explains its own gaps.
+            let line = "[\(formatter.string(from: Date()))] — Diagnostický log \(newValue ? "ZAPNUTÝ" : "VYPNUTÝ") —\n"
+            if let data = line.data(using: .utf8) { logQ.async { writeToFile(data) } }
+        }
+    }
+
     static func log(_ message: String) {
+        guard isEnabled else { return }
         print(message)
         // Timestamp on calling thread (DateFormatter.string is thread-safe for read-only use).
         let line = "[\(formatter.string(from: Date()))] \(message)\n"
         guard let data = line.data(using: .utf8) else { return }
         logQ.async { writeToFile(data) }
+    }
+
+    /// Current log size, for the diagnostics UI ("is there anything to send?").
+    static var fileSizeBytes: Int {
+        guard let attrs = try? FileManager.default.attributesOfItem(atPath: logFileURL.path) else { return 0 }
+        return attrs[.size] as? Int ?? 0
+    }
+
+    /// Writes a copy the user can attach to an email/message. Returns nil on failure.
+    /// Named with a timestamp so several reports from one person stay distinguishable.
+    static func exportCopy(to directory: URL) -> URL? {
+        let stamp = ISO8601DateFormatter().string(from: Date())
+            .replacingOccurrences(of: ":", with: "-")
+        let dest = directory.appendingPathComponent("OsobnyPomocnik-log-\(stamp).txt")
+        // Flush anything still queued so the copy isn't missing the last few lines.
+        logQ.sync { try? handle?.synchronize() }
+        do {
+            try? FileManager.default.removeItem(at: dest)
+            try FileManager.default.copyItem(at: logFileURL, to: dest)
+            return dest
+        } catch {
+            log("[AppLogger] export failed: \(error.localizedDescription)")
+            return nil
+        }
+    }
+
+    static func clear() {
+        logQ.sync {
+            try? handle?.close()
+            handle = nil
+            pendingBytes = 0
+            try? "".write(to: logFileURL, atomically: true, encoding: .utf8)
+        }
     }
 
     /// Marks the start of a new dictation attempt without discarding earlier

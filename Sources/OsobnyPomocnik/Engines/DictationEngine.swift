@@ -168,7 +168,14 @@ final class DictationEngine {
     // Transient, non-error info shown in the indicator (e.g. "saved to memory").
     // Distinct from connectionError so the UI can style it differently.
     private(set) var notice: String?
-    func showNotice(_ msg: String) { notice = msg }
+    /// Sticky notices stay until the user clicks the pill away. Advisory ones (mic-quality
+    /// hints raised mid-dictation) auto-hide so they don't sit on top of an active session.
+    private(set) var noticeIsSticky = true
+
+    func showNotice(_ msg: String, sticky: Bool = true) {
+        noticeIsSticky = sticky
+        notice = msg
+    }
 
     // Set at the end of stopAndTranscribe() — false if the mic tap never produced
     // a single usable chunk during the whole recording (mic permission, broken
@@ -721,10 +728,11 @@ final class DictationEngine {
                         self.isWaitingForServer = -lastDelta.timeIntervalSinceNow > 5.0
                     }
 
-                    // Passive quality check — fires once, ~15s into the session.
+                    // Passive quality check — fires once, ~15s into the session. Advisory only:
+                    // the dictation is still running, so this must not park itself over the pill.
                     if let snapshot = qualityMonitor.consumeIfReady() {
                         if let warning = Self.qualityWarning(from: snapshot) {
-                            self.showNotice(warning)
+                            self.showNotice(warning, sticky: false)
                         }
                     }
 
@@ -1089,15 +1097,17 @@ final class DictationEngine {
             let msg    = errObj?["message"] as? String ?? text
             AppLogger.log("[DictationEngine] ⚠️ API error [\(code)]: \(msg)")
 
-            // Any server-side error during session.update means transcription won't work
-            // correctly even if we keep "recording" — surface it and tear the session down
-            // instead of leaving the mic/WS running silently with no transcription.
-            connectionError = "[\(code)] \(msg)"
             // ponytail: server_vad auto-commits on silence; our trailing manual commit
             // in stopAndTranscribe() then hits "buffer empty" — harmless, but resuming
             // with "" wiped out everything already transcribed. Resume with what we have.
             let alreadyTranscribed = accumulatedText
-            if code != "input_audio_buffer_commit_empty" {
+            let harmless = code == "input_audio_buffer_commit_empty"
+            // Any *real* server-side error means transcription won't work even if we keep
+            // "recording", so surface it and tear the session down. The buffer-empty case is
+            // the expected end of a silent session — it must not raise a user-facing error at
+            // all (it used to show the raw English API text, only hidden by a 3 s auto-dismiss).
+            if !harmless {
+                connectionError = "[\(code)] \(msg)"
                 liveText = "⚠️ \(msg)"
             }
             stopSession()
