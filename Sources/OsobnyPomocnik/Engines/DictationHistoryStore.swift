@@ -8,10 +8,37 @@ import Observation
 struct DictationHistoryEntry: Codable, Identifiable {
     let id: UUID
     let date: Date
-    let text: String
+    let text: String              // raw transcript, as spoken
+    // Context + metrics, all added later — absent on entries logged before this shipped.
+    let appName: String
+    let bundleID: String
+    let category: AppCategory
+    let seconds: Int
+    let rewrittenText: String?    // Smart diktovanie output, when it ran
+    let metrics: DictationMetrics?
 
-    init(date: Date, text: String) {
+    init(date: Date, text: String, appName: String = "", bundleID: String = "",
+         category: AppCategory = .generic, seconds: Int = 0,
+         rewrittenText: String? = nil, metrics: DictationMetrics? = nil) {
         self.id = UUID(); self.date = date; self.text = text
+        self.appName = appName; self.bundleID = bundleID; self.category = category
+        self.seconds = seconds; self.rewrittenText = rewrittenText; self.metrics = metrics
+    }
+
+    // ponytail: hand-written decode so the added fields don't destroy existing history.
+    // Synthesized Codable throws on a missing key even with a default value, and load()
+    // bails to an empty array on any failure — which the next save() would then persist.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id            = try c.decode(UUID.self, forKey: .id)
+        date          = try c.decode(Date.self, forKey: .date)
+        text          = try c.decode(String.self, forKey: .text)
+        appName       = try c.decodeIfPresent(String.self, forKey: .appName) ?? ""
+        bundleID      = try c.decodeIfPresent(String.self, forKey: .bundleID) ?? ""
+        category      = try c.decodeIfPresent(AppCategory.self, forKey: .category) ?? .generic
+        seconds       = try c.decodeIfPresent(Int.self, forKey: .seconds) ?? 0
+        rewrittenText = try c.decodeIfPresent(String.self, forKey: .rewrittenText)
+        metrics       = try c.decodeIfPresent(DictationMetrics.self, forKey: .metrics)
     }
 }
 
@@ -29,9 +56,14 @@ final class DictationHistoryStore {
 
     private init() { load() }
 
-    func log(_ text: String) {
+    func log(_ text: String, appName: String = "", bundleID: String = "",
+             category: AppCategory = .generic, seconds: Int = 0, rewrittenText: String? = nil) {
         guard !text.isEmpty else { return }
-        entries.append(DictationHistoryEntry(date: Date(), text: text))
+        entries.append(DictationHistoryEntry(
+            date: Date(), text: text, appName: appName, bundleID: bundleID,
+            category: category, seconds: seconds, rewrittenText: rewrittenText,
+            metrics: DictationQualityEngine.analyze(text: text, rewritten: rewrittenText, seconds: seconds)
+        ))
         prune()
         save()
     }

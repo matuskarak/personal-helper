@@ -293,10 +293,14 @@ final class DictationEngine {
     // Resumed when the server sends the final completed transcript after commit
     private var transcriptionContinuation: CheckedContinuation<String, Never>?
 
-    // Smart diktovanie — captured at recording start, consumed at stop
+    // Target-app context — captured at recording start, consumed at stop. Needed on
+    // every dictation for quality tracking; the screenshot only for Smart diktovanie.
     private var isSmartMode        = false
     private var capturedScreenshot: CGImage?
     private var capturedProfile:    AppProfile?
+    private var capturedAppName:    String = ""
+    private var capturedBundleID:   String = ""
+    private var contextCaptureTask: Task<Void, Never>?
 
     // Bumped on every startRecording(). Stale WS callbacks from an abandoned
     // session (e.g. user pressed the shortcut rapidly start→stop→start) check
@@ -454,6 +458,8 @@ final class DictationEngine {
         isSmartMode        = smart
         capturedScreenshot = nil
         capturedProfile    = nil
+        capturedAppName    = ""
+        capturedBundleID   = ""
         liveText          = ""
         accumulatedText   = ""
         connectionError   = nil
@@ -471,16 +477,19 @@ final class DictationEngine {
         sendQueue.resetStats()
         AppLogger.log("[DictationEngine] 🟢 session #\(sessionID) started | path=\(deviceCapture != nil ? "DeviceCapture" : "AVAudioEngine") liveInsert=\(liveInsertEnabled)")
 
-        if smart {
-            // Capture frontmost app's window + screenshot asynchronously; consumed in stopAndTranscribe.
-            Task { [weak self] in
-                guard let self else { return }
-                let ctx = await SmartContextCapture.shared.captureFrontmostContext()
-                self.capturedScreenshot = ctx.image
-                self.capturedProfile = AppProfileStore.shared.matchingProfile(
-                    bundleID: ctx.bundleID, windowTitle: ctx.windowTitle
-                )
-            }
+        // Which app are we dictating into? Needed on every session so the quality tab can
+        // say "you dictate differently into ChatGPT than into Slack". Screenshot only in
+        // Smart mode — capturing pixels is the slow part, app identity is nearly free.
+        // Awaited (with a timeout) in stopAndTranscribe, so short dictations don't lose it.
+        contextCaptureTask = Task { [weak self] in
+            let ctx = await SmartContextCapture.shared.captureFrontmostContext(captureScreenshot: smart)
+            guard let self else { return }
+            self.capturedScreenshot = ctx.image
+            self.capturedAppName    = ctx.appName ?? ""
+            self.capturedBundleID   = ctx.bundleID ?? ""
+            self.capturedProfile = AppProfileStore.shared.matchingProfile(
+                bundleID: ctx.bundleID, windowTitle: ctx.windowTitle
+            )
         }
 
         do {
@@ -774,16 +783,38 @@ final class DictationEngine {
         let dictatedText = transcriptionMode == .realtime ? accumulatedText : transcript
         if !dictatedText.isEmpty { totalSecondsRecorded += elapsed }
 
+        // The context capture races the transcript — on a very short dictation the
+        // transcript can land first, leaving capturedProfile nil (which used to silently
+        // skip the Smart rewrite altogether). Give it a moment to finish before reading it.
+        if let task = contextCaptureTask {
+            // Whichever finishes first wins; the 2 s cap keeps a hung ScreenCaptureKit
+            // call from delaying the user's text. Cancelling the group only abandons the
+            // wait — the capture task itself is harmless if it lands late.
+            await withTaskGroup(of: Void.self) { group in
+                group.addTask { await task.value }
+                group.addTask { try? await Task.sleep(for: .seconds(2)) }
+                await group.next()
+                group.cancelAll()
+            }
+            if capturedProfile == nil {
+                AppLogger.log("[DictationEngine] ⚠️ context capture didn't finish in time — no app context for this session")
+            }
+        }
+        contextCaptureTask = nil
+
         // Smart diktovanie: rewrite the raw transcript using captured screen context
+        var rewritten: String?
         if isSmartMode, let raw = result, let profile = capturedProfile {
             isRewriting = true
             do {
-                result = try await SmartRewriteEngine.shared.rewrite(
+                let output = try await SmartRewriteEngine.shared.rewrite(
                     transcript: raw,
                     screenshot: capturedScreenshot,
                     profile: profile,
                     apiKey: openAIKey
                 )
+                result = output
+                rewritten = output
             } catch {
                 AppLogger.log("[DictationEngine] Smart rewrite failed, falling back to raw transcript: \(error)")
                 result = raw
@@ -791,9 +822,15 @@ final class DictationEngine {
             isRewriting = false
         }
 
+        let appName  = capturedAppName
+        let bundleID = capturedBundleID
+        let category = capturedProfile?.category ?? .generic
+
         isSmartMode        = false
         capturedScreenshot = nil
         capturedProfile    = nil
+        capturedAppName    = ""
+        capturedBundleID   = ""
 
         closeWebSocket()
         isTranscribing  = false
@@ -802,7 +839,9 @@ final class DictationEngine {
         if !dictatedText.isEmpty {
             let model = transcriptionMode == .realtime ? "gpt-realtime-whisper" : batchModel
             UsageStore.shared.logDictation(seconds: elapsed, text: dictatedText, model: model)
-            DictationHistoryStore.shared.log(dictatedText)
+            DictationHistoryStore.shared.log(dictatedText, appName: appName, bundleID: bundleID,
+                                             category: category, seconds: elapsed,
+                                             rewrittenText: rewritten)
         }
         return result
     }

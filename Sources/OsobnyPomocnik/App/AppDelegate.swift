@@ -7,6 +7,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         AppLogger.markSection("Aplikácia spustená (PID \(ProcessInfo.processInfo.processIdentifier))")
+        #if DEBUG
+        DictationQualityEngine.selfCheck()
+        #endif
         PermissionsChecker.shared.requestAllIfNeeded()
         _ = UpdaterController.shared // starts Sparkle's background update checks
         _ = RemoteConfig.shared      // starts feature-flag fetch
