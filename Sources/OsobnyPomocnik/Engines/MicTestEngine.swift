@@ -114,7 +114,9 @@ final class MicTestEngine {
         }
 
         for remaining in stride(from: durationSeconds, through: 1, by: -1) {
-            if Task.isCancelled { teardownCapture(); return }
+            // levelPollTask is unstructured, so cancelling this task doesn't reach it —
+            // bail out through the same cleanup rather than leaving a 20 Hz MainActor loop alive.
+            if Task.isCancelled { levelPollTask?.cancel(); liveLevel = 0; teardownCapture(); return }
             phase = .recording(secondsLeft: remaining)
             try? await Task.sleep(for: .seconds(1))
         }

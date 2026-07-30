@@ -180,7 +180,13 @@ struct MicEqualizerView: View {
         .animation(.easeInOut(duration: 0.25), value: tint == .blue)
         .onReceive(Self.ticker) { _ in
             guard isActive else {
-                heights = Array(repeating: 3, count: Self.barCount)
+                // ponytail: only write when it would actually change. The ticker is a
+                // static autoconnect() publisher that fires for the app's whole lifetime,
+                // and re-assigning an identical array still invalidates @State — which
+                // re-lays-out the entire enclosing view 28×/s forever. That cost showed up
+                // as ~14% idle CPU with Preferences open (this view sits in the mic-test card).
+                let atRest = heights.allSatisfy { $0 == 3 }
+                if !atRest { heights = Array(repeating: 3, count: Self.barCount) }
                 return
             }
             let base = CGFloat(level ?? DictationEngine.shared.audioLevel) * Self.maxBarHeight
@@ -236,6 +242,11 @@ struct DictationIndicatorView: View {
         }
         .buttonStyle(.plain)
             .onReceive(Self.levelTicker) { _ in
+                // ponytail: the pill's NSHostingView is built once and never torn down —
+                // hide() only orderOut's the window — so without this guard the noise-floor
+                // buffer keeps churning @State (and a layout pass with it) for the app's
+                // entire lifetime, while the pill isn't even on screen.
+                guard engine.isRecording else { return }
                 levelHistory[historyIndex] = engine.audioLevel
                 historyIndex = (historyIndex + 1) % levelHistory.count
             }
@@ -274,6 +285,13 @@ struct DictationIndicatorView: View {
             }
             .onChange(of: engine.isRecording) { _, recording in
                 AppLogger.log("[Indicator] isRecording → \(recording) | isMicReady=\(engine.isMicReady) btNeg=\(engine.btNegotiating) compact=\(engine.liveInsertEnabled && engine.liveInsertActive)")
+                // The ticker above stops updating between sessions, so clear the noise-floor
+                // window on start — otherwise the last session's levels linger and skew the
+                // voice-detection tint for the first couple of seconds.
+                if recording {
+                    levelHistory = Array(repeating: 0, count: levelHistory.count)
+                    historyIndex = 0
+                }
             }
             .onChange(of: engine.isMicReady) { _, ready in
                 AppLogger.log("[Indicator] isMicReady → \(ready) | btNeg=\(engine.btNegotiating) compact=\(engine.liveInsertEnabled && engine.liveInsertActive)")
