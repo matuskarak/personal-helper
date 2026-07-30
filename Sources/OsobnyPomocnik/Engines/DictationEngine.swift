@@ -733,7 +733,10 @@ final class DictationEngine {
         stopAudio()
         isTranscribing = true
         let firstInfo = chunkCounter.firstChunkInfo
-        lastRecordingCapturedAudio = chunkCounter.sent > 0
+        // ponytail: was `chunkCounter.sent > 0` — true for any chunk sent, even pure digital
+        // silence (wrong/muted input device). hasRealAudio checks actual peak amplitude, which
+        // is what "audio sa nezaznamenalo" is meant to detect — see its BT-silence comment.
+        lastRecordingCapturedAudio = chunkCounter.hasRealAudio
         AppLogger.log("[DictationEngine] Recording stopped. Chunks sent: \(chunkCounter.sent), failed: \(chunkCounter.failed), firstChunkBytes: \(firstInfo.bytes), firstChunkMaxAmplitude: \(firstInfo.maxAmplitude)/32767, secondsSinceLastChunk: \(chunkCounter.secondsSinceLastChunk.map { String(format: "%.1f", $0) } ?? "n/a")")
 
         let transcript: String
