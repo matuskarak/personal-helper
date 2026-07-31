@@ -1579,8 +1579,8 @@ struct PreferencesView: View {
 
     private static func modelNote(_ model: String) -> String {
         switch model {
-        case "gpt-4o-mini-transcribe": return " (odporúčaný)"
-        case "gpt-4o-transcribe":      return " (najpresnejší)"
+        case "gpt-transcribe":         return " (odporúčaný, najpresnejší)"
+        case "gpt-4o-mini-transcribe": return " (staršia generácia)"
         default:                       return ""
         }
     }

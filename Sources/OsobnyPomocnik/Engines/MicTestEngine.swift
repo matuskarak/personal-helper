@@ -277,7 +277,7 @@ final class MicTestEngine {
             body.append("Content-Disposition: form-data; name=\"\(name)\"\r\n\r\n".data(using: .utf8)!)
             body.append("\(value)\r\n".data(using: .utf8)!)
         }
-        addField("model", "gpt-4o-mini-transcribe")
+        addField("model", "gpt-transcribe")
         addField("language", "sk")
         addField("response_format", "json")
         body.append("--\(boundary)\r\n".data(using: .utf8)!)
