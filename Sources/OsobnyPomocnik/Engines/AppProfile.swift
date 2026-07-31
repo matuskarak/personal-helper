@@ -59,8 +59,13 @@ struct AppProfile: Codable, Identifiable, Equatable, Sendable {
     /// `keywords` as the API wants it: one term per element, no empties. `<` and `>` are
     /// stripped because OpenAI documents them as forbidden in a keyword, and a single bad
     /// entry would reject the whole session.update — see selfCheck() for the cases.
-    var transcriptionKeywords: [String] {
-        keywords
+    var transcriptionKeywords: [String] { Self.parseKeywords(keywords) }
+
+    /// Shared with DictationEngine.defaultKeywords, which is the same free-text-one-per-line
+    /// UI but not tied to a profile — both need identical parsing so a keyword typed in
+    /// either place behaves the same way.
+    static func parseKeywords(_ raw: String) -> [String] {
+        raw
             .split(whereSeparator: \.isNewline)
             .map { $0.replacingOccurrences(of: "<", with: "")
                      .replacingOccurrences(of: ">", with: "")

@@ -361,9 +361,15 @@ struct PreferencesView: View {
                     }
                     if dictation.realtimeModel == .live {
                         rowDivider
-                        Text("Nový model berie do úvahy kľúčové slová z App profilov nižšie — pomáha to pri názvoch funkcií, produktov a skratkách.")
-                            .font(.caption).foregroundStyle(.secondary)
-                            .padding(.horizontal, 16).padding(.vertical, 10)
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("Predvolené kľúčové slová").font(.body)
+                            Text("Platia pri každom diktovaní — jedno na riadok. Napríklad tvoje meno alebo časté pojmy z tvojej práce. Ku každému diktovaniu sa pridajú aj kľúčové slová z App profilu danej aplikácie nižšie.")
+                                .font(.caption).foregroundStyle(.secondary)
+                            TextField("", text: $dictation.defaultKeywords, axis: .vertical)
+                                .lineLimit(2...5)
+                                .textFieldStyle(.roundedBorder)
+                        }
+                        .padding(.horizontal, 16).padding(.vertical, 12)
                     }
                 }
                 rowDivider
