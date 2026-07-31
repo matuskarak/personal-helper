@@ -249,6 +249,15 @@ final class DictationEngine {
         didSet { UserDefaults.standard.set(realtimeModel.rawValue, forKey: "dictation.realtimeModel") }
     }
 
+    // Always-on keywords for gpt-live-transcribe (one per line), on top of whatever the
+    // matched App profile adds — e.g. the user's own name, recurring product/project terms.
+    // Same free-text format and parser as AppProfile.keywords (AppProfile.parseKeywords).
+    // API caps the combined array at 16384 entries (tested against the live endpoint) —
+    // no real user gets near that, so no truncation logic here.
+    var defaultKeywords: String {
+        didSet { UserDefaults.standard.set(defaultKeywords, forKey: "dictation.defaultKeywords") }
+    }
+
     var transcriptionMode: TranscriptionMode {
         didSet { UserDefaults.standard.set(transcriptionMode.rawValue, forKey: "dictation.mode") }
     }
@@ -393,6 +402,7 @@ final class DictationEngine {
         self.transcriptionDelay     = UserDefaults.standard.string(forKey: "whisper.delay") ?? "low"
         self.transcriptionMode      = TranscriptionMode(rawValue: UserDefaults.standard.string(forKey: "dictation.mode") ?? "") ?? .realtime
         self.realtimeModel          = RealtimeModel(rawValue: UserDefaults.standard.string(forKey: "dictation.realtimeModel") ?? "") ?? .live
+        self.defaultKeywords        = UserDefaults.standard.string(forKey: "dictation.defaultKeywords") ?? ""
         // New default for fresh installs only — existing users keep whatever they already
         // had saved, this doesn't migrate anyone off their current choice.
         self.batchModel             = UserDefaults.standard.string(forKey: "dictation.batchModel") ?? "gpt-transcribe"
@@ -1027,9 +1037,11 @@ final class DictationEngine {
         ]
         if let profile = sessionProfile {
             transcription["prompt"] = profile.category.transcriptionPrompt
-            let keywords = profile.transcriptionKeywords
-            if !keywords.isEmpty { transcription["keywords"] = keywords }
         }
+        // Default (always-on) keywords first, then the matched profile's — order shouldn't
+        // matter to the model, but keeping it deterministic makes app.log easier to read.
+        let keywords = AppProfile.parseKeywords(defaultKeywords) + (sessionProfile?.transcriptionKeywords ?? [])
+        if !keywords.isEmpty { transcription["keywords"] = keywords }
         return [
             "type": "session.update",
             "session": [
