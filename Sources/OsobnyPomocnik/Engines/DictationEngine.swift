@@ -236,19 +236,24 @@ final class DictationEngine {
         }
     }
 
-    // Microphone priority order — persistent device UIDs, most preferred first.
-    // At recording start we walk the list and use the first one that's currently
-    // connected; if none are, or the list is empty, we fall back to system default.
+    // Microphone priority order — persistent stableKeys (see AudioInputDevice.stableKey),
+    // most preferred first. At recording start we walk the list and use the first one
+    // that's currently connected; if none are, or the list is empty, fall back to system default.
     var micPriority: [String] {
         didSet { UserDefaults.standard.set(micPriority, forKey: "dictation.micPriority") }
     }
 
     /// First priority-list device that's currently connected, or nil (→ system default)
-    /// if the list is empty or none of its devices are present right now.
+    /// if the list is empty or none of its devices are present right now. Matches by
+    /// stableKey (so a USB mic in a different port than last time still resolves) but
+    /// returns the live `uid` of that instance, since callers need the actual connected
+    /// device to open, not its stable identity.
     func resolvedInputDeviceUID() -> String? {
         guard !micPriority.isEmpty else { return nil }
-        let available = Set(AudioDeviceManager.inputDevices().map(\.uid))
-        return micPriority.first(where: available.contains)
+        let byStableKey = Dictionary(AudioDeviceManager.inputDevices().map { ($0.stableKey, $0) },
+                                     uniquingKeysWith: { first, _ in first })
+        guard let key = micPriority.first(where: { byStableKey[$0] != nil }) else { return nil }
+        return byStableKey[key]?.uid
     }
 
     /// Same thresholds as MicTestEngine's verdict, minus the transcript-accuracy part —
@@ -329,12 +334,20 @@ final class DictationEngine {
         // Migrate the old single-device pick into a one-item priority list.
         // didSet doesn't fire for assignments inside this initializer, so persist explicitly.
         if let legacyUID = UserDefaults.standard.string(forKey: "dictation.inputDeviceUID") {
-            let migrated = [legacyUID]
+            let migrated = [AudioInputDevice.stableKey(forUID: legacyUID)]
             self.micPriority = migrated
             UserDefaults.standard.set(migrated, forKey: "dictation.micPriority")
             UserDefaults.standard.removeObject(forKey: "dictation.inputDeviceUID")
         } else {
-            self.micPriority = UserDefaults.standard.stringArray(forKey: "dictation.micPriority") ?? []
+            let stored = UserDefaults.standard.stringArray(forKey: "dictation.micPriority") ?? []
+            // One-time re-key + de-dupe: entries saved before stableKey existed are raw UIDs,
+            // which for a USB mic without a real serial include the port-dependent segment —
+            // the same physical device could appear several times, each a permanent "not
+            // connected" ghost from whichever port it isn't currently in.
+            var seen = Set<String>()
+            let migrated = stored.map(AudioInputDevice.stableKey(forUID:)).filter { seen.insert($0).inserted }
+            self.micPriority = migrated
+            if migrated != stored { UserDefaults.standard.set(migrated, forKey: "dictation.micPriority") }
         }
         self.openAIKey              = UserDefaults.standard.string(forKey: "openai.dictation.key") ?? ""
         self.transcriptionDelay     = UserDefaults.standard.string(forKey: "whisper.delay") ?? "low"

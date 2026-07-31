@@ -110,23 +110,26 @@ final class MenuBarController: NSObject, NSMenuDelegate {
 
         if !devices.isEmpty { sub.addItem(.separator()) }
 
-        let deviceByUID = Dictionary(uniqueKeysWithValues: devices.map { ($0.uid, $0) })
-        let prioritized = engine.micPriority.compactMap { deviceByUID[$0] }
-        let rest = devices.filter { !engine.micPriority.contains($0.uid) }
+        // Keyed by stableKey (see AudioInputDevice.stableKey), not raw uid — the priority
+        // list is stored as stableKeys so a USB mic still matches after a different port.
+        let deviceByKey = Dictionary(devices.map { ($0.stableKey, $0) }, uniquingKeysWith: { first, _ in first })
+        let resolvedKey = devices.first(where: { $0.uid == resolvedUID })?.stableKey
+        let prioritized = engine.micPriority.compactMap { deviceByKey[$0] }
+        let rest = devices.filter { !engine.micPriority.contains($0.stableKey) }
 
         for (index, dev) in prioritized.enumerated() {
             let item = NSMenuItem(title: "\(index + 1). \(dev.name)", action: #selector(selectMic(_:)), keyEquivalent: "")
             item.target = self
-            item.representedObject = dev.uid
-            item.state = dev.uid == resolvedUID ? .on : .off
+            item.representedObject = dev.stableKey
+            item.state = dev.stableKey == resolvedKey ? .on : .off
             sub.addItem(item)
         }
         if !prioritized.isEmpty && !rest.isEmpty { sub.addItem(.separator()) }
         for dev in rest {
             let item = NSMenuItem(title: dev.name, action: #selector(selectMic(_:)), keyEquivalent: "")
             item.target = self
-            item.representedObject = dev.uid
-            item.state = dev.uid == resolvedUID ? .on : .off
+            item.representedObject = dev.stableKey
+            item.state = dev.stableKey == resolvedKey ? .on : .off
             sub.addItem(item)
         }
         micSubmenuItem.submenu = sub
@@ -178,10 +181,10 @@ final class MenuBarController: NSObject, NSMenuDelegate {
 
     /// Makes the clicked device the top priority (moves it to the front, no duplicates).
     @objc private func selectMic(_ sender: NSMenuItem) {
-        guard let uid = sender.representedObject as? String else { return }
+        guard let key = sender.representedObject as? String else { return }
         var priority = DictationEngine.shared.micPriority
-        priority.removeAll { $0 == uid }
-        priority.insert(uid, at: 0)
+        priority.removeAll { $0 == key }
+        priority.insert(key, at: 0)
         DictationEngine.shared.micPriority = priority
     }
 
