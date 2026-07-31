@@ -351,6 +351,20 @@ struct PreferencesView: View {
                                 .tag(model)
                         }
                     }
+                } else {
+                    rowDivider
+                    // Both realtime models cost the same, so no price in the labels here.
+                    pickerRow(title: "Model", selection: $dictation.realtimeModel) {
+                        ForEach(DictationEngine.RealtimeModel.allCases, id: \.self) { model in
+                            Text(model.label).tag(model)
+                        }
+                    }
+                    if dictation.realtimeModel == .live {
+                        rowDivider
+                        Text("Nový model berie do úvahy kľúčové slová z App profilov nižšie — pomáha to pri názvoch funkcií, produktov a skratkách.")
+                            .font(.caption).foregroundStyle(.secondary)
+                            .padding(.horizontal, 16).padding(.vertical, 10)
+                    }
                 }
                 rowDivider
                 HStack {
@@ -502,6 +516,9 @@ struct PreferencesView: View {
                                         TextField("Instrukcie pre prepis", text: $profile.instructions,
                                                   axis: .vertical)
                                             .lineLimit(2...4)
+                                        TextField("Kľúčové slová — jedno na riadok (názvy funkcií, produktov, skratky)",
+                                                  text: $profile.keywords, axis: .vertical)
+                                            .lineLimit(2...5)
                                         HStack {
                                             Spacer()
                                             Button("Odstrániť", role: .destructive) {
@@ -1366,7 +1383,9 @@ struct PreferencesView: View {
 
     private func modelLabel(_ raw: String) -> String {
         switch raw {
+        case "gpt-live-transcribe":     "Live"
         case "gpt-realtime-whisper":    "Realtime"
+        case "gpt-transcribe":          "Transcribe"
         case "gpt-4o-mini-transcribe":  "4o-mini"
         case "gpt-4o-transcribe":       "4o"
         case "whisper-1":               "Whisper-1"

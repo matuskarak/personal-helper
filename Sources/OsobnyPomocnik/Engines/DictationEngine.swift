@@ -1,4 +1,5 @@
 @preconcurrency import AVFoundation
+import AppKit
 import CoreGraphics
 import Observation
 
@@ -205,12 +206,48 @@ final class DictationEngine {
     }
     var hasOpenAIKey: Bool { !openAIKey.isEmpty }
 
-    // Latency tradeoff for gpt-realtime-whisper: "minimal"|"low"|"medium"|"high"|"xhigh"
+    // Latency tradeoff, same five values on both realtime models:
+    // "minimal"|"low"|"medium"|"high"|"xhigh"
     var transcriptionDelay: String {
         didSet { UserDefaults.standard.set(transcriptionDelay, forKey: "whisper.delay") }
     }
 
     enum TranscriptionMode: String { case realtime, batch }
+
+    /// Which backend serves .realtime mode.
+    ///
+    /// `.live` is OpenAI's dedicated transcription session — no conversational model in the
+    /// loop, and it accepts `keywords`/`prompt`/`languages`, which is where the accuracy win
+    /// actually comes from (measured: the model swap alone changed almost nothing; adding
+    /// keywords turned "resolve input device uid" into "resolvedInputDeviceUID").
+    ///
+    /// `.legacy` is the original path — the conversational `gpt-realtime-2` with its voice
+    /// reply switched off. Kept selectable, not deleted, so a regression in the new session
+    /// is one dropdown away from a fix instead of a new build.
+    enum RealtimeModel: String, CaseIterable, Sendable {
+        case live   = "gpt-live-transcribe"
+        case legacy = "gpt-realtime-whisper"
+
+        var socketURL: URL {
+            switch self {
+            // The transcription session is selected by `intent`, not by `model` — the model
+            // goes in session.update instead.
+            case .live:   URL(string: "wss://api.openai.com/v1/realtime?intent=transcription")!
+            case .legacy: URL(string: "wss://api.openai.com/v1/realtime?model=gpt-realtime-2")!
+            }
+        }
+
+        var label: String {
+            switch self {
+            case .live:   "gpt-live-transcribe (nový, presnejší)"
+            case .legacy: "gpt-realtime-whisper (pôvodný)"
+            }
+        }
+    }
+
+    var realtimeModel: RealtimeModel {
+        didSet { UserDefaults.standard.set(realtimeModel.rawValue, forKey: "dictation.realtimeModel") }
+    }
 
     var transcriptionMode: TranscriptionMode {
         didSet { UserDefaults.standard.set(transcriptionMode.rawValue, forKey: "dictation.mode") }
@@ -314,6 +351,13 @@ final class DictationEngine {
     private var capturedBundleID:   String = ""
     private var contextCaptureTask: Task<Void, Never>?
 
+    // Profile resolved synchronously at recording start, purely so its keywords can go into
+    // the very FIRST session.update. capturedProfile above can't serve here: it's filled by
+    // contextCaptureTask, which awaits ScreenCaptureKit and lands long after the socket opens.
+    // NSWorkspace.frontmostApplication is a plain synchronous read, so bundleID alone is free —
+    // the async capture then only refines the match by window title, for Smart rewrite.
+    private var sessionProfile: AppProfile?
+
     // Bumped on every startRecording(). Stale WS callbacks from an abandoned
     // session (e.g. user pressed the shortcut rapidly start→stop→start) check
     // this before mutating state, so they can't corrupt a newer in-flight session.
@@ -348,6 +392,7 @@ final class DictationEngine {
         self.openAIKey              = UserDefaults.standard.string(forKey: "openai.dictation.key") ?? ""
         self.transcriptionDelay     = UserDefaults.standard.string(forKey: "whisper.delay") ?? "low"
         self.transcriptionMode      = TranscriptionMode(rawValue: UserDefaults.standard.string(forKey: "dictation.mode") ?? "") ?? .realtime
+        self.realtimeModel          = RealtimeModel(rawValue: UserDefaults.standard.string(forKey: "dictation.realtimeModel") ?? "") ?? .live
         // New default for fresh installs only — existing users keep whatever they already
         // had saved, this doesn't migrate anyone off their current choice.
         self.batchModel             = UserDefaults.standard.string(forKey: "dictation.batchModel") ?? "gpt-transcribe"
@@ -382,17 +427,19 @@ final class DictationEngine {
             else { return "✅ Kľúč je platný (zoznam modelov sa nepodarilo prečítať)." }
 
             let ids = Set(models.compactMap { $0["id"] as? String })
-            let hasRealtime2 = ids.contains("gpt-realtime-2")
-            let hasWhisper   = ids.contains("gpt-realtime-whisper")
-            AppLogger.log("[DictationEngine] API key OK. gpt-realtime-2=\(hasRealtime2), gpt-realtime-whisper=\(hasWhisper)")
+            // Only the models the current settings actually use — reporting a missing
+            // gpt-realtime-2 to someone on gpt-live-transcribe is just noise.
+            let needed = transcriptionMode == .realtime
+                ? (realtimeModel == .live ? [RealtimeModel.live.rawValue]
+                                          : ["gpt-realtime-2", RealtimeModel.legacy.rawValue])
+                : [batchModel]
+            let missing = needed.filter { !ids.contains($0) }
+            AppLogger.log("[DictationEngine] API key OK. Required: \(needed.joined(separator: ", ")) — missing: \(missing.isEmpty ? "none" : missing.joined(separator: ", "))")
 
-            if hasRealtime2 && hasWhisper {
-                return "✅ API kľúč funguje a má prístup k potrebným modelom."
+            guard missing.isEmpty else {
+                return "⚠️ Kľúč je platný, ale účet nemá prístup k: \(missing.joined(separator: ", "))"
             }
-            var missing: [String] = []
-            if !hasRealtime2 { missing.append("gpt-realtime-2") }
-            if !hasWhisper   { missing.append("gpt-realtime-whisper") }
-            return "⚠️ Kľúč je platný, ale účet nemá prístup k: \(missing.joined(separator: ", "))"
+            return "✅ API kľúč funguje a má prístup k potrebným modelom."
         } catch {
             return "❌ Sieťová chyba: \(error.localizedDescription)"
         }
@@ -508,6 +555,15 @@ final class DictationEngine {
         // say "you dictate differently into ChatGPT than into Slack". Screenshot only in
         // Smart mode — capturing pixels is the slow part, app identity is nearly free.
         // Awaited (with a timeout) in stopAndTranscribe, so short dictations don't lose it.
+        // Resolved here, synchronously, because openRealtimeSocket() below needs the profile's
+        // keywords in the first session.update — see the sessionProfile declaration.
+        sessionProfile = AppProfileStore.shared.matchingProfile(
+            bundleID: NSWorkspace.shared.frontmostApplication?.bundleIdentifier, windowTitle: nil
+        )
+        if realtimeModel == .live, transcriptionMode == .realtime {
+            AppLogger.log("[DictationEngine] Session profile: \(sessionProfile?.displayName ?? "—"), keywords: \(sessionProfile?.transcriptionKeywords.count ?? 0)")
+        }
+
         contextCaptureTask = Task { [weak self] in
             let ctx = await SmartContextCapture.shared.captureFrontmostContext(captureScreenshot: smart)
             guard let self else { return }
@@ -532,23 +588,7 @@ final class DictationEngine {
                 // separately and we don't fight Ark's HAL lock here.
                 switch transcriptionMode {
                 case .realtime:
-                    let url = URL(string: "wss://api.openai.com/v1/realtime?model=gpt-realtime-2")!
-                    AppLogger.log("[DictationEngine] Connecting to \(url)")
-                    var req = URLRequest(url: url)
-                    req.setValue("Bearer \(openAIKey)", forHTTPHeaderField: "Authorization")
-                    let session = URLSession(configuration: .default)
-                    let task    = session.webSocketTask(with: req)
-                    wsURLSession = session
-                    wsTask       = task
-                    sendQueue.configure(task: task)
-                    sendQueue.onTaskAppearsDead = { [weak self] deadTask in
-                        Task { @MainActor in
-                            self?.attemptReconnect(deadTask: deadTask, sessionID: mySessionID, reason: "send failures exhausted")
-                        }
-                    }
-                    task.resume()
-                    sendSessionConfig(delay: transcriptionDelay)
-                    Task { await self.receiveMessages(task: task, sessionID: mySessionID) }
+                    openRealtimeSocket(sessionID: mySessionID)
                     let tapQueue = sendQueue
                     capture.onBuffer = { buf in
                         sendChunkOverWebSocket(
@@ -582,23 +622,7 @@ final class DictationEngine {
 
                 switch transcriptionMode {
                 case .realtime:
-                    let url = URL(string: "wss://api.openai.com/v1/realtime?model=gpt-realtime-2")!
-                    AppLogger.log("[DictationEngine] Connecting to \(url)")
-                    var req = URLRequest(url: url)
-                    req.setValue("Bearer \(openAIKey)", forHTTPHeaderField: "Authorization")
-                    let session = URLSession(configuration: .default)
-                    let task    = session.webSocketTask(with: req)
-                    wsURLSession = session
-                    wsTask       = task
-                    sendQueue.configure(task: task)
-                    sendQueue.onTaskAppearsDead = { [weak self] deadTask in
-                        Task { @MainActor in
-                            self?.attemptReconnect(deadTask: deadTask, sessionID: mySessionID, reason: "send failures exhausted")
-                        }
-                    }
-                    task.resume()
-                    sendSessionConfig(delay: transcriptionDelay)
-                    Task { await self.receiveMessages(task: task, sessionID: mySessionID) }
+                    openRealtimeSocket(sessionID: mySessionID)
                     AppLogger.log("[DictationEngine] WS task started, audio tap installing...")
                     let tapQueue = sendQueue
                     inputNode.installTap(onBus: 0, bufferSize: 2_400, format: inputFormat) { buf, _ in
@@ -867,6 +891,7 @@ final class DictationEngine {
         isSmartMode        = false
         capturedScreenshot = nil
         capturedProfile    = nil
+        sessionProfile     = nil
         capturedAppName    = ""
         capturedBundleID   = ""
 
@@ -875,7 +900,7 @@ final class DictationEngine {
         liveText        = ""
         accumulatedText = ""
         if !dictatedText.isEmpty {
-            let model = transcriptionMode == .realtime ? "gpt-realtime-whisper" : batchModel
+            let model = transcriptionMode == .realtime ? realtimeModel.rawValue : batchModel
             UsageStore.shared.logDictation(seconds: elapsed, text: dictatedText, model: model)
             DictationHistoryStore.shared.log(dictatedText, appName: appName, bundleID: bundleID,
                                              category: category, seconds: elapsed,
@@ -973,11 +998,58 @@ final class DictationEngine {
     // MARK: - WebSocket
 
     private func sendSessionConfig(delay: String) {
-        // gpt-realtime-2 session (conversation model used as transcription-only):
-        // - output_modalities: text only (no audio response)
-        // - turn_detection with create_response: false → VAD fires but no AI reply
-        // - input transcription via gpt-realtime-whisper
-        let payload: [String: Any] = [
+        let payload = realtimeModel == .live
+            ? liveTranscribeSessionPayload(delay: delay)
+            : legacyRealtimeSessionPayload(delay: delay)
+        guard let data = try? JSONSerialization.data(withJSONObject: payload),
+              let str  = String(data: data, encoding: .utf8) else { return }
+        AppLogger.log("[DictationEngine] → session.update: \(str.prefix(400))")
+        sendQueue.enqueue(str)
+    }
+
+    /// Dedicated transcription session (`intent=transcription`). No conversational model in
+    /// the loop, so none of the output_modalities/create_response contortions below.
+    ///
+    /// `turn_detection` MUST be null: the API rejects server_vad for this model outright
+    /// ("Turn detection is not supported for this transcription model") and a rejected
+    /// session.update means the transcription config never applies — zero transcript, no
+    /// obvious cause. Consequence: no mid-recording auto-commit, so the single `completed`
+    /// arrives on our own commit in stopAndTranscribe(). Verified over a 3.3-minute stream:
+    /// connection held, deltas stayed append-only (never revised), so live-insert is safe.
+    private func liveTranscribeSessionPayload(delay: String) -> [String: Any] {
+        var transcription: [String: Any] = [
+            "model": RealtimeModel.live.rawValue,
+            // Plural on purpose — this model takes `languages`, not `language`, and sending
+            // both is an error. "en" is here because Slovak dictation routinely carries
+            // English technical terms.
+            "languages": ["sk", "en"],
+            "delay": delay
+        ]
+        if let profile = sessionProfile {
+            transcription["prompt"] = profile.category.transcriptionPrompt
+            let keywords = profile.transcriptionKeywords
+            if !keywords.isEmpty { transcription["keywords"] = keywords }
+        }
+        return [
+            "type": "session.update",
+            "session": [
+                "type": "transcription",
+                "audio": [
+                    "input": [
+                        "format": ["type": "audio/pcm", "rate": 24000],
+                        "turn_detection": NSNull(),
+                        "transcription": transcription
+                    ] as [String: Any]
+                ] as [String: Any]
+            ] as [String: Any]
+        ]
+    }
+
+    /// Original path: the conversational gpt-realtime-2 used as transcription-only —
+    /// text-only output, VAD that fires without generating a reply, transcription delegated
+    /// to gpt-realtime-whisper. Kept as the fallback behind the model picker.
+    private func legacyRealtimeSessionPayload(delay: String) -> [String: Any] {
+        [
             "type": "session.update",
             "session": [
                 "type": "realtime",
@@ -996,7 +1068,7 @@ final class DictationEngine {
                             "create_response":     false
                         ],
                         "transcription": [
-                            "model":    "gpt-realtime-whisper",
+                            "model":    RealtimeModel.legacy.rawValue,
                             "language": "sk",
                             "delay":    delay
                         ]
@@ -1004,10 +1076,6 @@ final class DictationEngine {
                 ] as [String: Any]
             ] as [String: Any]
         ]
-        guard let data = try? JSONSerialization.data(withJSONObject: payload),
-              let str  = String(data: data, encoding: .utf8) else { return }
-        AppLogger.log("[DictationEngine] → session.update: \(str.prefix(250))")
-        sendQueue.enqueue(str)
     }
 
     private func receiveMessages(task: URLSessionWebSocketTask, sessionID mySessionID: Int) async {
@@ -1069,22 +1137,33 @@ final class DictationEngine {
         reconnectAttempts += 1
         AppLogger.log("[DictationEngine] 🔄 Reconnecting WS (\(reconnectAttempts)/\(maxReconnectAttempts)) — \(reason)")
 
-        let url = URL(string: "wss://api.openai.com/v1/realtime?model=gpt-realtime-2")!
+        openRealtimeSocket(sessionID: mySessionID)
+    }
+
+    /// Opens the realtime WebSocket for the currently selected model, wires the send queue
+    /// and the receive loop, and sends the session config.
+    ///
+    /// ponytail: this was copy-pasted three times — DeviceCapture path, AVAudioEngine path,
+    /// and reconnect — so adding a second realtime model would have meant three near-identical
+    /// edits. One function instead; the model only shows up in `socketURL` and `sendSessionConfig`.
+    private func openRealtimeSocket(sessionID mySessionID: Int) {
+        let url = realtimeModel.socketURL
+        AppLogger.log("[DictationEngine] Connecting to \(url) (\(realtimeModel.rawValue))")
         var req = URLRequest(url: url)
         req.setValue("Bearer \(openAIKey)", forHTTPHeaderField: "Authorization")
         let session = URLSession(configuration: .default)
-        let newTask = session.webSocketTask(with: req)
+        let task    = session.webSocketTask(with: req)
         wsURLSession = session
-        wsTask       = newTask
-        sendQueue.configure(task: newTask)
+        wsTask       = task
+        sendQueue.configure(task: task)
         sendQueue.onTaskAppearsDead = { [weak self] deadTask in
             Task { @MainActor in
                 self?.attemptReconnect(deadTask: deadTask, sessionID: mySessionID, reason: "send failures exhausted")
             }
         }
-        newTask.resume()
+        task.resume()
         sendSessionConfig(delay: transcriptionDelay)
-        Task { await self.receiveMessages(task: newTask, sessionID: mySessionID) }
+        Task { await self.receiveMessages(task: task, sessionID: mySessionID) }
     }
 
     private func handleEvent(_ text: String, sessionID mySessionID: Int) {

@@ -19,6 +19,22 @@ enum AppCategory: String, Codable, CaseIterable, Sendable {
         case .generic:   return "Všeobecné"
         }
     }
+
+    /// `prompt` for gpt-live-transcribe — free-form context about the *situation* being
+    /// recorded. Deliberately not `AppProfile.instructions`: that's the Smart-rewrite task
+    /// ("vráť LEN opravený text"), and OpenAI's guide is explicit that this field must
+    /// describe the setting, not restate the transcription task.
+    /// ponytail: derived from the category we already store — no extra field, no extra UI.
+    var transcriptionPrompt: String {
+        switch self {
+        case .aiChat:    return "Používateľ diktuje prompt pre AI nástroj."
+        case .messaging: return "Používateľ diktuje krátku správu do chatu."
+        case .email:     return "Používateľ diktuje e-mail."
+        case .document:  return "Používateľ diktuje text do dokumentu."
+        case .code:      return "Používateľ diktuje poznámky k programovaniu; môžu obsahovať názvy funkcií, premenných a súborov."
+        case .generic:   return "Používateľ diktuje text do aplikácie na Macu."
+        }
+    }
 }
 
 /// Maps a frontmost app (by bundle ID, optionally narrowed by window-title keyword
@@ -30,11 +46,26 @@ struct AppProfile: Codable, Identifiable, Equatable, Sendable {
     var titleKeyword: String = "" // optional case-insensitive substring match on window title
     var instructions: String
     var category: AppCategory = .generic
+    var keywords: String = ""   // one term per line, fed to gpt-live-transcribe as `keywords`
 
     init(id: UUID = UUID(), displayName: String, bundleID: String,
-         titleKeyword: String = "", instructions: String, category: AppCategory = .generic) {
+         titleKeyword: String = "", instructions: String, category: AppCategory = .generic,
+         keywords: String = "") {
         self.id = id; self.displayName = displayName; self.bundleID = bundleID
-        self.titleKeyword = titleKeyword; self.instructions = instructions; self.category = category
+        self.titleKeyword = titleKeyword; self.instructions = instructions
+        self.category = category; self.keywords = keywords
+    }
+
+    /// `keywords` as the API wants it: one term per element, no empties. `<` and `>` are
+    /// stripped because OpenAI documents them as forbidden in a keyword, and a single bad
+    /// entry would reject the whole session.update — see selfCheck() for the cases.
+    var transcriptionKeywords: [String] {
+        keywords
+            .split(whereSeparator: \.isNewline)
+            .map { $0.replacingOccurrences(of: "<", with: "")
+                     .replacingOccurrences(of: ">", with: "")
+                     .trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
     }
 
     // ponytail: hand-written decode purely so added fields don't nuke saved profiles.
@@ -49,7 +80,27 @@ struct AppProfile: Codable, Identifiable, Equatable, Sendable {
         titleKeyword = try c.decodeIfPresent(String.self, forKey: .titleKeyword) ?? ""
         instructions = try c.decode(String.self, forKey: .instructions)
         category     = try c.decodeIfPresent(AppCategory.self, forKey: .category) ?? .generic
+        keywords     = try c.decodeIfPresent(String.self, forKey: .keywords) ?? ""
     }
+
+    #if DEBUG
+    /// Cheap assert-based check for transcriptionKeywords — the one bit of real parsing here.
+    /// ponytail: no test target for a single parser; called once from AppDelegate at launch.
+    static func selfCheck() {
+        func keys(_ s: String) -> [String] {
+            AppProfile(displayName: "t", bundleID: "", instructions: "", keywords: s).transcriptionKeywords
+        }
+        assert(keys("") == [])
+        assert(keys("\n\n  \n") == [], "blank lines must not become empty keywords")
+        assert(keys("Xcode") == ["Xcode"])
+        assert(keys("  Xcode  \n SwiftUI ") == ["Xcode", "SwiftUI"], "entries must be trimmed")
+        assert(keys("<Xcode>") == ["Xcode"], "angle brackets are forbidden by the API")
+        assert(keys("resolvedInputDeviceUID\nOsobný pomocník") == ["resolvedInputDeviceUID", "Osobný pomocník"],
+               "camelCase and multi-word terms must survive intact")
+        assert(keys("a\r\nb") == ["a", "b"], "CRLF must split like LF")
+        AppLogger.log("[AppProfile] selfCheck OK")
+    }
+    #endif
 }
 
 // MARK: - Store

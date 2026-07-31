@@ -9,6 +9,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         AppLogger.markSection("Aplikácia spustená (PID \(ProcessInfo.processInfo.processIdentifier))")
         #if DEBUG
         DictationQualityEngine.selfCheck()
+        AppProfile.selfCheck()
         #endif
         PermissionsChecker.shared.requestAllIfNeeded()
         _ = UpdaterController.shared // starts Sparkle's background update checks
