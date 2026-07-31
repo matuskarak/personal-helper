@@ -8,6 +8,32 @@ struct AudioInputDevice: Identifiable, Hashable, Sendable {
     let name: String
     let transportType: UInt32 // also decides whether to expect a link-warmup delay (see below)
 
+    /// Identity used for persisting priority order and de-duplicating a device across
+    /// reconnections — unlike `uid`, this ignores anything that changes when the *same*
+    /// physical device is plugged into a different port.
+    ///
+    /// Many USB audio devices have no real hardware serial number, so CoreAudio's UID for
+    /// them embeds the USB topology instead: `AppleUSBAudioEngine:<Manufacturer>:<Product>:
+    /// <serial-or-location>:<streamIndex>`. Reconnecting the exact same mic to a different
+    /// port then produces a different `uid`, which showed up as the same device
+    /// accumulating multiple permanently-"Nedostupné" ghost entries in the priority list.
+    /// Bluetooth (MAC-based) and built-in devices don't have this problem — this only
+    /// normalizes the one driver prefix known to cause it.
+    ///
+    /// Trade-off: two genuinely distinct units of the identical mic model would collapse
+    /// into one entry. Accepted deliberately — far rarer than the port-hopping case, and
+    /// even then falling back to whichever unit is connected beats an ever-growing ghost list.
+    var stableKey: String { Self.stableKey(forUID: uid) }
+
+    /// Pure string form of `stableKey`, usable on a persisted UID string with no live
+    /// device to query — needed to migrate/de-duplicate an existing priority list.
+    static func stableKey(forUID uid: String) -> String {
+        guard uid.hasPrefix("AppleUSBAudioEngine:") else { return uid }
+        let parts = uid.split(separator: ":", omittingEmptySubsequences: false).map(String.init)
+        guard parts.count >= 3 else { return uid }
+        return parts[0...2].joined(separator: ":")
+    }
+
     /// Bluetooth and Continuity mics negotiate the audio link before real samples flow,
     /// delivering zeroed buffers meanwhile — so for those, "chunks are arriving" isn't
     /// enough to call the mic live. Wired/built-in/virtual devices have no such handshake:

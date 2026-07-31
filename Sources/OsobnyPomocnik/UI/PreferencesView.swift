@@ -718,15 +718,19 @@ struct PreferencesView: View {
             Text("Zoraď mikrofóny podľa dôležitosti — pri štarte diktovania appka použije prvý pripojený z tohto poradia. Ak nie je pripojený žiadny, použije systémový mikrofón.")
                 .font(.caption).foregroundStyle(.secondary)
 
-            let deviceByUID   = Dictionary(uniqueKeysWithValues: inputDevices.map { ($0.uid, $0) })
-            let resolvedUID   = dictation.resolvedInputDeviceUID()
-            let unprioritized = inputDevices.filter { !dictation.micPriority.contains($0.uid) }
+            // Keyed by stableKey, not raw uid — the priority list is stored as stableKeys
+            // (see AudioInputDevice.stableKey) so the same USB mic still matches after
+            // being moved to a different port. uniquingKeysWith just keeps the first when
+            // two simultaneously-connected devices happen to collapse to one key.
+            let deviceByKey   = Dictionary(inputDevices.map { ($0.stableKey, $0) }, uniquingKeysWith: { first, _ in first })
+            let resolvedKey   = inputDevices.first(where: { $0.uid == dictation.resolvedInputDeviceUID() })?.stableKey
+            let unprioritized = inputDevices.filter { !dictation.micPriority.contains($0.stableKey) }
 
             if !dictation.micPriority.isEmpty {
                 card {
                     List {
-                        ForEach(dictation.micPriority, id: \.self) { uid in
-                            let device = deviceByUID[uid]
+                        ForEach(dictation.micPriority, id: \.self) { key in
+                            let device = deviceByKey[key]
                             let connected = device != nil
                             HStack(spacing: 14) {
                                 Image(systemName: "line.3.horizontal")
@@ -734,9 +738,9 @@ struct PreferencesView: View {
                                 Image(systemName: connected ? deviceIcon(device!.name) : "mic.slash")
                                     .font(.system(size: 13)).foregroundStyle(.secondary)
                                     .frame(width: 18)
-                                Text(device?.name ?? savedDeviceName(uid))
-                                    .font(uid == resolvedUID ? .body.bold() : .body)
-                                if uid == resolvedUID {
+                                Text(device?.name ?? savedDeviceName(key))
+                                    .font(key == resolvedKey ? .body.bold() : .body)
+                                if key == resolvedKey {
                                     Text("aktívny").font(.caption2).foregroundStyle(accent)
                                         .padding(.horizontal, 6).padding(.vertical, 2)
                                         .background(Capsule().fill(accent.opacity(0.12)))
@@ -749,7 +753,7 @@ struct PreferencesView: View {
                                         .font(.caption).foregroundStyle(connected ? greenDot : Color.secondary)
                                 }
                                 Button {
-                                    dictation.micPriority.removeAll { $0 == uid }
+                                    dictation.micPriority.removeAll { $0 == key }
                                 } label: {
                                     Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
                                 }
@@ -779,7 +783,7 @@ struct PreferencesView: View {
                         ForEach(unprioritized) { device in
                             Divider().padding(.leading, 50)
                             Button {
-                                dictation.micPriority.append(device.uid)
+                                dictation.micPriority.append(device.stableKey)
                             } label: {
                                 HStack(spacing: 14) {
                                     Image(systemName: "plus.circle")
@@ -934,9 +938,12 @@ struct PreferencesView: View {
         return "mic.circle"
     }
 
-    private func savedDeviceName(_ uid: String) -> String {
-        let parts = uid.split(separator: ":").map(String.init)
-        return parts.count >= 3 ? parts[2] : uid
+    /// Best-effort display name for a disconnected device, parsed straight out of its
+    /// stableKey — still `AppleUSBAudioEngine:<Manufacturer>:<Product>` for USB, so the
+    /// product name is at the same index whether or not the device is currently plugged in.
+    private func savedDeviceName(_ key: String) -> String {
+        let parts = key.split(separator: ":").map(String.init)
+        return parts.count >= 3 ? parts[2] : key
     }
 
     // MARK: - História
