@@ -46,6 +46,7 @@ enum Pricing {
         guard !realtime else { return 0.017 }
         switch batchModel {
         case "gpt-4o-mini-transcribe": return 0.003
+        case "gpt-transcribe":         return 0.0045
         default:                       return 0.006 // gpt-4o-transcribe, whisper-1
         }
     }

@@ -220,21 +220,17 @@ final class DictationEngine {
     var batchModel: String {
         didSet { UserDefaults.standard.set(batchModel, forKey: "dictation.batchModel") }
     }
-    static let batchModels = ["gpt-4o-mini-transcribe", "gpt-4o-transcribe", "whisper-1"]
+    // gpt-transcribe listed first: OpenAI's newer, more accurate replacement for the
+    // gpt-4o-*/whisper-1 family (WER 15.21% -> 8.98% on OpenAI's own benchmark) — see
+    // Pricing.swift for the rate and the "not truly live" caveat on all these numbers.
+    static let batchModels = ["gpt-transcribe", "gpt-4o-mini-transcribe", "gpt-4o-transcribe", "whisper-1"]
 
     /// $/minute for whichever mode+model is currently selected — used for the usage cost estimate.
     /// ponytail: applies the CURRENT rate to the whole accumulated counter, not a historical
     /// mix of rates if the user switched modes mid-way. Fine until someone needs split billing.
-    var costPerMinute: Double {
-        switch transcriptionMode {
-        case .realtime: return 0.017
-        case .batch:
-            switch batchModel {
-            case "gpt-4o-mini-transcribe": return 0.003
-            default:                       return 0.006 // gpt-4o-transcribe, whisper-1
-            }
-        }
-    }
+    /// Delegates to Pricing.usdPerMinute so the per-model rate has one source of truth instead
+    /// of drifting between here and the model picker in Nastavenia.
+    var costPerMinute: Double { Pricing.usdPerMinute(realtime: transcriptionMode == .realtime, batchModel: batchModel) }
 
     // Microphone priority order — persistent stableKeys (see AudioInputDevice.stableKey),
     // most preferred first. At recording start we walk the list and use the first one
@@ -352,7 +348,9 @@ final class DictationEngine {
         self.openAIKey              = UserDefaults.standard.string(forKey: "openai.dictation.key") ?? ""
         self.transcriptionDelay     = UserDefaults.standard.string(forKey: "whisper.delay") ?? "low"
         self.transcriptionMode      = TranscriptionMode(rawValue: UserDefaults.standard.string(forKey: "dictation.mode") ?? "") ?? .realtime
-        self.batchModel             = UserDefaults.standard.string(forKey: "dictation.batchModel") ?? "gpt-4o-mini-transcribe"
+        // New default for fresh installs only — existing users keep whatever they already
+        // had saved, this doesn't migrate anyone off their current choice.
+        self.batchModel             = UserDefaults.standard.string(forKey: "dictation.batchModel") ?? "gpt-transcribe"
         self.liveInsertEnabled      = UserDefaults.standard.object(forKey: "dictation.liveInsert") as? Bool ?? true
         self.enterAutoStop          = UserDefaults.standard.bool(forKey: "dictation.enterAutoStop")
         self.smartAlwaysOn          = UserDefaults.standard.bool(forKey: "dictation.smartAlwaysOn")
