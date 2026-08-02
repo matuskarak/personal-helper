@@ -61,8 +61,13 @@ final class ControlPanelWindowController: NSWindowController, NSWindowDelegate {
 
     func show() {
         restoreOrDefaultPosition()
-        window?.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
+        // No NSApp.activate here — this is a menu-bar accessory app, so activating the app
+        // brings ALL of its windows forward (e.g. an open Preferences window jumps above
+        // whatever other app the user is actually looking at), not just this panel. .floating
+        // level already keeps the panel visible over other apps, and FirstMouseHostingView
+        // (see init) already makes pause/stop clickable without the window being key/active —
+        // same non-activating pattern DictationIndicatorController already uses successfully.
+        window?.orderFront(nil)
     }
 
     func hide() { window?.orderOut(nil) }
