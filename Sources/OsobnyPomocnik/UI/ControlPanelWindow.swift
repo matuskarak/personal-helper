@@ -32,12 +32,22 @@ final class ControlPanelWindowController: NSWindowController, NSWindowDelegate {
     private static let margin: CGFloat = 20
 
     private init() {
-        let w = NSWindow(
+        // NSPanel + .nonactivatingPanel, not a plain NSWindow — this is the actual fix, not
+        // FirstMouseHostingView. On macOS, clicking ANY plain NSWindow of a background app
+        // activates that app as a side effect of the window becoming key, independent of
+        // acceptsFirstMouse (which only avoids the window server "swallowing" the very first
+        // click). .nonactivatingPanel is the one style bit that's documented to suppress that:
+        // "the panel does not activate the owning application when brought forward." It must
+        // be part of the styleMask passed to init — changing styleMask afterward is a known
+        // AppKit/WindowServer desync bug that silently breaks this again. Mirrors
+        // DictationIndicatorController's NSPanel, which never had this problem.
+        let w = NSPanel(
             contentRect: NSRect(x: 0, y: 0, width: 56, height: 182),
-            styleMask: [.borderless],
+            styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
         )
+        w.isFloatingPanel = true
         w.backgroundColor = .clear
         w.isOpaque = false
         w.level = .floating
@@ -46,9 +56,6 @@ final class ControlPanelWindowController: NSWindowController, NSWindowDelegate {
         w.isMovableByWindowBackground = true
         w.hasShadow = false
         w.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-        // Plain NSWindow (not a nonactivating panel), so without first-mouse the pause/stop
-        // controls needed a throwaway click each time focus was elsewhere — which is most of
-        // the time, since the user is reading in another app.
         w.contentView = FirstMouseHostingView(rootView: ControlPanelView())
         super.init(window: w)
         w.delegate = self
@@ -61,13 +68,13 @@ final class ControlPanelWindowController: NSWindowController, NSWindowDelegate {
 
     func show() {
         restoreOrDefaultPosition()
-        // No NSApp.activate here — this is a menu-bar accessory app, so activating the app
-        // brings ALL of its windows forward (e.g. an open Preferences window jumps above
-        // whatever other app the user is actually looking at), not just this panel. .floating
-        // level already keeps the panel visible over other apps, and FirstMouseHostingView
-        // (see init) already makes pause/stop clickable without the window being key/active —
-        // same non-activating pattern DictationIndicatorController already uses successfully.
-        window?.orderFront(nil)
+        // makeKeyAndOrderFront, not just orderFront: the panel's Space/Esc keyboard shortcuts
+        // (pause/stop) need it to be key to receive key events. For a NORMAL window, becoming
+        // key requires — and triggers — app activation; a .nonactivatingPanel is specifically
+        // exempted from that, so this brings only the panel forward and lets it receive
+        // keystrokes, without activating the app or moving any other of the app's windows
+        // (e.g. an open Preferences window stays wherever it was, behind other apps).
+        window?.makeKeyAndOrderFront(nil)
     }
 
     func hide() { window?.orderOut(nil) }
