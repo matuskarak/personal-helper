@@ -270,6 +270,17 @@ struct PreferencesView: View {
             .strokeBorder(Color(red: 0.85, green: 0.70, blue: 0.35).opacity(0.35), lineWidth: 0.5))
     }
 
+    /// Small "?" next to a label — hover shows `text` via the system tooltip (native
+    /// NSView tooltip under the hood, no custom popover to build or position).
+    /// ponytail: only wired up where this session touched (keywords/prompt); rolling it out
+    /// to every other caption in this file is a separate, larger pass — noted in Notion.
+    private func infoIcon(_ text: String) -> some View {
+        Image(systemName: "questionmark.circle")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .help(text)
+    }
+
     private func toggleRow(title: String, subtitle: String? = nil, isOn: Binding<Bool>) -> some View {
         HStack(alignment: subtitle != nil ? .top : .center, spacing: 16) {
             VStack(alignment: .leading, spacing: 2) {
@@ -287,11 +298,13 @@ struct PreferencesView: View {
 
     private func pickerRow<T: Hashable, L: View>(
         title: String,
+        info: String? = nil,
         selection: Binding<T>,
         @ViewBuilder content: () -> L
     ) -> some View {
         HStack {
             Text(title).font(.body)
+            if let info { infoIcon(info) }
             Spacer()
             Picker("", selection: selection) { content() }
                 .labelsHidden()
@@ -354,20 +367,27 @@ struct PreferencesView: View {
                 } else {
                     rowDivider
                     // Both realtime models cost the same, so no price in the labels here.
-                    pickerRow(title: "Model", selection: $dictation.realtimeModel) {
+                    pickerRow(
+                        title: "Model",
+                        info: "gpt-live-transcribe je vyhradený prepisovací model — na rozdiel od pôvodného gpt-realtime-whisper vie využiť kľúčové slová a kontext appky nižšie, čo mu pomáha pri menách, skratkách a názvoch funkcií. Cena je rovnaká.",
+                        selection: $dictation.realtimeModel
+                    ) {
                         ForEach(DictationEngine.RealtimeModel.allCases, id: \.self) { model in
                             Text(model.label).tag(model)
                         }
                     }
                     if dictation.realtimeModel == .live {
                         rowDivider
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text("Predvolené kľúčové slová").font(.body)
-                            Text("Platia pri každom diktovaní — jedno na riadok. Napríklad tvoje meno alebo časté pojmy z tvojej práce. Ku každému diktovaniu sa pridajú aj kľúčové slová z App profilu danej aplikácie nižšie.")
-                                .font(.caption).foregroundStyle(.secondary)
-                            TextField("", text: $dictation.defaultKeywords, axis: .vertical)
-                                .lineLimit(2...5)
-                                .textFieldStyle(.roundedBorder)
+                        HStack(alignment: .top, spacing: 6) {
+                            VStack(alignment: .leading, spacing: 6) {
+                                HStack(spacing: 6) {
+                                    Text("Predvolené kľúčové slová").font(.body)
+                                    infoIcon("Sú to výrazy, ktoré model počuje ako nápovedu (nie príkaz) — pomáhajú mu rozhodnúť sa pri neistote, napr. medzi \"resolve input device uid\" a \"resolvedInputDeviceUID\". Platia pri KAŽDOM diktovaní, nezávisle od appky. Jedno slovo/fráza na riadok — mená, skratky, časté pojmy z tvojej práce. Pri diktovaní do konkrétnej appky sa k nim pridajú aj kľúčové slová z jej App profilu nižšie.")
+                                }
+                                TextField("napr. Matúš Karák\nOsobný pomocník", text: $dictation.defaultKeywords, axis: .vertical)
+                                    .lineLimit(2...5)
+                                    .textFieldStyle(.roundedBorder)
+                            }
                         }
                         .padding(.horizontal, 16).padding(.vertical, 12)
                     }
@@ -512,6 +532,7 @@ struct PreferencesView: View {
                                                   text: $profile.titleKeyword)
                                         HStack {
                                             Text("Typ cieľa").font(.callout)
+                                            infoIcon("Určuje, podľa akej rubriky sa diktovanie do tejto appky hodnotí na karte Kvalita (prompt do AI chatu a Slack správa majú iné kritériá) a zároveň sa z neho pri gpt-live-transcribe odvodí kontextová veta (\"prompt\") poslaná modelu, napr. pre AI chat: \"Používateľ diktuje prompt pre AI nástroj.\" Toto pole sa needituje ručne.")
                                             Picker("", selection: $profile.category) {
                                                 ForEach(AppCategory.allCases, id: \.self) { cat in
                                                     Text(cat.label).tag(cat)
@@ -522,7 +543,11 @@ struct PreferencesView: View {
                                         TextField("Instrukcie pre prepis", text: $profile.instructions,
                                                   axis: .vertical)
                                             .lineLimit(2...4)
-                                        TextField("Kľúčové slová — jedno na riadok (názvy funkcií, produktov, skratky)",
+                                        HStack(spacing: 6) {
+                                            Text("Kľúčové slová").font(.callout)
+                                            infoIcon("Platia iba pri diktovaní do TEJTO appky (naviac k predvoleným v Nastaveniach → Diktovanie). Nápoveda pre gpt-live-transcribe, jedno slovo/fráza na riadok — vhodné pre názvy funkcií, produktov a skratky typické pre túto appku, napr. pre Xcode: resolvedInputDeviceUID, DictationEngine, SwiftUI.")
+                                        }
+                                        TextField("napr. resolvedInputDeviceUID\nDictationEngine",
                                                   text: $profile.keywords, axis: .vertical)
                                             .lineLimit(2...5)
                                         HStack {
