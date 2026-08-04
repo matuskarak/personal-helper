@@ -1333,6 +1333,28 @@ struct PreferencesView: View {
             .labelsHidden()
             .frame(maxWidth: 340)
 
+            // Range for the "Vývoj diktovania" chart below — kept up here, next to the
+            // Dnes/Týždeň/Mesiac period, so it's reachable without scrolling past the stat
+            // cards first. Also fixed a real overflow bug: with this picker still inside the
+            // chart card's own header row, that row (title + 3 pickers) needed ~640pt in a
+            // card with ~600pt available, so it was clipping at the bottom of the fixed-size
+            // Nastavenia window instead of wrapping.
+            HStack(spacing: 10) {
+                Text("Rozsah grafu").font(.caption).foregroundStyle(.secondary)
+                Picker("", selection: $chartRange) {
+                    ForEach(ChartRange.allCases, id: \.self) { r in Text(r.label).tag(r) }
+                }
+                .labelsHidden().frame(width: 150)
+                if chartRange == .custom {
+                    DatePicker("Od", selection: $customFrom,
+                               in: earliestStoredDate...customTo, displayedComponents: .date)
+                    DatePicker("Do", selection: $customTo,
+                               in: customFrom...Date(), displayedComponents: .date)
+                }
+                Spacer()
+            }
+            .font(.caption)
+
             card {
                 HStack(spacing: 18) {
                     Image(systemName: "clock.badge.checkmark")
@@ -1406,21 +1428,6 @@ struct PreferencesView: View {
                         ForEach(ChartMetric.allCases, id: \.self) { m in Text(m.label).tag(m) }
                     }
                     .pickerStyle(.segmented).labelsHidden().frame(width: 230)
-                    Picker("", selection: $chartRange) {
-                        ForEach(ChartRange.allCases, id: \.self) { r in Text(r.label).tag(r) }
-                    }
-                    .labelsHidden().frame(width: 150)
-                }
-
-                if chartRange == .custom {
-                    HStack(spacing: 10) {
-                        DatePicker("Od", selection: $customFrom,
-                                   in: earliestStoredDate...customTo, displayedComponents: .date)
-                        DatePicker("Do", selection: $customTo,
-                                   in: customFrom...Date(), displayedComponents: .date)
-                    }
-                    .font(.caption)
-                    .datePickerStyle(.field)
                 }
 
                 if buckets.isEmpty {
