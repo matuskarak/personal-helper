@@ -59,6 +59,33 @@ struct PreferencesView: View {
         }
     }
 
+    enum ChartKind: CaseIterable, Hashable {
+        case bar, line
+        var label: String {
+            switch self {
+            case .bar:  "Stĺpce"
+            case .line: "Čiara"
+            }
+        }
+    }
+
+    enum ChartRange: Hashable, CaseIterable {
+        static var allCases: [ChartRange] { [.days(30), .days(90), .days(180), .days(365), .custom] }
+        case days(Int)
+        case custom
+
+        var label: String {
+            switch self {
+            case .days(30):  "30 dní"
+            case .days(90):  "90 dní"
+            case .days(180): "Pol roka"
+            case .days(365): "Rok"
+            case .days(let n): "\(n) dní"
+            case .custom: "Vlastný rozsah"
+            }
+        }
+    }
+
     @State private var selectedTab: Tab = .dictation
     // Collapsed by default — expanded on demand, or automatically if the current tab is
     // one of its children (so History/Kvalita never end up hidden behind a chevron).
@@ -83,7 +110,10 @@ struct PreferencesView: View {
     @State private var pillFollowsField = PillPosition.followFocusedField
     @State private var usagePeriod: UsagePeriod = .today
     @State private var chartMetric: ChartMetric = .timeSaved
-    @State private var chartDays = 7
+    @State private var chartKind: ChartKind = .bar
+    @State private var chartRange: ChartRange = .days(30)
+    @State private var customFrom = Calendar.current.date(byAdding: .day, value: -30, to: Date()) ?? Date()
+    @State private var customTo = Date()
 
     @State private var smartModelInput = ""
     @State private var inputDevices: [AudioInputDevice] = []
@@ -1350,22 +1380,47 @@ struct PreferencesView: View {
         }
     }
 
+    /// Earliest selectable date for the custom range — matches UsageStore's own retention,
+    /// so the picker can't offer a date the store has already pruned.
+    private var earliestStoredDate: Date {
+        Calendar.current.date(byAdding: .day, value: -UsageStore.maxAgeDays, to: Date()) ?? Date.distantPast
+    }
+
     private var usageChart: some View {
-        let buckets = usageStore.dictationDailyByModel(days: chartDays)
+        let buckets: [UsageStore.DailyModelBucket] = {
+            switch chartRange {
+            case .days(let n): usageStore.dictationDailyByModel(days: n)
+            case .custom:       usageStore.dictationDailyByModel(from: customFrom, to: customTo)
+            }
+        }()
         return card {
             VStack(alignment: .leading, spacing: 12) {
                 HStack {
                     Text("Vývoj diktovania").font(.headline)
                     Spacer()
+                    Picker("", selection: $chartKind) {
+                        ForEach(ChartKind.allCases, id: \.self) { k in Text(k.label).tag(k) }
+                    }
+                    .pickerStyle(.segmented).labelsHidden().frame(width: 120)
                     Picker("", selection: $chartMetric) {
                         ForEach(ChartMetric.allCases, id: \.self) { m in Text(m.label).tag(m) }
                     }
                     .pickerStyle(.segmented).labelsHidden().frame(width: 230)
-                    Picker("", selection: $chartDays) {
-                        Text("7 dní").tag(7)
-                        Text("30 dní").tag(30)
+                    Picker("", selection: $chartRange) {
+                        ForEach(ChartRange.allCases, id: \.self) { r in Text(r.label).tag(r) }
                     }
-                    .pickerStyle(.segmented).labelsHidden().frame(width: 140)
+                    .labelsHidden().frame(width: 150)
+                }
+
+                if chartRange == .custom {
+                    HStack(spacing: 10) {
+                        DatePicker("Od", selection: $customFrom,
+                                   in: earliestStoredDate...customTo, displayedComponents: .date)
+                        DatePicker("Do", selection: $customTo,
+                                   in: customFrom...Date(), displayedComponents: .date)
+                    }
+                    .font(.caption)
+                    .datePickerStyle(.field)
                 }
 
                 if buckets.isEmpty {
@@ -1374,11 +1429,21 @@ struct PreferencesView: View {
                         .frame(maxWidth: .infinity, minHeight: 140, alignment: .center)
                 } else {
                     Chart(buckets) { b in
-                        BarMark(
-                            x: .value("Deň", b.day, unit: .day),
-                            y: .value(chartMetric.label, chartValue(b))
-                        )
-                        .foregroundStyle(by: .value("Model", modelLabel(b.model)))
+                        switch chartKind {
+                        case .bar:
+                            BarMark(
+                                x: .value("Deň", b.day, unit: .day),
+                                y: .value(chartMetric.label, chartValue(b))
+                            )
+                            .foregroundStyle(by: .value("Model", modelLabel(b.model)))
+                        case .line:
+                            LineMark(
+                                x: .value("Deň", b.day, unit: .day),
+                                y: .value(chartMetric.label, chartValue(b))
+                            )
+                            .foregroundStyle(by: .value("Model", modelLabel(b.model)))
+                            .symbol(by: .value("Model", modelLabel(b.model)))
+                        }
                     }
                     .chartForegroundStyleScale(range: [accent, accent.opacity(0.55), accent.opacity(0.3)])
                     .chartLegend(position: .bottom, spacing: 8)
