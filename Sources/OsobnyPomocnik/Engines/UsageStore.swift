@@ -168,40 +168,18 @@ final class UsageStore {
         return String(format: "%.1f h", totalMin / 60)
     }
 
-    private func summary(for range: DateInterval) -> Summary {
+    /// Single entry point for the Prehľad tab's stat cards — Dnes/Týždeň/Mesiac/Rok/Vlastné
+    /// all resolve to a `from`/`to` pair (see PreferencesView.currentUsageRange) and land here,
+    /// so there's one summing implementation instead of one computed property per period.
+    func summary(from: Date, to: Date) -> Summary {
         var s = Summary()
-        for b in dailyBuckets where range.contains(b.day) {
+        for b in dailyBuckets where b.day >= from && b.day < to {
             switch b.kind {
             case .dictation: s.dictationSeconds += b.seconds; s.dictationWords += b.words
             case .reading:   s.readingWords += b.words; s.readingChars += b.chars
             }
         }
         return s
-    }
-
-    var today: Summary {
-        let cal = Calendar.current
-        let start = cal.startOfDay(for: Date())
-        let end = cal.date(byAdding: .day, value: 1, to: start) ?? Date()
-        return summary(for: DateInterval(start: start, end: end))
-    }
-
-    /// Week starts Monday — ISO8601 calendar's weekOfYear is Monday-first by definition.
-    var thisWeek: Summary {
-        var iso = Calendar(identifier: .iso8601)
-        iso.timeZone = .current
-        let comps = iso.dateComponents([.yearForWeekOfYear, .weekOfYear], from: Date())
-        guard let start = iso.date(from: comps),
-              let end = iso.date(byAdding: .day, value: 7, to: start) else { return Summary() }
-        return summary(for: DateInterval(start: start, end: end))
-    }
-
-    var thisMonth: Summary {
-        let cal = Calendar.current
-        let comps = cal.dateComponents([.year, .month], from: Date())
-        guard let start = cal.date(from: comps),
-              let end = cal.date(byAdding: .month, value: 1, to: start) else { return Summary() }
-        return summary(for: DateInterval(start: start, end: end))
     }
 
     // MARK: - Chart data
@@ -214,15 +192,9 @@ final class UsageStore {
         var seconds: Int
     }
 
-    /// Dictation activity for the last `days` days, bucketed per day × model — feeds the trend chart.
-    func dictationDailyByModel(days: Int) -> [DailyModelBucket] {
-        let today = Calendar.current.startOfDay(for: Date())
-        guard let from = Calendar.current.date(byAdding: .day, value: -(days - 1), to: today) else { return [] }
-        return dictationDailyByModel(from: from, to: Date())
-    }
-
-    /// Same, but for an explicit range — backs the custom date-range picker. `days:` above is
-    /// now a thin wrapper around this so there's one source of truth for the aggregation.
+    /// Dictation activity for an explicit range, bucketed per day × model — feeds the trend
+    /// chart. Same `from`/`to` as `summary(from:to:)` above, so the chart and the stat cards
+    /// it sits under always agree on what period they're showing.
     func dictationDailyByModel(from: Date, to: Date) -> [DailyModelBucket] {
         let cal = Calendar.current
         let fromDay = cal.startOfDay(for: from)

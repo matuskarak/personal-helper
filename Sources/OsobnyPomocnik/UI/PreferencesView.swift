@@ -38,13 +38,17 @@ struct PreferencesView: View {
         }
     }
 
+    /// Single period selector for the whole Prehľad tab — drives both the stat cards and the
+    /// chart below them, so switching it never leaves the two showing different ranges.
     enum UsagePeriod: CaseIterable, Hashable {
-        case today, week, month
+        case today, week, month, year, custom
         var label: String {
             switch self {
-            case .today: "Dnes"
-            case .week:  "Tento týždeň"
-            case .month: "Tento mesiac"
+            case .today:  "Dnes"
+            case .week:   "Týždeň"
+            case .month:  "Mesiac"
+            case .year:   "Rok"
+            case .custom: "Vlastné"
             }
         }
     }
@@ -65,23 +69,6 @@ struct PreferencesView: View {
             switch self {
             case .bar:  "Stĺpce"
             case .line: "Čiara"
-            }
-        }
-    }
-
-    enum ChartRange: Hashable, CaseIterable {
-        static var allCases: [ChartRange] { [.days(30), .days(90), .days(180), .days(365), .custom] }
-        case days(Int)
-        case custom
-
-        var label: String {
-            switch self {
-            case .days(30):  "30 dní"
-            case .days(90):  "90 dní"
-            case .days(180): "Pol roka"
-            case .days(365): "Rok"
-            case .days(let n): "\(n) dní"
-            case .custom: "Vlastný rozsah"
             }
         }
     }
@@ -111,7 +98,6 @@ struct PreferencesView: View {
     @State private var usagePeriod: UsagePeriod = .today
     @State private var chartMetric: ChartMetric = .timeSaved
     @State private var chartKind: ChartKind = .bar
-    @State private var chartRange: ChartRange = .days(30)
     @State private var customFrom = Calendar.current.date(byAdding: .day, value: -30, to: Date()) ?? Date()
     @State private var customTo = Date()
 
@@ -1312,40 +1298,54 @@ struct PreferencesView: View {
 
     // MARK: - Prehľad (usage)
 
+    /// The one date range the whole Prehľad tab reads from — the top Dnes/Týždeň/Mesiac/
+    /// Rok/Vlastné picker picks which case applies, so the stat cards and the chart below
+    /// them can never end up showing different periods (they used to: an earlier version
+    /// had a separate range picker just for the chart).
+    private func currentUsageRange() -> (from: Date, to: Date) {
+        let cal = Calendar.current
+        let now = Date()
+        switch usagePeriod {
+        case .today:
+            let start = cal.startOfDay(for: now)
+            return (start, cal.date(byAdding: .day, value: 1, to: start) ?? now)
+        case .week:
+            // Monday-first by definition of the ISO8601 calendar's weekOfYear.
+            var iso = Calendar(identifier: .iso8601); iso.timeZone = .current
+            let comps = iso.dateComponents([.yearForWeekOfYear, .weekOfYear], from: now)
+            let start = iso.date(from: comps) ?? now
+            return (start, iso.date(byAdding: .day, value: 7, to: start) ?? now)
+        case .month:
+            let comps = cal.dateComponents([.year, .month], from: now)
+            let start = cal.date(from: comps) ?? now
+            return (start, cal.date(byAdding: .month, value: 1, to: start) ?? now)
+        case .year:
+            let comps = cal.dateComponents([.year], from: now)
+            let start = cal.date(from: comps) ?? now
+            return (start, cal.date(byAdding: .year, value: 1, to: start) ?? now)
+        case .custom:
+            return (customFrom, customTo)
+        }
+    }
+
     private var usageTab: some View {
-        let summary: UsageStore.Summary = {
-            switch usagePeriod {
-            case .today: usageStore.today
-            case .week:  usageStore.thisWeek
-            case .month: usageStore.thisMonth
-            }
-        }()
+        let range = currentUsageRange()
+        let summary = usageStore.summary(from: range.from, to: range.to)
 
         return VStack(alignment: .leading, spacing: 16) {
             Text("Prehľad využitia").font(.title2.bold())
 
-            Picker("", selection: $usagePeriod) {
-                ForEach(UsagePeriod.allCases, id: \.self) { p in
-                    Text(p.label).tag(p)
-                }
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .frame(maxWidth: 340)
-
-            // Range for the "Vývoj diktovania" chart below — kept up here, next to the
-            // Dnes/Týždeň/Mesiac period, so it's reachable without scrolling past the stat
-            // cards first. Also fixed a real overflow bug: with this picker still inside the
-            // chart card's own header row, that row (title + 3 pickers) needed ~640pt in a
-            // card with ~600pt available, so it was clipping at the bottom of the fixed-size
-            // Nastavenia window instead of wrapping.
             HStack(spacing: 10) {
-                Text("Rozsah grafu").font(.caption).foregroundStyle(.secondary)
-                Picker("", selection: $chartRange) {
-                    ForEach(ChartRange.allCases, id: \.self) { r in Text(r.label).tag(r) }
+                Picker("", selection: $usagePeriod) {
+                    ForEach(UsagePeriod.allCases, id: \.self) { p in
+                        Text(p.label).tag(p)
+                    }
                 }
-                .labelsHidden().frame(width: 150)
-                if chartRange == .custom {
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .frame(maxWidth: 460)
+
+                if usagePeriod == .custom {
                     DatePicker("Od", selection: $customFrom,
                                in: earliestStoredDate...customTo, displayedComponents: .date)
                     DatePicker("Do", selection: $customTo,
@@ -1398,7 +1398,7 @@ struct PreferencesView: View {
             Text("Ušetrený čas je odhad: diktovanie sa porovnáva s písaním na klávesnici (~40 slov/min), čítanie s manuálnym čítaním (~120 slov/min) oproti počúvaniu (~180 slov/min).")
                 .font(.caption2).foregroundStyle(.tertiary)
 
-            usageChart
+            usageChart(range: range)
         }
     }
 
@@ -1408,13 +1408,8 @@ struct PreferencesView: View {
         Calendar.current.date(byAdding: .day, value: -UsageStore.maxAgeDays, to: Date()) ?? Date.distantPast
     }
 
-    private var usageChart: some View {
-        let buckets: [UsageStore.DailyModelBucket] = {
-            switch chartRange {
-            case .days(let n): usageStore.dictationDailyByModel(days: n)
-            case .custom:       usageStore.dictationDailyByModel(from: customFrom, to: customTo)
-            }
-        }()
+    private func usageChart(range: (from: Date, to: Date)) -> some View {
+        let buckets = usageStore.dictationDailyByModel(from: range.from, to: range.to)
         return card {
             VStack(alignment: .leading, spacing: 12) {
                 HStack {
