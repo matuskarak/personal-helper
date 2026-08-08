@@ -178,6 +178,14 @@ final class DictationEngine {
         notice = msg
     }
 
+    /// Clears an advisory notice without touching anything else — the indicator's auto-hide
+    /// timer uses this while still recording, so the pill reverts to the live equalizer/timer
+    /// view instead of closing (closing was the actual bug: a mid-recording quality hint used
+    /// to take the whole pill down with it, cutting the session's visible feedback short).
+    func clearNotice() {
+        notice = nil
+    }
+
     // Set at the end of stopAndTranscribe() — false if the mic tap never produced
     // a single usable chunk during the whole recording (mic permission, broken
     // device, etc.), so callers can show a clear "audio didn't work" message
@@ -1395,10 +1403,19 @@ private final class DictationQualityMonitor: @unchecked Sendable {
     private let windowDuration: TimeInterval = 15
     private let maxFrames = 600 // ~15s worth of chunk-sized frames — bounded, cheap
 
+    // A single loud sample (a sharp "p"/"t" transient, a slightly close mic on one syllable)
+    // is normal speech, not distortion — real digital clipping flat-tops the waveform, i.e.
+    // several samples in a row pinned at the ceiling. Counting isolated near-max samples (the
+    // previous approach) fired on ordinary loud speech; requiring a short run is what actually
+    // distinguishes a clipped waveform from a clean loud one. Carried across recordChunk calls
+    // since a run can straddle a ~100ms chunk boundary.
+    private let minClipRun = 3
+    private var pendingRun = 0
+
     func reset() {
         lock.lock()
         windowStart = nil; frameRMS.removeAll(); peak = 0
-        clippedSamples = 0; totalSamples = 0; ready = false
+        clippedSamples = 0; totalSamples = 0; ready = false; pendingRun = 0
         lock.unlock()
     }
 
@@ -1411,13 +1428,24 @@ private final class DictationQualityMonitor: @unchecked Sendable {
         var sumSquares: Float = 0
         var localPeak: Float = 0
         var localClipped = 0
+        var run = pendingRun
         for i in 0..<count {
             let f = Float(ptr[i]) / Float(Int16.max)
             let a = abs(f)
             if a > localPeak { localPeak = a }
-            if a >= 0.999 { localClipped += 1 }
+            if a >= 0.999 {
+                run += 1
+                // Once a run reaches the minimum, count every sample in it (including the ones
+                // that made it qualify) — a longer flat-top should still weigh more, just not
+                // register at all below the threshold.
+                if run >= minClipRun { localClipped += 1 }
+                if run == minClipRun { localClipped += minClipRun - 1 }
+            } else {
+                run = 0
+            }
             sumSquares += f * f
         }
+        pendingRun = run
         if frameRMS.count < maxFrames { frameRMS.append(sqrt(sumSquares / Float(count))) }
         if localPeak > peak { peak = localPeak }
         clippedSamples += localClipped
