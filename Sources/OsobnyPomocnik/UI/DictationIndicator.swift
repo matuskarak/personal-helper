@@ -270,13 +270,22 @@ struct DictationIndicatorView: View {
                 // fade on their own.
                 guard !engine.noticeIsSticky else { return }
                 Task {
-                    try? await Task.sleep(for: .seconds(4))
+                    try? await Task.sleep(for: .seconds(6))
                     guard engine.notice != nil else {
                         AppLogger.log("[Indicator] notice auto-hide cancelled — notice already cleared (new session started)")
                         return
                     }
-                    AppLogger.log("[Indicator] notice auto-hide firing (4s elapsed) | isRecording=\(engine.isRecording)")
-                    DictationIndicatorController.shared.hide(from: "notice-onChange")
+                    // Still recording: this was a passive heads-up (mic-quality hint) raised
+                    // mid-session, not a reason to end it — clear the notice so the pill
+                    // reverts to the live equalizer/timer and keeps recording, don't close it.
+                    // Only hide outright once the session itself has actually finished.
+                    if engine.isRecording {
+                        AppLogger.log("[Indicator] notice auto-clear firing (6s elapsed) — still recording, reverting to normal view")
+                        engine.clearNotice()
+                    } else {
+                        AppLogger.log("[Indicator] notice auto-hide firing (6s elapsed) | isRecording=false")
+                        DictationIndicatorController.shared.hide(from: "notice-onChange")
+                    }
                 }
             }
             .onChange(of: engine.isRecording) { _, recording in
@@ -360,7 +369,16 @@ struct DictationIndicatorView: View {
                             .font(.caption)
                             .foregroundStyle(.primary)
                             .lineLimit(3)
-                        if engine.noticeIsSticky { dismissHint }
+                        if engine.noticeIsSticky {
+                            dismissHint
+                        } else if engine.isRecording {
+                            // A passive heads-up, not an interruption — say so, otherwise the
+                            // pill quietly reverting to the equalizer a few seconds later reads
+                            // as "something broke" rather than "recording never stopped".
+                            Text("Len upozornenie — nahrávanie pokračuje")
+                                .font(.system(size: 9))
+                                .foregroundStyle(.tertiary)
+                        }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                 } else if !engine.isMicReady {
