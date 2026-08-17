@@ -7,13 +7,14 @@ import Charts
 struct PreferencesView: View {
 
     enum Tab: CaseIterable, Hashable {
-        case dictation, reading, microphone, usage, history, quality, shortcuts, about
+        case general, dictation, reading, microphone, usage, history, quality, shortcuts, about
 
         // Sidebar row order for the flat (top-level) items — .history and .quality are
         // rendered separately, nested under .dictation, so they're excluded here.
-        static let topLevel: [Tab] = [.dictation, .reading, .microphone, .usage, .shortcuts, .about]
+        static let topLevel: [Tab] = [.general, .dictation, .reading, .microphone, .usage, .shortcuts, .about]
         var label: String {
             switch self {
+            case .general:    "Všeobecné"
             case .dictation:  "Diktovanie"
             case .reading:    "Čítanie"
             case .microphone: "Mikrofón"
@@ -26,6 +27,7 @@ struct PreferencesView: View {
         }
         var icon: String {
             switch self {
+            case .general:    "gearshape"
             case .dictation:  "mic"
             case .reading:    "chart.bar"
             case .microphone: "record.circle"
@@ -82,6 +84,7 @@ struct PreferencesView: View {
     @State private var dictation    = DictationEngine.shared
     @State private var profileStore = AppProfileStore.shared
     @State private var rewriteEngine = SmartRewriteEngine.shared
+    @State private var visionPromptExpanded = false
     @State private var remoteConfig  = RemoteConfig.shared
     @State private var micTest       = MicTestEngine.shared
     @State private var usageStore    = UsageStore.shared
@@ -95,6 +98,8 @@ struct PreferencesView: View {
     @State private var accessCodeInput = ""
     @State private var accessCodeSaved = false
     @State private var pillFollowsField = PillPosition.followFocusedField
+    @State private var showResetShortcutsConfirm = false
+    @State private var shortcutsResetToken = 0
     @State private var usagePeriod: UsagePeriod = .today
     @State private var chartMetric: ChartMetric = .timeSaved
     @State private var chartKind: ChartKind = .bar
@@ -134,6 +139,7 @@ struct PreferencesView: View {
                 ScrollView {
                     Group {
                         switch selectedTab {
+                        case .general:    generalTab
                         case .dictation:  dictationTab
                         case .reading:    readingTab
                         case .microphone: microphoneTab
@@ -271,13 +277,17 @@ struct PreferencesView: View {
                 .strokeBorder(Color.primary.opacity(0.07), lineWidth: 0.5))
     }
 
-    private func warningBanner(_ message: String) -> some View {
+    private func warningBanner(_ message: String, action: (String, () -> Void)? = nil) -> some View {
         HStack(spacing: 8) {
             Circle().fill(warnFG).frame(width: 6, height: 6)
             Text(message)
                 .font(.callout)
                 .foregroundStyle(warnFG)
             Spacer()
+            if let action {
+                Button(action.0, action: action.1)
+                    .font(.caption).buttonStyle(.bordered)
+            }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
@@ -321,33 +331,73 @@ struct PreferencesView: View {
         Divider().padding(.leading, 16)
     }
 
+    // MARK: - Všeobecné
+
+    private var generalTab: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Všeobecné").font(.title2.bold())
+
+            card {
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Mena pre ceny").font(.body)
+                        Text("Ceny sú orientačné, podľa cenníka OpenAI (\(Pricing.ratesCheckedOn)). Prepočet z dolárov je fixný, nie podľa aktuálneho kurzu.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Picker("", selection: Binding(
+                        get: { currency },
+                        set: { currency = $0; AppCurrency.selected = $0 }
+                    )) {
+                        ForEach(AppCurrency.allCases, id: \.self) { c in
+                            Text(c.label).tag(c)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(width: 180)
+                    .labelsHidden()
+                }
+                .padding(.horizontal, 16).padding(.vertical, 12)
+            }
+        }
+    }
+
     // MARK: - Diktovanie
 
     private var dictationTab: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Diktovanie").font(.title2.bold())
 
-            // Toggles
+            // Toggles — Live vkladanie funguje iba v Realtime režime a mimo Smart diktovania
+            // (deltas sa v inom stave netypujú, viď DictationEngine), takže sa zobrazuje iba
+            // vtedy, keď reálne môže fungovať, namiesto ponechania zapnutého s upozornením.
             card {
                 if remoteConfig.smartDictationAllowed {
                     toggleRow(title: "Smart diktovanie",
-                              subtitle: "Pred vložením text prepíše AI s kontextom obrazovky",
+                              subtitle: dictation.transcriptionMode == .realtime
+                                  ? "Pred vložením text prepíše AI s kontextom obrazovky. Vypína Live vkladanie."
+                                  : "Pred vložením text prepíše AI s kontextom obrazovky",
                               isOn: $dictation.smartAlwaysOn)
-                    rowDivider
-                }
-                toggleRow(title: "Live vkladanie",
-                          subtitle: "Píše text do poľa priebežne počas diktovania",
-                          isOn: $dictation.liveInsertEnabled)
-                if dictation.smartAlwaysOn && dictation.liveInsertEnabled {
-                    warningBanner("Tieto dve funkcie nie sú kompatibilné")
+                    if dictation.smartAlwaysOn && !CGPreflightScreenCaptureAccess() {
+                        warningBanner(
+                            "Bez povolenia 'Nahrávanie obrazovky' Smart diktovanie neuvidí obsah obrazovky — funguje len ako oprava gramatiky.",
+                            action: ("Otvoriť nastavenia", { PermissionsChecker.shared.openScreenRecordingSettings() })
+                        )
                         .padding(.horizontal, 16)
                         .padding(.bottom, 12)
+                    }
                 }
-                if dictation.liveInsertEnabled {
-                    rowDivider
-                    toggleRow(title: "Enter zastaví diktovanie",
-                              subtitle: "Stlačenie Enter automaticky ukončí nahrávanie",
-                              isOn: $dictation.enterAutoStop)
+                if canUseLiveInsert {
+                    if remoteConfig.smartDictationAllowed { rowDivider }
+                    toggleRow(title: "Live vkladanie",
+                              subtitle: "Píše text do poľa priebežne počas diktovania",
+                              isOn: $dictation.liveInsertEnabled)
+                    if dictation.liveInsertEnabled {
+                        rowDivider
+                        toggleRow(title: "Enter zastaví diktovanie",
+                                  subtitle: "Stlačenie Enter automaticky ukončí nahrávanie",
+                                  isOn: $dictation.enterAutoStop)
+                    }
                 }
             }
 
@@ -392,27 +442,6 @@ struct PreferencesView: View {
                         .padding(.horizontal, 16).padding(.vertical, 12)
                     }
                 }
-                rowDivider
-                HStack {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Mena pre ceny").font(.body)
-                        Text("Ceny sú orientačné, podľa cenníka OpenAI (\(Pricing.ratesCheckedOn)). Prepočet z dolárov je fixný, nie podľa aktuálneho kurzu.")
-                            .font(.caption).foregroundStyle(.secondary)
-                    }
-                    Spacer()
-                    Picker("", selection: Binding(
-                        get: { currency },
-                        set: { currency = $0; AppCurrency.selected = $0 }
-                    )) {
-                        ForEach(AppCurrency.allCases, id: \.self) { c in
-                            Text(c.label).tag(c)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    .frame(width: 180)
-                    .labelsHidden()
-                }
-                .padding(.horizontal, 16).padding(.vertical, 12)
                 rowDivider
                 HStack(alignment: .top) {
                     VStack(alignment: .leading, spacing: 2) {
@@ -505,6 +534,34 @@ struct PreferencesView: View {
                     .onChange(of: smartModelInput) { _, v in rewriteEngine.model = v }
                 }
 
+                // Vision-context prompt
+                card {
+                    toggleRow(title: "Kontext zo screenshotu",
+                              subtitle: "Vysvetlí modelu, ako má screenshot použiť pri oprave prepisu",
+                              isOn: $rewriteEngine.visionPromptEnabled)
+                    if rewriteEngine.visionPromptEnabled {
+                        rowDivider
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("Prompt").font(.body)
+                            Text("Uprav si predvolený text podľa potreby. Úplným vymazaním sa vráti predvolený prompt.")
+                                .font(.caption).foregroundStyle(.secondary)
+                            TextEditor(text: $rewriteEngine.visionPromptOverride)
+                                .font(.body)
+                                .frame(height: visionPromptExpanded ? 200 : 54)
+                                .overlay(RoundedRectangle(cornerRadius: 6).stroke(.separator))
+                            Button(visionPromptExpanded ? "Zobraziť menej" : "Zobraziť viac") {
+                                visionPromptExpanded.toggle()
+                            }
+                            .buttonStyle(.plain).font(.caption).foregroundStyle(accent)
+                        }
+                        .padding(.horizontal, 16).padding(.vertical, 12)
+                    }
+                    rowDivider
+                    toggleRow(title: "Ukladať screenshoty do histórie",
+                              subtitle: "Na ladenie: uloží presne to, čo model videl pri Smart prepise, ku každému diktovaniu v karte Kvalita. Môžu obsahovať citlivý obsah obrazovky — vypni, keď doladíš.",
+                              isOn: $rewriteEngine.saveScreenshotsToHistory)
+                }
+
                 // App profiles
                 card {
                     VStack(alignment: .leading, spacing: 0) {
@@ -514,6 +571,8 @@ struct PreferencesView: View {
                             Button("+ Pridať") { profileStore.addBlank() }
                                 .buttonStyle(.bordered).font(.caption)
                             Button("Aktuálna appka") { addProfileFromFrontmostApp() }
+                                .buttonStyle(.bordered).font(.caption)
+                            Button("Vybrať appku…") { addProfileFromFilePicker() }
                                 .buttonStyle(.bordered).font(.caption)
                         }
                         .padding(.horizontal, 16).padding(.vertical, 12)
@@ -579,6 +638,16 @@ struct PreferencesView: View {
             }
             .padding(.horizontal, 4)
         }
+        .onChange(of: dictation.smartAlwaysOn) { _, on in
+            if on { dictation.liveInsertEnabled = false }
+        }
+    }
+
+    /// Live vkladanie píše deltas do poľa počas realtime prepisu — v batch režime žiadne
+    /// deltas nie sú a v Smart móde sa netypujú (viď DictationEngine.handleRealtimeEvent),
+    /// takže mimo tejto kombinácie sa toggle vôbec nezobrazuje.
+    private var canUseLiveInsert: Bool {
+        dictation.transcriptionMode == .realtime && !dictation.smartAlwaysOn
     }
 
     private var vadSubtitle: String {
@@ -1005,7 +1074,7 @@ struct PreferencesView: View {
     private var historyTab: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("História diktovania").font(.title2.bold())
-            Text("Posledné nadiktované texty — len lokálne, uchovávané max. 30 dní alebo posledných 200 položiek. Keďže sem môže padnúť čokoľvek, čo nadiktuješ, históriu môžeš kedykoľvek celú vymazať.")
+            Text("Posledné nadiktované texty — len lokálne. Keďže sem môže padnúť čokoľvek, čo nadiktuješ, históriu môžeš kedykoľvek celú vymazať.")
                 .font(.caption).foregroundStyle(.secondary)
 
             if historyStore.entries.isEmpty {
@@ -1263,6 +1332,18 @@ struct PreferencesView: View {
                     Text("Po Smart prepise").font(.caption2).foregroundStyle(.tertiary)
                     Text(rewritten).font(.callout).textSelection(.enabled)
                 }
+                if entry.hasScreenshot {
+                    Text("Screenshot pri diktovaní").font(.caption2).foregroundStyle(.tertiary)
+                    let url = DictationHistoryStore.shared.screenshotURL(for: entry.id)
+                    if let image = NSImage(contentsOf: url) {
+                        Image(nsImage: image)
+                            .resizable().scaledToFit()
+                            .frame(maxHeight: 200)
+                            .clipShape(RoundedRectangle(cornerRadius: 6))
+                            .onTapGesture { NSWorkspace.shared.open(url) }
+                            .help("Otvoriť v plnej veľkosti")
+                    }
+                }
             }
             .padding(.vertical, 8)
         } label: {
@@ -1511,46 +1592,39 @@ struct PreferencesView: View {
             Text("Klávesové skratky").font(.title2.bold())
 
             card {
-                shortcutRow("Diktovanie", Binding(
-                    get: { ShortcutStore.shared.dictate },
-                    set: { ShortcutStore.shared.dictate = $0 }
-                ))
+                ShortcutMappingRow(label: "Diktovanie", action: .dictate)
                 if remoteConfig.smartDictationAllowed {
                     rowDivider
-                    shortcutRow("Smart diktovanie", Binding(
-                        get: { ShortcutStore.shared.smartDictate },
-                        set: { ShortcutStore.shared.smartDictate = $0 }
-                    ))
+                    ShortcutMappingRow(label: "Smart diktovanie", action: .smartDictate)
                 }
                 rowDivider
-                shortcutRow("Čítať text", Binding(
-                    get: { ShortcutStore.shared.readText },
-                    set: { ShortcutStore.shared.readText = $0 }
-                ))
+                ShortcutMappingRow(label: "Čítať text", action: .readText)
                 rowDivider
-                shortcutRow("OCR oblasť", Binding(
-                    get: { ShortcutStore.shared.ocr },
-                    set: { ShortcutStore.shared.ocr = $0 }
-                ))
+                ShortcutMappingRow(label: "OCR oblasť", action: .ocr)
                 rowDivider
-                shortcutRow("Vložiť z pamäte", Binding(
-                    get: { ShortcutStore.shared.insertFromMemory },
-                    set: { ShortcutStore.shared.insertFromMemory = $0 }
-                ))
+                ShortcutMappingRow(label: "Vložiť z pamäte", action: .insertFromMemory)
             }
+            .id(shortcutsResetToken) // forces each row to reload from the store after a reset
 
-            Text("Klikni na skratku a stlač novú kombináciu (vyžaduje aspoň jeden modifier).")
+            Text("Klikni na skratku a stlač novú kombináciu (vyžaduje aspoň jeden modifier). Tlačidlom „+“ pridáš ďalšiu skratku pre tú istú akciu — napríklad inú kombináciu na externej klávesnici než na notebooku (max \(ShortcutStore.maxPerAction)).")
                 .font(.caption).foregroundStyle(.secondary).padding(.horizontal, 4)
-        }
-    }
 
-    private func shortcutRow(_ label: String, _ binding: Binding<Shortcut>) -> some View {
-        HStack {
-            Text(label).font(.body)
-            Spacer()
-            ShortcutRecorderView(shortcut: binding)
+            Button("Obnoviť predvolené skratky") { showResetShortcutsConfirm = true }
+                .buttonStyle(.bordered)
+                .confirmationDialog(
+                    "Obnoviť všetky skratky na predvolené hodnoty?",
+                    isPresented: $showResetShortcutsConfirm,
+                    titleVisibility: .visible
+                ) {
+                    Button("Obnoviť", role: .destructive) {
+                        ShortcutStore.shared.resetAllToDefaults()
+                        shortcutsResetToken += 1
+                    }
+                    Button("Zrušiť", role: .cancel) {}
+                } message: {
+                    Text("Odstráni všetky pridané skratky a vráti pôvodné kombinácie.")
+                }
         }
-        .padding(.horizontal, 16).padding(.vertical, 12)
     }
 
     // MARK: - O aplikácii
@@ -1735,6 +1809,22 @@ struct PreferencesView: View {
         ))
     }
 
+    private func addProfileFromFilePicker() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.application]
+        panel.directoryURL = URL(fileURLWithPath: "/Applications")
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        guard panel.runModal() == .OK, let url = panel.url, let bundle = Bundle(url: url) else { return }
+        profileStore.profiles.append(AppProfile(
+            displayName: bundle.infoDictionary?["CFBundleName"] as? String
+                ?? url.deletingPathExtension().lastPathComponent,
+            bundleID: bundle.bundleIdentifier ?? "",
+            titleKeyword: "",
+            instructions: ""
+        ))
+    }
+
     private func loadGoogleVoices() async {
         loadingVoices = true; voiceError = nil
         do {
@@ -1752,20 +1842,6 @@ struct PreferencesView: View {
 
 private extension Float {
     func clamped(_ lo: Float, _ hi: Float) -> Float { Swift.min(hi, Swift.max(lo, self)) }
-}
-
-// MARK: - Shortcut row (unchanged)
-
-private struct ShortcutRow: View {
-    let label: String
-    @Binding var shortcut: Shortcut
-    var body: some View {
-        HStack {
-            Text(label)
-            Spacer()
-            ShortcutRecorderView(shortcut: $shortcut)
-        }
-    }
 }
 
 // MARK: - Launch at login
