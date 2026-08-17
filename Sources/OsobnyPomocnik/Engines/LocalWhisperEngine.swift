@@ -16,42 +16,66 @@ final class LocalWhisperEngine {
         case failed(String)
     }
 
+    enum Source: String, CaseIterable, Identifiable {
+        case stock = "Stock large-v3-turbo"
+        case slovakFineTuned = "SK fine-tuned (NaiveNeuron)"
+        var id: String { rawValue }
+    }
+
     private(set) var status: Status = .notLoaded
     private var whisperKit: WhisperKit?
+    private var loadedSource: Source?
 
-    /// `NaiveNeuron/whisper-large-v3-turbo-sk` isn't published as a ready-made CoreML repo
-    /// yet — it needs conversion via whisperkittools first (see CLAUDE.md). Until that's
-    /// done, default to the stock multilingual large-v3-turbo from Argmax's own repo, which
-    /// WhisperKit downloads automatically. Swap `modelRepo`/`model` once the SK conversion
-    /// is available, to compare fine-tuned vs stock on the same test harness.
+    var source: Source = .stock {
+        didSet {
+            guard source != oldValue else { return }
+            whisperKit = nil
+            loadedSource = nil
+            status = .notLoaded
+        }
+    }
+
     // WhisperKit matches this as a substring against folder names in the Argmax CoreML repo
     // (e.g. "openai_whisper-large-v3-v20240930_turbo") — "large-v3-turbo" doesn't actually
     // occur as a substring there (there's a "-v20240930" date tag spliced in between), which
     // is why the plain name 404s. This is the exact folder-name fragment instead.
-    var modelVariant = "large-v3-v20240930_turbo"
-    var modelRepo: String?
+    private let stockModelVariant = "large-v3-v20240930_turbo"
+
+    // Converted locally via whisperkittools from NaiveNeuron/whisper-large-v3-turbo-sk (not
+    // published as a ready CoreML repo) — see CLAUDE.md for how this folder was produced.
+    private let skModelFolder = "\(NSHomeDirectory())/Documents/whisperkit-models-sk/NaiveNeuron_whisper-large-v3-turbo-sk"
 
     private init() {}
 
     func ensureLoaded() async {
-        if case .loaded = status, whisperKit != nil { return }
+        if case .loaded = status, whisperKit != nil, loadedSource == source { return }
         status = .downloading(progress: 0)
         do {
-            let config = WhisperKitConfig(
-                model: modelVariant,
-                modelRepo: modelRepo,
-                verbose: false,
-                logLevel: .error,
-                prewarm: true,
-                load: true,
-                download: true
-            )
+            let config: WhisperKitConfig
+            switch source {
+            case .stock:
+                config = WhisperKitConfig(
+                    model: stockModelVariant,
+                    verbose: false, logLevel: .error,
+                    prewarm: true, load: true, download: true
+                )
+            case .slovakFineTuned:
+                guard FileManager.default.fileExists(atPath: skModelFolder) else {
+                    throw LocalWhisperError.skModelMissing
+                }
+                config = WhisperKitConfig(
+                    modelFolder: skModelFolder,
+                    verbose: false, logLevel: .error,
+                    prewarm: true, load: true, download: false
+                )
+            }
             whisperKit = try await WhisperKit(config)
+            loadedSource = source
             status = .loaded
-            AppLogger.log("[LocalWhisperEngine] model loaded — variant=\(modelVariant) repo=\(modelRepo ?? "default")")
+            AppLogger.log("[LocalWhisperEngine] model loaded — source=\(source.rawValue)")
         } catch {
             status = .failed(error.localizedDescription)
-            AppLogger.log("[LocalWhisperEngine] ⚠️ load failed: \(error)")
+            AppLogger.log("[LocalWhisperEngine] ⚠️ load failed (\(source.rawValue)): \(error)")
         }
     }
 
@@ -74,6 +98,12 @@ final class LocalWhisperEngine {
 
     enum LocalWhisperError: LocalizedError {
         case notLoaded
-        var errorDescription: String? { "Lokálny model sa nepodarilo načítať." }
+        case skModelMissing
+        var errorDescription: String? {
+            switch self {
+            case .notLoaded:     "Lokálny model sa nepodarilo načítať."
+            case .skModelMissing: "SK model nie je na disku — spusti konverziu cez whisperkittools (viď CLAUDE.md)."
+            }
+        }
     }
 }
