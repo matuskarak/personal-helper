@@ -24,7 +24,11 @@ final class LocalWhisperEngine {
     /// done, default to the stock multilingual large-v3-turbo from Argmax's own repo, which
     /// WhisperKit downloads automatically. Swap `modelRepo`/`model` once the SK conversion
     /// is available, to compare fine-tuned vs stock on the same test harness.
-    var modelVariant = "large-v3-turbo"
+    // WhisperKit matches this as a substring against folder names in the Argmax CoreML repo
+    // (e.g. "openai_whisper-large-v3-v20240930_turbo") — "large-v3-turbo" doesn't actually
+    // occur as a substring there (there's a "-v20240930" date tag spliced in between), which
+    // is why the plain name 404s. This is the exact folder-name fragment instead.
+    var modelVariant = "large-v3-v20240930_turbo"
     var modelRepo: String?
 
     private init() {}
