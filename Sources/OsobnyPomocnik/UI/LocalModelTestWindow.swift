@@ -63,20 +63,28 @@ private struct LocalModelTestView: View {
         VStack(alignment: .leading, spacing: 4) {
             Text("Cloud (gpt-transcribe) vs. lokálny WhisperKit — porovnanie na tej istej nahrávke.")
                 .font(.callout)
-            Picker("Lokálny model:", selection: Binding(
-                get: { whisper.source },
-                set: { whisper.source = $0 }
-            )) {
-                ForEach(LocalWhisperEngine.Source.allCases) { Text($0.rawValue).tag($0) }
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Lokálny model:").font(.caption).foregroundStyle(.secondary)
+                Picker("", selection: Binding(
+                    get: { whisper.source },
+                    set: { whisper.source = $0 }
+                )) {
+                    ForEach(LocalWhisperEngine.Source.allCases) { Text($0.rawValue).tag($0) }
+                }
+                .labelsHidden()
+                .pickerStyle(.segmented)
+                .frame(maxWidth: 360)
+                .disabled(engine.phase == .transcribing)
             }
-            .pickerStyle(.segmented)
-            .frame(maxWidth: 360)
-            .disabled(engine.phase == .transcribing)
             HStack(spacing: 6) {
                 Text("Stav:").foregroundStyle(.secondary)
                 switch whisper.status {
                 case .notLoaded:          Text("nenačítaný")
-                case .downloading:        HStack(spacing: 6) { ProgressView().controlSize(.small); Text("sťahujem/pripravujem…") }
+                case .downloading:
+                    HStack(spacing: 6) {
+                        ProgressView().controlSize(.small)
+                        Text("pripravujem… (prvé načítanie SK modelu môže trvať aj cez 15 minút — macOS ho na pozadí kompiluje pre Neural Engine)")
+                    }
                 case .loaded:             Text("pripravený ✓").foregroundStyle(.green)
                 case .failed(let reason): Text("chyba: \(reason)").foregroundStyle(.red)
                 }
