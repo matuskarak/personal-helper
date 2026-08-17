@@ -16,13 +16,15 @@ struct DictationHistoryEntry: Codable, Identifiable {
     let seconds: Int
     let rewrittenText: String?    // Smart diktovanie output, when it ran
     let metrics: DictationMetrics?
+    let hasScreenshot: Bool       // true → a JPEG sits at DictationHistoryStore.screenshotURL(for: id)
 
-    init(date: Date, text: String, appName: String = "", bundleID: String = "",
+    init(id: UUID = UUID(), date: Date, text: String, appName: String = "", bundleID: String = "",
          category: AppCategory = .generic, seconds: Int = 0,
-         rewrittenText: String? = nil, metrics: DictationMetrics? = nil) {
-        self.id = UUID(); self.date = date; self.text = text
+         rewrittenText: String? = nil, metrics: DictationMetrics? = nil, hasScreenshot: Bool = false) {
+        self.id = id; self.date = date; self.text = text
         self.appName = appName; self.bundleID = bundleID; self.category = category
         self.seconds = seconds; self.rewrittenText = rewrittenText; self.metrics = metrics
+        self.hasScreenshot = hasScreenshot
     }
 
     // ponytail: hand-written decode so the added fields don't destroy existing history.
@@ -39,6 +41,7 @@ struct DictationHistoryEntry: Codable, Identifiable {
         seconds       = try c.decodeIfPresent(Int.self, forKey: .seconds) ?? 0
         rewrittenText = try c.decodeIfPresent(String.self, forKey: .rewrittenText)
         metrics       = try c.decodeIfPresent(DictationMetrics.self, forKey: .metrics)
+        hasScreenshot = try c.decodeIfPresent(Bool.self, forKey: .hasScreenshot) ?? false
     }
 }
 
@@ -48,51 +51,87 @@ final class DictationHistoryStore {
     static let shared = DictationHistoryStore()
 
     private(set) var entries: [DictationHistoryEntry] = []  // oldest first
-    private let defaultsKey = "dictation.history.v1"
-    // ponytail: fixed caps, not user-configurable — this is a personal-data store,
-    // keep the retention policy simple and predictable rather than another setting.
-    private let maxAgeDays = 30
-    private let maxEntries = 200
+
+    // ponytail: measured ~755 bytes/entry (150KB / 200 entries) before this change.
+    // Uncapped storage was requested to build up a real dataset for the quality-analysis
+    // engine — 20k entries is still only ~15MB on disk, a non-issue for a JSON file.
+    // Upgrade path if it ever grows past that: paginate/archive older entries instead of
+    // just deleting them.
+    private let safetyCeiling = 20_000
+
+    // Moved off UserDefaults (a .plist meant for small settings, loaded fully into memory
+    // at every launch) onto its own file now that there's no small fixed cap keeping it tiny.
+    private let fileURL: URL = {
+        let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("OsobnyPomocnik", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir.appendingPathComponent("dictation-history.json")
+    }()
+
+    // Screenshots are opt-in debug data for tuning Smart diktovanie — kept as loose files
+    // next to the JSON, not inline in it, so the (much bigger) images don't get re-encoded
+    // on every single save(). Lifecycle is tied 1:1 to the owning entry: deleted whenever
+    // the entry is (prune/delete/clearAll), never separately capped.
+    private let screenshotsDir: URL = {
+        let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("OsobnyPomocnik/screenshots", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }()
+
+    func screenshotURL(for id: UUID) -> URL { screenshotsDir.appendingPathComponent("\(id.uuidString).jpg") }
 
     private init() { load() }
 
     func log(_ text: String, appName: String = "", bundleID: String = "",
-             category: AppCategory = .generic, seconds: Int = 0, rewrittenText: String? = nil) {
+             category: AppCategory = .generic, seconds: Int = 0, rewrittenText: String? = nil,
+             screenshotJPEG: Data? = nil) {
         guard !text.isEmpty else { return }
+        let id = UUID()
+        if let screenshotJPEG {
+            try? screenshotJPEG.write(to: screenshotURL(for: id), options: .atomic)
+        }
         entries.append(DictationHistoryEntry(
-            date: Date(), text: text, appName: appName, bundleID: bundleID,
+            id: id, date: Date(), text: text, appName: appName, bundleID: bundleID,
             category: category, seconds: seconds, rewrittenText: rewrittenText,
-            metrics: DictationQualityEngine.analyze(text: text, rewritten: rewrittenText, seconds: seconds)
+            metrics: DictationQualityEngine.analyze(text: text, rewritten: rewrittenText, seconds: seconds),
+            hasScreenshot: screenshotJPEG != nil
         ))
-        prune()
+        if entries.count > safetyCeiling {
+            let overflow = entries.prefix(entries.count - safetyCeiling)
+            overflow.forEach { if $0.hasScreenshot { try? FileManager.default.removeItem(at: screenshotURL(for: $0.id)) } }
+            entries.removeFirst(entries.count - safetyCeiling)
+        }
         save()
     }
 
     func delete(_ id: UUID) {
+        try? FileManager.default.removeItem(at: screenshotURL(for: id))
         entries.removeAll { $0.id == id }
         save()
     }
 
     func clearAll() {
+        entries.forEach { if $0.hasScreenshot { try? FileManager.default.removeItem(at: screenshotURL(for: $0.id)) } }
         entries = []
         save()
     }
 
-    private func prune() {
-        guard let cutoff = Calendar.current.date(byAdding: .day, value: -maxAgeDays, to: Date()) else { return }
-        entries.removeAll { $0.date < cutoff }
-        if entries.count > maxEntries {
-            entries.removeFirst(entries.count - maxEntries)
-        }
-    }
-
     private func save() {
         guard let data = try? JSONEncoder().encode(entries) else { return }
-        UserDefaults.standard.set(data, forKey: defaultsKey)
+        try? data.write(to: fileURL, options: .atomic)
     }
 
     private func load() {
-        guard let data = UserDefaults.standard.data(forKey: defaultsKey),
+        // One-time migration from the old UserDefaults-backed store.
+        if let legacy = UserDefaults.standard.data(forKey: "dictation.history.v1"),
+           let decoded = try? JSONDecoder().decode([DictationHistoryEntry].self, from: legacy) {
+            entries = decoded
+            save()
+            UserDefaults.standard.removeObject(forKey: "dictation.history.v1")
+            return
+        }
+        guard let data = try? Data(contentsOf: fileURL),
               let decoded = try? JSONDecoder().decode([DictationHistoryEntry].self, from: data) else { return }
         entries = decoded
     }
