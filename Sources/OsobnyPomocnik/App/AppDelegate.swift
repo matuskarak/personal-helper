@@ -5,6 +5,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var menuBarController: MenuBarController?
     private var axRetryTimer: Timer?
 
+    // Continuously tracks the last real app to become frontmost — used by URL-scheme triggers
+    // (see handleGetURL) where receiving the Apple Event has already activated US, so by the
+    // time we run, the system-wide "focused app" AX query would wrongly report our own app
+    // instead of the field the user was actually dictating into.
+    private var lastExternalAppPID: pid_t?
+
+    /// Apps whose activation must never overwrite `lastExternalAppPID`: ourselves, and
+    /// Logi Options+'s own processes. The Action Ring is itself an on-screen overlay — opening
+    /// it and picking a command necessarily activates Logi's process first, pulling focus out
+    /// of the field the user was dictating into. If we tracked that as "the target app" we'd
+    /// aim the pill/insertion at Logi Options+ instead of the field itself.
+    private func isIgnorableForFocusTracking(_ app: NSRunningApplication) -> Bool {
+        guard let id = app.bundleIdentifier else { return false }
+        return id == Bundle.main.bundleIdentifier || id.hasPrefix("com.logi.") || id.hasPrefix("com.logitech.")
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         AppLogger.markSection("Aplikácia spustená (PID \(ProcessInfo.processInfo.processIdentifier))")
         #if DEBUG
@@ -16,11 +32,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         _ = RemoteConfig.shared      // starts feature-flag fetch
         menuBarController = MenuBarController()
         setupHotkeys()
+        ShortcutStore.shared.sync() // load persisted (incl. extra-mapped) shortcuts before the tap starts
         startHotkeyManagerOrRetry()
+        NSAppleEventManager.shared().setEventHandler(
+            self, andSelector: #selector(handleGetURL(_:withReplyEvent:)),
+            forEventClass: AEEventClass(kInternetEventClass), andEventID: AEEventID(kAEGetURL)
+        )
+        NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main
+        ) { [weak self] note in
+            guard let self, let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
+                  !self.isIgnorableForFocusTracking(app)
+            else { return }
+            self.lastExternalAppPID = app.processIdentifier
+        }
 
         if !UserDefaults.standard.bool(forKey: "onboarding.firstLaunchShown") {
             UserDefaults.standard.set(true, forKey: "onboarding.firstLaunchShown")
             OnboardingWindowController.shared.show()
+        }
+    }
+
+    /// Fires while `NSWorkspace.shared.frontmostApplication` still reports the OUTGOING app —
+    /// the one instant this trigger's target is reliably knowable. A URL-scheme trigger
+    /// (osobnypomocnik://..., used by Logi Options+ Smart Actions) delivers an Apple Event
+    /// that forces macOS to activate us, which stomps the very focus/AX context Smart
+    /// diktovanie and the pill positioning depend on — capture it here before that happens.
+    func applicationWillBecomeActive(_ notification: Notification) {
+        if let prev = NSWorkspace.shared.frontmostApplication, !isIgnorableForFocusTracking(prev) {
+            lastExternalAppPID = prev.processIdentifier
+            AppLogger.log("[AppDelegate] applicationWillBecomeActive — captured \(prev.bundleIdentifier ?? "?") (\(prev.processIdentifier)) as the trigger's real target")
         }
     }
 
@@ -77,6 +118,51 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard engine.isRecording else { return }
             DictationSounds.playStop()
             Task { @MainActor in await self?.finishDictation(engine: engine, label: "enterAutoStop") }
+        }
+    }
+
+    // MARK: - URL scheme (osobnypomocnik://<action>)
+
+    /// External trigger for tools whose synthesized keystrokes don't reach our global
+    /// CGEventTap (e.g. Logi Options+ Smart Actions posted straight to the frontmost app —
+    /// see HotkeyManager for why that's architecturally invisible to us). Point a Logi
+    /// Smart Action / Shortcuts.app action at e.g. osobnypomocnik://dictate instead of a
+    /// keyboard-shortcut action and it triggers the same handler as the real hotkey.
+    @objc func handleGetURL(_ event: NSAppleEventDescriptor, withReplyEvent: NSAppleEventDescriptor) {
+        guard
+            let urlString = event.paramDescriptor(forKeyword: keyDirectObject)?.stringValue,
+            let url = URL(string: urlString), url.scheme == "osobnypomocnik",
+            let action = url.host
+        else { return }
+        AppLogger.log("[AppDelegate] URL trigger: \(url)")
+        // Receiving this Apple Event has already activated us — the pill's "follow the
+        // focused field" AX lookup would otherwise wrongly target our own app instead of
+        // the one the user was actually dictating into (see DictationIndicatorController).
+        AppLogger.log("[AppDelegate] URL trigger — lastExternalAppPID=\(lastExternalAppPID.map(String.init) ?? "nil")")
+        DictationIndicatorController.shared.externalAppPIDOverride = lastExternalAppPID
+
+        // Receiving this Apple Event just forced macOS to activate us — hand focus straight
+        // back to whatever we were triggered from (applicationWillBecomeActive captured it)
+        // before touching anything AX/paste-related, which all depend on that app being the
+        // real frontmost one. Give the window server a beat to actually complete the handoff.
+        if let pid = lastExternalAppPID, let app = NSRunningApplication(processIdentifier: pid) {
+            app.activate()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
+                self?.dispatch(action: action)
+            }
+        } else {
+            dispatch(action: action)
+        }
+    }
+
+    private func dispatch(action: String) {
+        switch action {
+        case "readText":         Task { @MainActor in await self.handleReadText() }
+        case "ocr":               handleOCR()
+        case "dictate":           handleDictate()
+        case "smartDictate":      handleSmartDictate()
+        case "insertFromMemory":  handleInsertFromMemory()
+        default: AppLogger.log("[AppDelegate] URL trigger — neznáma akcia: \(action)")
         }
     }
 
@@ -211,6 +297,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Inserts the last dictated text that couldn't be auto-inserted (⌃⌥V by default).
     func handleInsertFromMemory() {
         AppLogger.log("[AppDelegate] handleInsertFromMemory — skratka stlačená")
+        // The "saved to memory" notice told the user about this exact shortcut — using it
+        // is the notice doing its job, so dismiss the pill instead of leaving it sitting
+        // there (same dismissal path as clicking the pill away).
+        DictationIndicatorController.shared.hide(from: "handleInsertFromMemory")
         guard let text = DictationMemoryStore.shared.consume() else {
             menuBarController?.showError("⚠️ Pamäť diktovania je prázdna.")
             return

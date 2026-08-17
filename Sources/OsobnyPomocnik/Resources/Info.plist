@@ -33,6 +33,23 @@
     <key>NSScreenCaptureUsageDescription</key>
     <string>Osobný pomocník potrebuje zachytiť obrazovku pre funkciu OCR.</string>
 
+    <!-- Custom URL scheme — lets external tools (Logi Options+ Smart Actions, Shortcuts.app,
+         Raycast, ...) trigger actions directly (osobnypomocnik://dictate) instead of via a
+         synthesized keystroke, which CGEventTap-based global hotkeys can't reliably see when
+         the synthetic event is posted straight to the frontmost app (CGEventPostToPid bypasses
+         session-wide event taps by OS design). -->
+    <key>CFBundleURLTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleURLName</key>
+            <string>sk.matuskarak.osobny-pomocnik</string>
+            <key>CFBundleURLSchemes</key>
+            <array>
+                <string>osobnypomocnik</string>
+            </array>
+        </dict>
+    </array>
+
     <!-- Sparkle auto-update -->
     <key>SUFeedURL</key>
     <string>https://raw.githubusercontent.com/matuskarak/personal-helper/master/appcast.xml</string>
