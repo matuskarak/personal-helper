@@ -56,14 +56,24 @@ private struct LocalModelTestView: View {
         }
         .padding(16)
         .task { await whisper.ensureLoaded() }
+        .onChange(of: whisper.source) { _, _ in Task { await whisper.ensureLoaded() } }
     }
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text("Cloud (gpt-transcribe) vs. lokálny WhisperKit — porovnanie na tej istej nahrávke.")
                 .font(.callout)
+            Picker("Lokálny model:", selection: Binding(
+                get: { whisper.source },
+                set: { whisper.source = $0 }
+            )) {
+                ForEach(LocalWhisperEngine.Source.allCases) { Text($0.rawValue).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            .frame(maxWidth: 360)
+            .disabled(engine.phase == .transcribing)
             HStack(spacing: 6) {
-                Text("Model:").foregroundStyle(.secondary)
+                Text("Stav:").foregroundStyle(.secondary)
                 switch whisper.status {
                 case .notLoaded:          Text("nenačítaný")
                 case .downloading:        HStack(spacing: 6) { ProgressView().controlSize(.small); Text("sťahujem/pripravujem…") }
