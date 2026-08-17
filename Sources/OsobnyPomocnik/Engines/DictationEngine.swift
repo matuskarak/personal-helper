@@ -220,7 +220,10 @@ final class DictationEngine {
         didSet { UserDefaults.standard.set(transcriptionDelay, forKey: "whisper.delay") }
     }
 
-    enum TranscriptionMode: String { case realtime, batch }
+    // test/local-whisper-sk only — see CLAUDE.md. `.local` transcribes fully on-device via
+    // WhisperKit (LocalWhisperEngine) instead of an OpenAI REST call — same recording path
+    // as `.batch`, different transcription backend.
+    enum TranscriptionMode: String { case realtime, batch, local }
 
     /// Which backend serves .realtime mode.
     ///
@@ -284,7 +287,9 @@ final class DictationEngine {
     /// mix of rates if the user switched modes mid-way. Fine until someone needs split billing.
     /// Delegates to Pricing.usdPerMinute so the per-model rate has one source of truth instead
     /// of drifting between here and the model picker in Nastavenia.
-    var costPerMinute: Double { Pricing.usdPerMinute(realtime: transcriptionMode == .realtime, batchModel: batchModel) }
+    var costPerMinute: Double {
+        transcriptionMode == .local ? 0 : Pricing.usdPerMinute(realtime: transcriptionMode == .realtime, batchModel: batchModel)
+    }
 
     // Microphone priority order — persistent stableKeys (see AudioInputDevice.stableKey),
     // most preferred first. At recording start we walk the list and use the first one
@@ -447,10 +452,12 @@ final class DictationEngine {
             let ids = Set(models.compactMap { $0["id"] as? String })
             // Only the models the current settings actually use — reporting a missing
             // gpt-realtime-2 to someone on gpt-live-transcribe is just noise.
-            let needed = transcriptionMode == .realtime
-                ? (realtimeModel == .live ? [RealtimeModel.live.rawValue]
-                                          : ["gpt-realtime-2", RealtimeModel.legacy.rawValue])
-                : [batchModel]
+            let needed: [String] = switch transcriptionMode {
+            case .realtime: realtimeModel == .live ? [RealtimeModel.live.rawValue]
+                                                    : ["gpt-realtime-2", RealtimeModel.legacy.rawValue]
+            case .batch: [batchModel]
+            case .local: []  // fully on-device, no OpenAI model needed
+            }
             let missing = needed.filter { !ids.contains($0) }
             AppLogger.log("[DictationEngine] API key OK. Required: \(needed.joined(separator: ", ")) — missing: \(missing.isEmpty ? "none" : missing.joined(separator: ", "))")
 
@@ -618,8 +625,8 @@ final class DictationEngine {
                     }
                     AppLogger.log("[DictationEngine] DeviceCapture WS ready, starting IO proc...")
 
-                case .batch:
-                    AppLogger.log("[DictationEngine] DeviceCapture Batch mode (\(batchModel))")
+                case .batch, .local:
+                    AppLogger.log("[DictationEngine] DeviceCapture \(transcriptionMode == .local ? "Local" : "Batch") mode (\(transcriptionMode == .local ? "whisperkit-sk" : batchModel))")
                     _ = batchAudioBuffer.drain()
                     capture.onBuffer = { buf in
                         accumulateChunkForBatch(
@@ -652,8 +659,8 @@ final class DictationEngine {
                         )
                     }
 
-                case .batch:
-                    AppLogger.log("[DictationEngine] Batch mode (\(batchModel)) — recording locally, no WebSocket")
+                case .batch, .local:
+                    AppLogger.log("[DictationEngine] \(transcriptionMode == .local ? "Local" : "Batch") mode (\(transcriptionMode == .local ? "whisperkit-sk" : batchModel)) — recording locally, no WebSocket")
                     _ = batchAudioBuffer.drain()
                     inputNode.installTap(onBus: 0, bufferSize: 2_400, format: inputFormat) { buf, _ in
                         accumulateChunkForBatch(
@@ -859,6 +866,9 @@ final class DictationEngine {
 
         case .batch:
             transcript = await transcribeBatch()
+
+        case .local:
+            transcript = await transcribeLocal()
         }
 
         var result = transcript.isEmpty ? nil : transcript
@@ -964,7 +974,8 @@ final class DictationEngine {
         liveText        = ""
         accumulatedText = ""
         if !dictatedText.isEmpty {
-            let model = transcriptionMode == .realtime ? realtimeModel.rawValue : batchModel
+            let model = transcriptionMode == .realtime ? realtimeModel.rawValue
+                : (transcriptionMode == .local ? "whisperkit-sk-local" : batchModel)
             UsageStore.shared.logDictation(seconds: elapsed, text: dictatedText, model: model)
             DictationHistoryStore.shared.log(dictatedText, appName: appName, bundleID: bundleID,
                                              category: category, seconds: elapsed,
@@ -1034,6 +1045,28 @@ final class DictationEngine {
         } catch {
             AppLogger.log("[DictationEngine] ⚠️ Batch transcription network error: \(error)")
             connectionError = "Sieťová chyba: \(error.localizedDescription)"
+            return ""
+        }
+    }
+
+    // test/local-whisper-sk only — see CLAUDE.md. Same recorded PCM as .batch, but
+    // transcribed fully on-device via WhisperKit instead of an OpenAI REST call.
+    private func transcribeLocal() async -> String {
+        let pcmData = batchAudioBuffer.drain()
+        AppLogger.log("[DictationEngine] Local transcribe — \(pcmData.count) bytes PCM")
+        guard !pcmData.isEmpty else { return "" }
+
+        let wav = Self.wavData(pcm16: pcmData, sampleRate: 24_000, channels: 1)
+        let tmpURL = FileManager.default.temporaryDirectory.appendingPathComponent("dictation-local-\(UUID().uuidString).wav")
+        do {
+            try wav.write(to: tmpURL)
+            defer { try? FileManager.default.removeItem(at: tmpURL) }
+            let outcome = try await LocalWhisperEngine.shared.transcribe(wavURL: tmpURL)
+            AppLogger.log("[DictationEngine] Local transcription completed (\(outcome.text.count) chars, \(String(format: "%.1f", outcome.seconds))s)")
+            return outcome.text
+        } catch {
+            AppLogger.log("[DictationEngine] ⚠️ Local transcription failed: \(error)")
+            connectionError = "Lokálny prepis zlyhal: \(error.localizedDescription)"
             return ""
         }
     }
