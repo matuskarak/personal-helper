@@ -582,6 +582,7 @@ final class DictationEngine {
             AppLogger.log("[DictationEngine] Session profile: \(sessionProfile?.displayName ?? "—"), keywords: \(sessionProfile?.transcriptionKeywords.count ?? 0)")
         }
 
+        AppLogger.log("[DictationEngine] context capture task launched (smart: \(smart))")
         contextCaptureTask = Task { [weak self] in
             let ctx = await SmartContextCapture.shared.captureFrontmostContext(captureScreenshot: smart)
             guard let self else { return }
@@ -591,6 +592,7 @@ final class DictationEngine {
             self.capturedProfile = AppProfileStore.shared.matchingProfile(
                 bundleID: ctx.bundleID, windowTitle: ctx.windowTitle
             )
+            AppLogger.log("[DictationEngine] context capture task finished — profile=\(self.capturedProfile?.displayName ?? "?") hasScreenshot=\(ctx.image != nil)")
         }
 
         do {
@@ -806,6 +808,11 @@ final class DictationEngine {
     func stopAndTranscribe() async -> String? {
         let elapsed = recordingStartDate.map { Int(Date().timeIntervalSince($0)) } ?? 0
         recordingStartDate = nil
+        // A slow/hung network call (e.g. Smart rewrite) can still be in flight when the user
+        // starts a brand-new session before this one finishes — startRecording() bumps
+        // sessionID. Checked again below, right before this call would otherwise mutate
+        // shared captured*/isSmartMode state or insert text into whatever's now frontmost.
+        let mySessionID = sessionID
 
         stopAudio()
         isTranscribing = true
@@ -863,10 +870,20 @@ final class DictationEngine {
         let dictatedText = transcriptionMode == .realtime ? accumulatedText : transcript
         if !dictatedText.isEmpty { totalSecondsRecorded += elapsed }
 
+        // Everything below reads/resets shared captured*/isSmartMode state and can insert
+        // text — a newer session already owns that state if one started while this call was
+        // stuck (e.g. a slow Smart-rewrite network request). Bail before touching any of it.
+        guard sessionID == mySessionID else {
+            AppLogger.log("[DictationEngine] ⚠️ stopAndTranscribe — session #\(mySessionID) superseded by #\(sessionID) mid-flight, discarding stale result instead of inserting/resetting")
+            isTranscribing = false
+            return nil
+        }
+
         // The context capture races the transcript — on a very short dictation the
         // transcript can land first, leaving capturedProfile nil (which used to silently
         // skip the Smart rewrite altogether). Give it a moment to finish before reading it.
         if let task = contextCaptureTask {
+            AppLogger.log("[DictationEngine] waiting up to 2s for context capture to finish…")
             // Whichever finishes first wins; the 2 s cap keeps a hung ScreenCaptureKit
             // call from delaying the user's text. Cancelling the group only abandons the
             // wait — the capture task itself is harmless if it lands late.
@@ -884,27 +901,56 @@ final class DictationEngine {
 
         // Smart diktovanie: rewrite the raw transcript using captured screen context
         var rewritten: String?
-        if isSmartMode, let raw = result, let profile = capturedProfile {
-            isRewriting = true
-            do {
-                let output = try await SmartRewriteEngine.shared.rewrite(
-                    transcript: raw,
-                    screenshot: capturedScreenshot,
-                    profile: profile,
-                    apiKey: openAIKey
-                )
-                result = output
-                rewritten = output
-            } catch {
-                AppLogger.log("[DictationEngine] Smart rewrite failed, falling back to raw transcript: \(error)")
-                result = raw
+        if isSmartMode {
+            if let raw = result, let profile = capturedProfile {
+                AppLogger.log("[DictationEngine] Smart rewrite starting — rawChars=\(raw.count) hasScreenshot=\(capturedScreenshot != nil) profile=\(profile.displayName)")
+                let t0 = Date()
+                isRewriting = true
+                do {
+                    let output = try await SmartRewriteEngine.shared.rewrite(
+                        transcript: raw,
+                        screenshot: capturedScreenshot,
+                        profile: profile,
+                        apiKey: openAIKey
+                    )
+                    rewritten = output
+                    // Safety net independent of prompt reliability: a refusal or an "I
+                    // answered your question instead of correcting it" response is reliably
+                    // much shorter than a genuine language correction of the same sentence.
+                    // Keep the model's attempt in history for debugging, but never let it
+                    // silently replace what the user actually said.
+                    let rawWords = DictationQualityEngine.normalizeWords(raw).count
+                    let outWords = DictationQualityEngine.normalizeWords(output).count
+                    if rawWords > 3, outWords < rawWords / 2 {
+                        AppLogger.log("[DictationEngine] ⚠️ Smart rewrite looks like a refusal/derail (rawWords=\(rawWords) outWords=\(outWords)) — using raw transcript instead")
+                        result = raw
+                    } else {
+                        result = output
+                    }
+                    AppLogger.log("[DictationEngine] Smart rewrite done — outChars=\(output.count), \(Int(Date().timeIntervalSince(t0) * 1000))ms")
+                } catch {
+                    AppLogger.log("[DictationEngine] ⚠️ Smart rewrite failed, falling back to raw transcript: \(error)")
+                    result = raw
+                }
+                isRewriting = false
+            } else {
+                AppLogger.log("[DictationEngine] Smart rewrite skipped — result=\(result != nil) capturedProfile=\(capturedProfile != nil)")
             }
-            isRewriting = false
+        }
+
+        // Re-check: the Smart rewrite network call above is the slow part (up to the 20s
+        // timeout) — a new session can easily have started while it was in flight.
+        guard sessionID == mySessionID else {
+            AppLogger.log("[DictationEngine] ⚠️ stopAndTranscribe — session #\(mySessionID) superseded by #\(sessionID) during Smart rewrite, discarding stale result instead of inserting/resetting")
+            isTranscribing = false
+            return nil
         }
 
         let appName  = capturedAppName
         let bundleID = capturedBundleID
         let category = capturedProfile?.category ?? .generic
+        let screenshotJPEG = SmartRewriteEngine.shared.saveScreenshotsToHistory
+            ? capturedScreenshot?.jpegData(quality: 0.75) : nil
 
         isSmartMode        = false
         capturedScreenshot = nil
@@ -922,7 +968,7 @@ final class DictationEngine {
             UsageStore.shared.logDictation(seconds: elapsed, text: dictatedText, model: model)
             DictationHistoryStore.shared.log(dictatedText, appName: appName, bundleID: bundleID,
                                              category: category, seconds: elapsed,
-                                             rewrittenText: rewritten)
+                                             rewrittenText: rewritten, screenshotJPEG: screenshotJPEG)
         }
         return result
     }
