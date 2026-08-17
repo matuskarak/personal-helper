@@ -1058,10 +1058,14 @@ final class DictationEngine {
 
         let wav = Self.wavData(pcm16: pcmData, sampleRate: 24_000, channels: 1)
         let tmpURL = FileManager.default.temporaryDirectory.appendingPathComponent("dictation-local-\(UUID().uuidString).wav")
+        // Same keyword assembly as the realtime gpt-live-transcribe path (default + matched
+        // App profile's) — garbled technical/foreign terms have zero chance of being fixed
+        // downstream by Smart rewrite if the raw transcript never had a hint to get them right.
+        let keywords = AppProfile.parseKeywords(defaultKeywords) + (sessionProfile?.transcriptionKeywords ?? [])
         do {
             try wav.write(to: tmpURL)
             defer { try? FileManager.default.removeItem(at: tmpURL) }
-            let outcome = try await LocalWhisperEngine.shared.transcribe(wavURL: tmpURL)
+            let outcome = try await LocalWhisperEngine.shared.transcribe(wavURL: tmpURL, promptKeywords: keywords)
             AppLogger.log("[DictationEngine] Local transcription completed (\(outcome.text.count) chars, \(String(format: "%.1f", outcome.seconds))s)")
             return outcome.text
         } catch {

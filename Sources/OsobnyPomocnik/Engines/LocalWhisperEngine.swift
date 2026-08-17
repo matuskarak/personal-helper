@@ -84,13 +84,21 @@ final class LocalWhisperEngine {
         var seconds: Double
     }
 
-    func transcribe(wavURL: URL) async throws -> TranscribeOutcome {
+    /// - Parameter promptKeywords: same free-text vocabulary hints the cloud gpt-live-transcribe
+    ///   path gets (default keywords + matched App profile's) — encoded into Whisper's
+    ///   `initial_prompt` mechanism (`promptTokens`) so garbled technical/foreign terms have a
+    ///   chance of being recognized correctly instead of guessed at with zero context.
+    func transcribe(wavURL: URL, promptKeywords: [String] = []) async throws -> TranscribeOutcome {
         await ensureLoaded()
         guard let whisperKit else { throw LocalWhisperError.notLoaded }
         let t0 = Date()
         var options = DecodingOptions()
         options.language = "sk"
         options.detectLanguage = false
+        if !promptKeywords.isEmpty, let tokenizer = whisperKit.tokenizer {
+            options.promptTokens = tokenizer.encode(text: promptKeywords.joined(separator: ", "))
+            options.usePrefillPrompt = true
+        }
         let results = try await whisperKit.transcribe(audioPath: wavURL.path, decodeOptions: options)
         let text = results.map(\.text).joined(separator: " ").trimmingCharacters(in: .whitespacesAndNewlines)
         return TranscribeOutcome(text: text, seconds: Date().timeIntervalSince(t0))
