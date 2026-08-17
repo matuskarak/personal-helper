@@ -60,9 +60,10 @@ final class TTSEngine: NSObject {
         RecentTextStore.shared.store(text)
         if trackUsage { UsageStore.shared.logReading(text) }
         let lang = resolvedLanguage(for: text)
+        let spoken = SpeechTextNormalizer.normalize(text, language: lang)
         switch mode {
-        case .system:      speakWithSystem(text, language: lang)
-        case .googleCloud: Task { await speakWithGoogle(text, language: lang) }
+        case .system:      speakWithSystem(spoken, language: lang)
+        case .googleCloud: Task { await speakWithGoogle(spoken, language: lang) }
         }
     }
 
