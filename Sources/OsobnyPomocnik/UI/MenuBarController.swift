@@ -11,8 +11,6 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     private var historySubmenuItem  = NSMenuItem(title: "História diktovania", action: nil, keyEquivalent: "")
     private var restartItem         = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     private var diagnosticsItem     = NSMenuItem(title: "", action: nil, keyEquivalent: "")
-    // test/local-whisper-sk only — see CLAUDE.md.
-    private var localModelTestItem  = NSMenuItem(title: "", action: nil, keyEquivalent: "")
 
     override init() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
@@ -81,12 +79,6 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         restartItem.target = self
         restartItem.isHidden = true
         menu.addItem(restartItem)
-
-        // test/local-whisper-sk only — see CLAUDE.md.
-        localModelTestItem = NSMenuItem(title: "Test lokálneho modelu (SK)…", action: #selector(openLocalModelTest), keyEquivalent: "")
-        localModelTestItem.target = self
-        localModelTestItem.isHidden = true
-        menu.addItem(localModelTestItem)
 
         statusItem.menu = menu
     }
@@ -175,16 +167,10 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         let dev = DeveloperMode.isEnabled
         restartItem.isHidden     = !dev
         diagnosticsItem.isHidden = !dev
-        localModelTestItem.isHidden = !dev
     }
 
     @objc private func openLogViewer() {
         LogViewerWindowController.shared.show()
-    }
-
-    // test/local-whisper-sk only — see CLAUDE.md.
-    @objc private func openLocalModelTest() {
-        LocalModelTestWindowController.shared.show()
     }
 
     // MARK: - Mic selection
