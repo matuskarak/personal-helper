@@ -41,60 +41,103 @@ struct Shortcut: Codable, Equatable, Sendable {
             0:"A",1:"S",2:"D",3:"F",4:"H",5:"G",6:"Z",7:"X",8:"C",9:"V",
             11:"B",12:"Q",13:"W",14:"E",15:"R",16:"Y",17:"T",31:"O",32:"U",
             34:"I",37:"L",38:"J",40:"K",45:"N",46:"M",47:",",48:"⇥",49:"␣",
-            51:"⌫",53:"⎋",123:"←",124:"→",125:"↓",126:"↑"
+            51:"⌫",53:"⎋",123:"←",124:"→",125:"↓",126:"↑",
+            // Top-row digits
+            18:"1",19:"2",20:"3",21:"4",23:"5",22:"6",26:"7",28:"8",25:"9",29:"0",
+            // Numeric keypad — labelled distinctly since it's a different physical key
+            // than the top-row digit with the same face value (different keyCode).
+            82:"Num0",83:"Num1",84:"Num2",85:"Num3",86:"Num4",87:"Num5",
+            88:"Num6",89:"Num7",91:"Num8",92:"Num9",
+            65:"Num.",67:"Num*",69:"Num+",75:"Num/",76:"NumEnter",78:"Num-",81:"Num="
         ]
-        return map[keyCode] ?? "?"
+        if let name = map[keyCode] { return name }
+        if let f = fKeyNumber(forKeyCode: keyCode) { return "F\(f)" }
+        return "?"
+    }
+
+    // MARK: - Function keys
+    // macOS's virtual keycode set only goes up to F20 — there's no defined keycode for F21+,
+    // so that's the real ceiling here regardless of how many F-keys a keyboard claims to have.
+    private static let fKeyCodes: [Int: Int] = [
+        1:122, 2:120, 3:99, 4:118, 5:96, 6:97, 7:98, 8:100, 9:101, 10:109,
+        11:103, 12:111, 13:105, 14:107, 15:113, 16:106, 17:64, 18:79, 19:80, 20:90
+    ]
+    static func fKeyCode(_ n: Int) -> Int { fKeyCodes[n] ?? fKeyCodes[1]! }
+    private static func fKeyNumber(forKeyCode kc: Int) -> Int? {
+        fKeyCodes.first(where: { $0.value == kc })?.key
     }
 }
 
 // MARK: - Store
 
+/// Each action can have several shortcuts mapped to it (e.g. a laptop-keyboard combo and a
+/// separate external-keyboard combo) — up to `maxPerAction`. Index 0 is the "primary" one shown
+/// first; any of the list triggers the action.
 @MainActor
 final class ShortcutStore {
     static let shared = ShortcutStore()
     private init() {}
 
-    var readText: Shortcut {
-        get { load("sc.readText") ?? .defaultReadText }
-        set { save(newValue, for: "sc.readText"); sync() }
-    }
-    var ocr: Shortcut {
-        get { load("sc.ocr") ?? .defaultOCR }
-        set { save(newValue, for: "sc.ocr"); sync() }
-    }
-    var dictate: Shortcut {
-        get { load("sc.dictate") ?? .defaultDictate }
-        set { save(newValue, for: "sc.dictate"); sync() }
-    }
-    var smartDictate: Shortcut {
-        get { load("sc.smartDictate") ?? .defaultSmartDictate }
-        set { save(newValue, for: "sc.smartDictate"); sync() }
-    }
-    var insertFromMemory: Shortcut {
-        get { load("sc.insertFromMemory") ?? .defaultInsertFromMemory }
-        set { save(newValue, for: "sc.insertFromMemory"); sync() }
+    static let maxPerAction = 3
+
+    enum Action: String, CaseIterable {
+        case readText, ocr, dictate, smartDictate, insertFromMemory
+
+        var defaultShortcut: Shortcut {
+            switch self {
+            case .readText:         .defaultReadText
+            case .ocr:               .defaultOCR
+            case .dictate:           .defaultDictate
+            case .smartDictate:      .defaultSmartDictate
+            case .insertFromMemory:  .defaultInsertFromMemory
+            }
+        }
     }
 
-    private func load(_ key: String) -> Shortcut? {
-        // Both keys must exist (object(forKey:) returns nil if absent)
-        guard UserDefaults.standard.object(forKey: key + ".kc") != nil,
-              UserDefaults.standard.object(forKey: key + ".mf") != nil else { return nil }
-        let kc = UserDefaults.standard.integer(forKey: key + ".kc")
-        // modifierFlags is UInt; store as Int bit-pattern to survive UserDefaults round-trip
-        let mf = UInt(bitPattern: UserDefaults.standard.integer(forKey: key + ".mf"))
-        return Shortcut(keyCode: kc, rawModifiers: mf)
+    func shortcuts(for action: Action) -> [Shortcut] {
+        let key = "sc.\(action.rawValue).list"
+        if let data = UserDefaults.standard.data(forKey: key),
+           let list = try? JSONDecoder().decode([Shortcut].self, from: data),
+           !list.isEmpty {
+            return Array(list.prefix(Self.maxPerAction))
+        }
+        // Migrate the old single-shortcut keys (sc.<action>.kc/.mf) if present.
+        let legacyKey = "sc.\(action.rawValue)"
+        if UserDefaults.standard.object(forKey: legacyKey + ".kc") != nil,
+           UserDefaults.standard.object(forKey: legacyKey + ".mf") != nil {
+            let kc = UserDefaults.standard.integer(forKey: legacyKey + ".kc")
+            let mf = UInt(bitPattern: UserDefaults.standard.integer(forKey: legacyKey + ".mf"))
+            return [Shortcut(keyCode: kc, rawModifiers: mf)]
+        }
+        return [action.defaultShortcut]
     }
 
-    private func save(_ s: Shortcut, for key: String) {
-        UserDefaults.standard.set(s.keyCode, forKey: key + ".kc")
-        UserDefaults.standard.set(Int(bitPattern: s.modifierFlags), forKey: key + ".mf")
-        UserDefaults.standard.synchronize()
+    func setShortcuts(_ list: [Shortcut], for action: Action) {
+        let clamped = Array(list.prefix(Self.maxPerAction))
+        guard let data = try? JSONEncoder().encode(clamped) else { return }
+        UserDefaults.standard.set(data, forKey: "sc.\(action.rawValue).list")
+        sync()
     }
 
-    private func sync() {
+    func resetAllToDefaults() {
+        for action in Action.allCases {
+            // Write the default explicitly rather than just removing the key — shortcuts(for:)
+            // falls back to legacy pre-migration keys when the list key is absent, which would
+            // resurrect an old custom shortcut instead of actually resetting to default.
+            setShortcuts([action.defaultShortcut], for: action)
+        }
+    }
+
+    /// Pushes the persisted shortcuts into HotkeyManager — must run once at launch (the
+    /// manager's cache otherwise stays at hardcoded defaults until the user opens Preferences
+    /// and edits something) and again after every edit.
+    func sync() {
         HotkeyManager.shared.updateShortcuts(
-            readText: readText, ocr: ocr, dictate: dictate, smartDictate: smartDictate,
-            insertFromMemory: insertFromMemory
+            readText: shortcuts(for: .readText),
+            ocr: shortcuts(for: .ocr),
+            dictate: shortcuts(for: .dictate),
+            smartDictate: shortcuts(for: .smartDictate),
+            insertFromMemory: shortcuts(for: .insertFromMemory)
         )
     }
 }

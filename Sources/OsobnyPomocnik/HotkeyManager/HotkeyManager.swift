@@ -10,12 +10,13 @@ final class HotkeyManager: @unchecked Sendable {
     var onInsertFromMemory: (() -> Void)?
     var onEnterStopDictation: (() -> Void)?
 
-    // Cached shortcuts — written from MainActor, read from CGEventTap thread
-    private var readTextSC: Shortcut         = .defaultReadText
-    private var ocrSC: Shortcut              = .defaultOCR
-    private var dictateSC: Shortcut          = .defaultDictate
-    private var smartDictateSC: Shortcut     = .defaultSmartDictate
-    private var insertFromMemorySC: Shortcut = .defaultInsertFromMemory
+    // Cached shortcuts — written from MainActor, read from CGEventTap thread.
+    // Each action can have several mapped shortcuts (e.g. laptop keyboard vs external keyboard).
+    private var readTextSCs: [Shortcut]         = [.defaultReadText]
+    private var ocrSCs: [Shortcut]              = [.defaultOCR]
+    private var dictateSCs: [Shortcut]          = [.defaultDictate]
+    private var smartDictateSCs: [Shortcut]     = [.defaultSmartDictate]
+    private var insertFromMemorySCs: [Shortcut] = [.defaultInsertFromMemory]
 
     private var eventTap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
@@ -57,14 +58,14 @@ final class HotkeyManager: @unchecked Sendable {
     }
 
     func updateShortcuts(
-        readText: Shortcut, ocr: Shortcut, dictate: Shortcut, smartDictate: Shortcut,
-        insertFromMemory: Shortcut
+        readText: [Shortcut], ocr: [Shortcut], dictate: [Shortcut], smartDictate: [Shortcut],
+        insertFromMemory: [Shortcut]
     ) {
-        readTextSC         = readText
-        ocrSC               = ocr
-        dictateSC           = dictate
-        smartDictateSC      = smartDictate
-        insertFromMemorySC  = insertFromMemory
+        readTextSCs         = readText
+        ocrSCs               = ocr
+        dictateSCs           = dictate
+        smartDictateSCs      = smartDictate
+        insertFromMemorySCs  = insertFromMemory
     }
 
     // MARK: - Event handling
@@ -82,23 +83,23 @@ final class HotkeyManager: @unchecked Sendable {
         }
         guard type == .keyDown else { return Unmanaged.passRetained(event) }
 
-        if matches(event, shortcut: readTextSC) {
+        if matchesAny(event, shortcuts: readTextSCs) {
             DispatchQueue.main.async { self.onReadText?() }
             return nil
         }
-        if matches(event, shortcut: ocrSC) {
+        if matchesAny(event, shortcuts: ocrSCs) {
             DispatchQueue.main.async { self.onOCR?() }
             return nil
         }
-        if matches(event, shortcut: dictateSC) {
+        if matchesAny(event, shortcuts: dictateSCs) {
             DispatchQueue.main.async { self.onDictate?() }
             return nil
         }
-        if matches(event, shortcut: smartDictateSC) {
+        if matchesAny(event, shortcuts: smartDictateSCs) {
             DispatchQueue.main.async { self.onSmartDictate?() }
             return nil
         }
-        if matches(event, shortcut: insertFromMemorySC) {
+        if matchesAny(event, shortcuts: insertFromMemorySCs) {
             DispatchQueue.main.async { self.onInsertFromMemory?() }
             return nil
         }
@@ -113,6 +114,10 @@ final class HotkeyManager: @unchecked Sendable {
             }
         }
         return Unmanaged.passRetained(event)
+    }
+
+    private func matchesAny(_ event: CGEvent, shortcuts: [Shortcut]) -> Bool {
+        shortcuts.contains { matches(event, shortcut: $0) }
     }
 
     private func matches(_ event: CGEvent, shortcut: Shortcut) -> Bool {

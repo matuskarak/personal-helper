@@ -65,10 +65,17 @@ final class DictationIndicatorController: NSWindowController, NSWindowDelegate {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError() }
 
+    /// Set by callers whose trigger may have already activated our own app (URL-scheme /
+    /// Apple Event triggers, e.g. Logi Options+) before show() runs — reposition() then asks
+    /// this specific app's AX tree instead of the system-wide "focused app", which would
+    /// otherwise resolve to us.
+    var externalAppPIDOverride: pid_t?
+
     func show(from caller: String = #function) {
         AppLogger.log("[Indicator] show() ← \(caller) | window visible: \(window?.isVisible == true)")
         reposition()
         window?.orderFront(nil)
+        externalAppPIDOverride = nil // one-shot: don't leak into the next, normally-triggered show()
     }
 
     func hide(from caller: String = #function) {
@@ -99,7 +106,9 @@ final class DictationIndicatorController: NSWindowController, NSWindowDelegate {
         guard let window else { return }
         let size = window.frame.size
 
-        if PillPosition.followFocusedField, let axFrame = FocusValidator.focusedElementFrame() {
+        AppLogger.log("[Indicator] reposition() followField=\(PillPosition.followFocusedField) pidOverride=\(externalAppPIDOverride.map(String.init) ?? "nil")")
+        if PillPosition.followFocusedField, let axFrame = FocusValidator.focusedElementFrame(pid: externalAppPIDOverride) {
+            AppLogger.log("[Indicator] reposition() axFrame=\(axFrame)")
             // Flip AX's top-left/Y-down space into AppKit's bottom-left/Y-up space.
             let primaryHeight = NSScreen.screens.first?.frame.height ?? 0
             let fieldFrame = CGRect(x: axFrame.origin.x,
@@ -114,6 +123,8 @@ final class DictationIndicatorController: NSWindowController, NSWindowDelegate {
             }
             applyPosition(NSPoint(x: x, y: y))
             return
+        } else if PillPosition.followFocusedField {
+            AppLogger.log("[Indicator] reposition() — focusedElementFrame() returned nil, falling back")
         }
 
         if let custom = PillPosition.custom {

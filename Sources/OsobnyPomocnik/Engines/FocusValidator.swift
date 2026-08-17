@@ -47,14 +47,23 @@ enum FocusValidator {
     /// On-screen frame of the currently focused UI element, in Quartz global-display
     /// coordinates (origin top-left, Y down — what AX position/size attributes report).
     /// Callers needing AppKit screen coordinates (origin bottom-left, Y up) must flip it.
-    static func focusedElementFrame() -> CGRect? {
-        let systemWide = AXUIElementCreateSystemWide()
-
-        var focusedAppRef: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(systemWide, kAXFocusedApplicationAttribute as CFString, &focusedAppRef) == .success,
-              let focusedAppRef, CFGetTypeID(focusedAppRef) == AXUIElementGetTypeID()
-        else { return nil }
-        let focusedApp = focusedAppRef as! AXUIElement
+    ///
+    /// - Parameter pid: query this app's AX tree directly instead of asking the system-wide
+    ///   "currently focused application". Needed when a trigger (URL scheme / Apple Event)
+    ///   activates our own app before this runs, which would otherwise make the system-wide
+    ///   lookup report US as focused instead of the field the user was actually dictating into.
+    static func focusedElementFrame(pid: pid_t? = nil) -> CGRect? {
+        let focusedApp: AXUIElement
+        if let pid {
+            focusedApp = AXUIElementCreateApplication(pid)
+        } else {
+            let systemWide = AXUIElementCreateSystemWide()
+            var focusedAppRef: CFTypeRef?
+            guard AXUIElementCopyAttributeValue(systemWide, kAXFocusedApplicationAttribute as CFString, &focusedAppRef) == .success,
+                  let focusedAppRef, CFGetTypeID(focusedAppRef) == AXUIElementGetTypeID()
+            else { return nil }
+            focusedApp = focusedAppRef as! AXUIElement
+        }
 
         var focusedElementRef: CFTypeRef?
         guard AXUIElementCopyAttributeValue(focusedApp, kAXFocusedUIElementAttribute as CFString, &focusedElementRef) == .success,
