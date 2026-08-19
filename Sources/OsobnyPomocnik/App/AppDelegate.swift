@@ -271,6 +271,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             } else if !engine.lastRecordingCapturedAudio {
                 AppLogger.log("[AppDelegate] \(label) — žiadne audio sa nezaznamenalo")
                 engine.showNotice("⚠️ Audio sa nezaznamenalo. Skontroluj mikrofón.")
+            } else if engine.notice != nil {
+                // transcribeLocal() already raised a sticky notice explaining an empty
+                // result (e.g. no-speech-detected on real audio) — leave the pill up so
+                // the user actually sees why nothing was inserted, instead of it vanishing.
+                AppLogger.log("[AppDelegate] \(label) — prázdny transkript s vysvetľujúcim upozornením")
             } else {
                 AppLogger.log("[AppDelegate] \(label) — prázdny transkript, nič sa nevkladá")
                 DictationIndicatorController.shared.hide()
@@ -287,7 +292,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         switch TextInserter.shared.insertOrRemember(text) {
         case .inserted:
             AppLogger.log("[AppDelegate] \(label) — vložené (\(text.count) znakov)")
-            DictationIndicatorController.shared.hide()
+            DictationSounds.playInserted()
+            if engine.notice == nil {
+                DictationIndicatorController.shared.hide()
+            }
+            // else: a non-sticky notice (e.g. Smart rewrite fell back to raw transcript) is
+            // already showing — let the pill's own auto-clear timer dismiss it so the user
+            // actually sees why the inserted text looks different, instead of it vanishing
+            // the instant the paste succeeds.
         case .savedToMemory:
             AppLogger.log("[AppDelegate] \(label) — žiadne pole nebolo zvolené, uložené do pamäte (\(text.count) znakov)")
             engine.showNotice("⚠️ Nebolo zvolené pole na vloženie. Text uložený do pamäte (⌃⌥V).")
@@ -314,8 +326,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 // ponytail: loaded once and held — NSSound(named:)?.play() is silently a no-op because
 // the object is released by ARC before it finishes playing (no retained reference).
 private enum DictationSounds {
-    private static let start: NSSound? = load("Tink")
-    private static let stop_:  NSSound? = load("Pop")
+    private static let start:    NSSound? = load("Tink")
+    private static let stop_:    NSSound? = load("Pop")
+    private static let inserted: NSSound? = load("Submarine")
 
     private static func load(_ name: String) -> NSSound? {
         let s = NSSound(contentsOfFile: "/System/Library/Sounds/\(name).aiff", byReference: false)
@@ -323,8 +336,9 @@ private enum DictationSounds {
         return s
     }
 
-    static func playStart() { play(start) }
-    static func playStop()  { play(stop_) }
+    static func playStart()    { play(start) }
+    static func playStop()     { play(stop_) }
+    static func playInserted() { play(inserted) }
 
     private static func play(_ sound: NSSound?) {
         guard let sound else { return }

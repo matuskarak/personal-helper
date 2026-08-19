@@ -88,13 +88,20 @@ final class LocalWhisperEngine {
     ///   path gets (default keywords + matched App profile's) — encoded into Whisper's
     ///   `initial_prompt` mechanism (`promptTokens`) so garbled technical/foreign terms have a
     ///   chance of being recognized correctly instead of guessed at with zero context.
-    func transcribe(wavURL: URL, promptKeywords: [String] = []) async throws -> TranscribeOutcome {
+    /// - Parameter relaxNoSpeechGuard: disables WhisperKit's `noSpeechThreshold` silence-drop.
+    ///   Off by default — that guard is also what stops Whisper's well-known hallucination
+    ///   failure mode on true silence/noise (repeating boilerplate, or a stray URL — a known
+    ///   artifact of its YouTube-caption training data). Only pass true for a last-resort retry
+    ///   after independently confirming the recording actually has audio energy — see
+    ///   DictationEngine.transcribeLocal.
+    func transcribe(wavURL: URL, promptKeywords: [String] = [], relaxNoSpeechGuard: Bool = false) async throws -> TranscribeOutcome {
         await ensureLoaded()
         guard let whisperKit else { throw LocalWhisperError.notLoaded }
         let t0 = Date()
         var options = DecodingOptions()
         options.language = "sk"
         options.detectLanguage = false
+        if relaxNoSpeechGuard { options.noSpeechThreshold = nil }
         if !promptKeywords.isEmpty, let tokenizer = whisperKit.tokenizer {
             options.promptTokens = tokenizer.encode(text: promptKeywords.joined(separator: ", "))
             options.usePrefillPrompt = true

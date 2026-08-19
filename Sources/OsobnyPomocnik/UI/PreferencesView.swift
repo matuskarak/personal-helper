@@ -1114,13 +1114,16 @@ struct PreferencesView: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text(Self.historyDateFormatter.string(from: entry.date))
                     .font(.caption2).foregroundStyle(.tertiary)
-                Text(entry.text)
+                // Same text that the insert button pastes — see MenuBarController's history menu.
+                Text(entry.rewrittenText ?? entry.text)
                     .font(.callout)
                     .lineLimit(3)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             Button {
-                TextInserter.shared.insert(entry.text)
+                let text = entry.rewrittenText ?? entry.text
+                AppLogger.log("[PreferencesView] história — vložené na požiadanie (\(text.count) znakov)")
+                TextInserter.shared.insert(text)
             } label: {
                 Image(systemName: "arrow.right.doc.on.clipboard")
             }
