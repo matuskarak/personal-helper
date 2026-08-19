@@ -1,6 +1,5 @@
 import AppKit
 import AVFoundation
-import Speech
 @preconcurrency import ApplicationServices
 
 @MainActor
@@ -13,7 +12,6 @@ final class PermissionsChecker {
             showAccessibilityPrompt()
         }
         requestMicrophone()
-        requestSpeechRecognition()
     }
 
     var isAccessibilityGranted: Bool {
@@ -42,9 +40,5 @@ final class PermissionsChecker {
     private func requestMicrophone() {
         guard AVCaptureDevice.authorizationStatus(for: .audio) == .notDetermined else { return }
         AVCaptureDevice.requestAccess(for: .audio) { _ in }
-    }
-
-    private func requestSpeechRecognition() {
-        SFSpeechRecognizer.requestAuthorization { _ in }
     }
 }

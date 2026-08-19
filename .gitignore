@@ -7,3 +7,4 @@ backup_*.zip
 .claude/settings.local.json
 .sparkle-tools/
 releases/
+backup-pred-*/

@@ -59,15 +59,15 @@ final class SmartRewriteEngine {
 
     func rewrite(
         transcript: String,
-        screenshot: CGImage?,
+        screenshotJPEG: Data?,   // pre-encoded by DictationEngine's capture task — see capturedScreenshotJPEG
         profile: AppProfile,
         apiKey: String
     ) async throws -> String {
         var content: [[String: Any]] = [
             ["type": "text", "text": "<text_to_correct>\n\(transcript)\n</text_to_correct>"]
         ]
-        if let screenshot, let b64 = screenshot.jpegBase64(quality: 0.75) {
-            content.append(["type": "image_url", "image_url": ["url": "data:image/jpeg;base64,\(b64)"]])
+        if let screenshotJPEG {
+            content.append(["type": "image_url", "image_url": ["url": "data:image/jpeg;base64,\(screenshotJPEG.base64EncodedString())"]])
         }
 
         let preamble = visionPromptEnabled
@@ -188,5 +188,4 @@ extension CGImage {
         return rep.representation(using: .jpeg, properties: [.compressionFactor: quality])
     }
 
-    func jpegBase64(quality: CGFloat = 0.6) -> String? { jpegData(quality: quality)?.base64EncodedString() }
 }

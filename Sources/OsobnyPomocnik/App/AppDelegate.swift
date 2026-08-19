@@ -325,7 +325,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
 // ponytail: loaded once and held — NSSound(named:)?.play() is silently a no-op because
 // the object is released by ARC before it finishes playing (no retained reference).
+//
+// Played on a background queue, never the caller's thread: NSSound.play() BLOCKS while
+// CoreAudio spins up an idle output device — measured 580ms cold / 11ms warm. Called
+// synchronously from handleDictate's stop branch, that block sat between the user's
+// stop keypress and stopAudio(), delaying every transcription start by ~0.4s.
 private enum DictationSounds {
+    private static let soundQ = DispatchQueue(label: "sk.matuskarak.osobny-pomocnik.sounds", qos: .userInteractive)
     private static let start:    NSSound? = load("Tink")
     private static let stop_:    NSSound? = load("Pop")
     private static let inserted: NSSound? = load("Submarine")
@@ -341,8 +347,10 @@ private enum DictationSounds {
     static func playInserted() { play(inserted) }
 
     private static func play(_ sound: NSSound?) {
-        guard let sound else { return }
-        if sound.isPlaying { sound.stop(); sound.currentTime = 0 }
-        sound.play()
+        soundQ.async {
+            guard let sound else { return }
+            if sound.isPlaying { sound.stop(); sound.currentTime = 0 }
+            sound.play()
+        }
     }
 }
