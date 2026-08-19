@@ -1,43 +1,47 @@
-# ⚠️ Aktuálne aktívna je TESTOVACIA vetva
+# Osobný pomocník — pokyny pre Claude
 
-Tento pracovný adresár je momentálne prepnutý na **`test/local-whisper-sk`** — samostatnú
-git vetvu vytvorenú **len** na experiment s lokálnym (on-device) Whisper modelom pre
-slovenčinu (WhisperKit + fine-tuned `NaiveNeuron/whisper-large-v3-turbo-sk`).
+Aktívna vetva je **`master`**. Bežná práca (bugfixy, nové funkcie, UI) ide sem, žiadne
+prepínanie nie je potrebné.
 
-## Pravidlo pre Claude (a pre mňa, keď sa sem o pár dní vrátim)
+## Uzavretý experiment: lokálny (on-device) Whisper
 
-- **Bežná (produkčná) verzia appky je na branchi `master`.** Ak príde požiadavka, ktorá
-  NESÚVISÍ s testovaním lokálneho Whisper modelu (bugfix, nová appka feature, UI zmena,
-  čokoľvek nesúvisiace s WhisperKit experimentom), **najprv prepni na `master`**
-  (`git checkout master`) a rob zmenu tam, nie na tejto testovacej vetve.
-- Táto vetva (`test/local-whisper-sk`) je určená VÝHRADNE na:
-  - integráciu WhisperKit ako alternatívneho/paralelného transkripčného enginu,
-  - testovanie presnosti slovenčiny s `NaiveNeuron/whisper-large-v3-turbo-sk` (alebo iným
-    SK-ladeným checkpointom) oproti terajšiemu cloud riešeniu (OpenAI `gpt-transcribe` /
-    `gpt-live-transcribe`),
-  - čokoľvek iné explicitne označené ako súčasť tohto testu.
-- Ak si nie si (Claude) istý, či požadovaná zmena patrí sem alebo na `master` — **spýtaj sa**,
-  nepredpokladaj.
-- Táto vetva sa **nemergne do `master` automaticky** — až keď používateľ vyhodnotí test a
-  explicitne povie, že chce lokálny model natrvalo integrovať.
+Experiment s lokálnym prepisom (WhisperKit + `NaiveNeuron/whisper-large-v3-turbo-sk`)
+je **ukončený a NEBOL prijatý**. Kód z neho je odstránený z `master`, celý funkčný stav
+je zachovaný v git značke:
 
-## Kontext experimentu
+```
+git checkout -b <nazov-vetvy> experiment/local-whisper-sk
+```
 
-- **Cieľ:** zistiť, či lokálny (on-device, offline) Whisper model dosahuje na slovenčine
-  dostatočnú presnosť ako alternatíva/doplnok k cloud transkripcii.
-- **Model:** [`NaiveNeuron/whisper-large-v3-turbo-sk`](https://huggingface.co/NaiveNeuron/whisper-large-v3-turbo-sk)
-  (fine-tuned na SloPalSpeech datasete) — potrebuje konverziu na CoreML cez
-  [`whisperkittools`](https://github.com/argmaxinc/whisperkittools) pred použitím vo
-  WhisperKite.
-- **Runtime:** [WhisperKit](https://github.com/jkrukowski/WhisperKit) (Argmax) — Swift
-  balík, beží on-device cez CoreML/Neural Engine, **len Apple Silicon** (pozri nižšie).
-- **Východiskový bod pre porovnanie:** `master` branch, cloud transkripcia cez OpenAI
-  (`DictationEngine.swift`, `gpt-transcribe` batch / `gpt-live-transcribe` realtime).
+Značka nesie v popise celé meranie aj dôvody. Skrátene — na 98 diktovaniach (17.–19. 8. 2026)
+lokálny model prehral vo všetkých troch rozmeroch naraz:
 
-## Prečo len Apple Silicon (nie Windows)
+| | lokálny (WhisperKit SK) | cloud (`gpt-transcribe`) |
+|---|---|---|
+| pokusov | 67 | 31 |
+| prázdny výsledok (1. pokus) | 12 (18 %) | 0 (0 %) |
+| natrvalo stratené | 7 (10 %) | 0 |
+| medián prepisu | 4,1 s | 1,8 s |
+| najhorší prípad | 16,6 s | 5,8 s |
 
-WhisperKit je postavený na Apple CoreML + Neural Engine — funguje len na macOS/iOS,
-**nie na Windowse ani Linuxe**. Na Windows/iné platformy by ekvivalentná lokálna cesta bola
-iný runtime (napr. `whisper.cpp` s CUDA, alebo `faster-whisper`/CTranslate2) — architektúra
-modelu (Whisper) je rovnaká, len spôsob behu na hardvéri je iný balík/kód. Pre tento projekt
-(macOS appka) je WhisperKit správna voľba, len je to vedomá viazanosť na Apple hardvér.
+Rozhodujúca bola presnosť: na rovnakej téme (Elementor/WordPress) lokálny model dával
+*„Českého vlážu"*, *„cezva videty"*, *„určené s vedostom a rusenskou"*, kým cloud zvládol
+*carousel / Elementor / listing grid / loop carousel* bezchybne aj v dlhších diktovaniach.
+
+**Ak sa téma vráti, toto už netreba znovu skúšať:** `large-v3-turbo-sk` je najlepší dostupný
+SK fine-tune; plné `large-v3` by bolo ešte pomalšie (lokál je už teraz 2× pomalší než cloud
+round-trip); vlastný fine-tuning na hlase je práca na dni a nevyriešil by anglické technické
+termíny, na ktorých to padá najviac; streaming by zlepšil dojem z latencie, ale nie presnosť.
+
+Zmysel má už len ako **offline režim** (lietadlo, práca bez internetu, striktne lokálne
+spracovanie) — teda ako doplnok, nie ako náhrada cloudu.
+
+Na obnovenie treba aj skonvertovaný CoreML model v
+`~/Documents/whisperkit-models-sk/NaiveNeuron_whisper-large-v3-turbo-sk`
+(postup konverzie cez `whisperkittools` je v CLAUDE.md na tej značke).
+
+## Aktuálne priority
+
+1. **Rýchlosť diktovania a spracovania** — skrátiť čas od pustenia skratky po vložený text.
+2. **Výkon menu a Nastavení** — odstrániť zasekávanie/laggy pocit v menu bar dropdowne
+   a v okne Nastavenia.

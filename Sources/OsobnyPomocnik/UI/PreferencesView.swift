@@ -408,18 +408,8 @@ struct PreferencesView: View {
                         .tag(DictationEngine.TranscriptionMode.realtime)
                     Text("Po nahraní (presnejší, lacnejší)")
                         .tag(DictationEngine.TranscriptionMode.batch)
-                    // test/local-whisper-sk only — see CLAUDE.md.
-                    Text("Lokálny (offline, SK — experimentálne)")
-                        .tag(DictationEngine.TranscriptionMode.local)
                 }
-                if dictation.transcriptionMode == .local {
-                    rowDivider
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("WhisperKit, celé na tomto Macu — zadarmo, funguje offline, ale je to test verzia (menej presné než cloud, prvé spustenie po reštarte appky môže trvať dlho, kým macOS skompiluje model pre Neural Engine).")
-                            .font(.caption).foregroundStyle(.secondary)
-                    }
-                    .padding(.horizontal, 16).padding(.vertical, 10)
-                } else if dictation.transcriptionMode == .batch {
+                if dictation.transcriptionMode == .batch {
                     rowDivider
                     pickerRow(title: "Model", selection: $dictation.batchModel) {
                         ForEach(DictationEngine.batchModels, id: \.self) { model in

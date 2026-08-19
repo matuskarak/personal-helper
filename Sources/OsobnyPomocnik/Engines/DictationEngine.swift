@@ -220,10 +220,9 @@ final class DictationEngine {
         didSet { UserDefaults.standard.set(transcriptionDelay, forKey: "whisper.delay") }
     }
 
-    // test/local-whisper-sk only — see CLAUDE.md. `.local` transcribes fully on-device via
-    // WhisperKit (LocalWhisperEngine) instead of an OpenAI REST call — same recording path
-    // as `.batch`, different transcription backend.
-    enum TranscriptionMode: String { case realtime, batch, local }
+    // A `.local` on-device WhisperKit mode also lived here — removed, it lost on accuracy,
+    // latency and reliability at once. Preserved at tag `experiment/local-whisper-sk`.
+    enum TranscriptionMode: String { case realtime, batch }
 
     /// Which backend serves .realtime mode.
     ///
@@ -288,7 +287,7 @@ final class DictationEngine {
     /// Delegates to Pricing.usdPerMinute so the per-model rate has one source of truth instead
     /// of drifting between here and the model picker in Nastavenia.
     var costPerMinute: Double {
-        transcriptionMode == .local ? 0 : Pricing.usdPerMinute(realtime: transcriptionMode == .realtime, batchModel: batchModel)
+        Pricing.usdPerMinute(realtime: transcriptionMode == .realtime, batchModel: batchModel)
     }
 
     // Microphone priority order — persistent stableKeys (see AudioInputDevice.stableKey),
@@ -413,7 +412,11 @@ final class DictationEngine {
         }
         self.openAIKey              = UserDefaults.standard.string(forKey: "openai.dictation.key") ?? ""
         self.transcriptionDelay     = UserDefaults.standard.string(forKey: "whisper.delay") ?? "low"
-        self.transcriptionMode      = TranscriptionMode(rawValue: UserDefaults.standard.string(forKey: "dictation.mode") ?? "") ?? .realtime
+        // A stored "local" is from the removed on-device WhisperKit mode. Falling through to
+        // the `?? .realtime` default would silently move those users to the pricier streaming
+        // mode; .batch is the same record-then-transcribe shape they actually had.
+        let storedMode = UserDefaults.standard.string(forKey: "dictation.mode") ?? ""
+        self.transcriptionMode      = storedMode == "local" ? .batch : (TranscriptionMode(rawValue: storedMode) ?? .realtime)
         self.realtimeModel          = RealtimeModel(rawValue: UserDefaults.standard.string(forKey: "dictation.realtimeModel") ?? "") ?? .live
         self.defaultKeywords        = UserDefaults.standard.string(forKey: "dictation.defaultKeywords") ?? ""
         // New default for fresh installs only — existing users keep whatever they already
@@ -456,7 +459,6 @@ final class DictationEngine {
             case .realtime: realtimeModel == .live ? [RealtimeModel.live.rawValue]
                                                     : ["gpt-realtime-2", RealtimeModel.legacy.rawValue]
             case .batch: [batchModel]
-            case .local: []  // fully on-device, no OpenAI model needed
             }
             let missing = needed.filter { !ids.contains($0) }
             AppLogger.log("[DictationEngine] API key OK. Required: \(needed.joined(separator: ", ")) — missing: \(missing.isEmpty ? "none" : missing.joined(separator: ", "))")
@@ -625,8 +627,8 @@ final class DictationEngine {
                     }
                     AppLogger.log("[DictationEngine] DeviceCapture WS ready, starting IO proc...")
 
-                case .batch, .local:
-                    AppLogger.log("[DictationEngine] DeviceCapture \(transcriptionMode == .local ? "Local" : "Batch") mode (\(transcriptionMode == .local ? "whisperkit-sk" : batchModel))")
+                case .batch:
+                    AppLogger.log("[DictationEngine] DeviceCapture Batch mode (\(batchModel))")
                     _ = batchAudioBuffer.drain()
                     capture.onBuffer = { buf in
                         accumulateChunkForBatch(
@@ -659,8 +661,8 @@ final class DictationEngine {
                         )
                     }
 
-                case .batch, .local:
-                    AppLogger.log("[DictationEngine] \(transcriptionMode == .local ? "Local" : "Batch") mode (\(transcriptionMode == .local ? "whisperkit-sk" : batchModel)) — recording locally, no WebSocket")
+                case .batch:
+                    AppLogger.log("[DictationEngine] Batch mode (\(batchModel)) — recording locally, no WebSocket")
                     _ = batchAudioBuffer.drain()
                     inputNode.installTap(onBus: 0, bufferSize: 2_400, format: inputFormat) { buf, _ in
                         accumulateChunkForBatch(
@@ -866,9 +868,6 @@ final class DictationEngine {
 
         case .batch:
             transcript = await transcribeBatch()
-
-        case .local:
-            transcript = await transcribeLocal()
         }
 
         var result = transcript.isEmpty ? nil : transcript
@@ -978,8 +977,7 @@ final class DictationEngine {
         liveText        = ""
         accumulatedText = ""
         if !dictatedText.isEmpty {
-            let model = transcriptionMode == .realtime ? realtimeModel.rawValue
-                : (transcriptionMode == .local ? "whisperkit-sk-local" : batchModel)
+            let model = transcriptionMode == .realtime ? realtimeModel.rawValue : batchModel
             UsageStore.shared.logDictation(seconds: elapsed, text: dictatedText, model: model)
             DictationHistoryStore.shared.log(dictatedText, appName: appName, bundleID: bundleID,
                                              category: category, seconds: elapsed,
@@ -1050,71 +1048,6 @@ final class DictationEngine {
             AppLogger.log("[DictationEngine] ⚠️ Batch transcription network error: \(error)")
             connectionError = "Sieťová chyba: \(error.localizedDescription)"
             return ""
-        }
-    }
-
-    // test/local-whisper-sk only — see CLAUDE.md. Same recorded PCM as .batch, but
-    // transcribed fully on-device via WhisperKit instead of an OpenAI REST call.
-    private func transcribeLocal() async -> String {
-        let pcmData = batchAudioBuffer.drain()
-        AppLogger.log("[DictationEngine] Local transcribe — \(pcmData.count) bytes PCM")
-        guard !pcmData.isEmpty else { return "" }
-
-        let wav = Self.wavData(pcm16: pcmData, sampleRate: 24_000, channels: 1)
-        let tmpURL = FileManager.default.temporaryDirectory.appendingPathComponent("dictation-local-\(UUID().uuidString).wav")
-        // Same keyword assembly as the realtime gpt-live-transcribe path (default + matched
-        // App profile's) — garbled technical/foreign terms have zero chance of being fixed
-        // downstream by Smart rewrite if the raw transcript never had a hint to get them right.
-        let keywords = AppProfile.parseKeywords(defaultKeywords) + (sessionProfile?.transcriptionKeywords ?? [])
-        do {
-            try wav.write(to: tmpURL)
-            defer { try? FileManager.default.removeItem(at: tmpURL) }
-            let outcome = try await LocalWhisperEngine.shared.transcribe(wavURL: tmpURL, promptKeywords: keywords)
-            AppLogger.log("[DictationEngine] Local transcription completed (\(outcome.text.count) chars, \(String(format: "%.1f", outcome.seconds))s)")
-            // WhisperKit's prompt-conditioning (`usePrefillPrompt` + `promptTokens`) occasionally
-            // makes the decoder emit nothing at all for a real, non-trivial recording — seen
-            // repeatedly in testing (dictation silently vanished, nothing inserted, nothing to
-            // recover). >0.5s of audio with zero output text is never legitimate silence, so
-            // retry once without the prompt rather than losing the dictation.
-            var finalText = outcome.text
-            if finalText.isEmpty, !keywords.isEmpty, pcmData.count > 24_000 {
-                AppLogger.log("[DictationEngine] ⚠️ Local transcription came back empty with prompt keywords — retrying without them")
-                let retry = try await LocalWhisperEngine.shared.transcribe(wavURL: tmpURL, promptKeywords: [])
-                AppLogger.log("[DictationEngine] Local retry completed (\(retry.text.count) chars, \(String(format: "%.1f", retry.seconds))s)")
-                finalText = retry.text
-            }
-            // Last resort: WhisperKit's noSpeechThreshold can misfire on real speech too (seen
-            // in testing). But relaxing it unconditionally reintroduces Whisper's well-known
-            // hallucination failure on true silence — stray boilerplate or a URL pulled from its
-            // YouTube-caption training data, which is exactly the "prepis sa vloží ako URL" bug.
-            // So only relax it when the raw PCM itself shows real energy — near-silent audio is
-            // left alone and correctly comes back empty instead of hallucinating something.
-            if finalText.isEmpty, Self.hasAudibleEnergy(pcmData) {
-                AppLogger.log("[DictationEngine] ⚠️ Still empty despite audible energy in the recording — retrying with noSpeechThreshold relaxed")
-                let retry = try await LocalWhisperEngine.shared.transcribe(wavURL: tmpURL, promptKeywords: keywords, relaxNoSpeechGuard: true)
-                AppLogger.log("[DictationEngine] Local relaxed-guard retry completed (\(retry.text.count) chars, \(String(format: "%.1f", retry.seconds))s)")
-                finalText = retry.text
-            }
-            // A non-trivial recording that still comes back empty is data loss the user can't
-            // recover from (no field to insert into memory, nothing to retry) — surface it
-            // instead of letting the pill just vanish, so at least the failure is visible.
-            if finalText.isEmpty, pcmData.count > 24_000 {
-                showNotice("⚠️ Lokálny prepis nerozpoznal žiadnu reč v tomto nahraní. Skús to prosím zopakovať.")
-            }
-            return finalText
-        } catch {
-            AppLogger.log("[DictationEngine] ⚠️ Local transcription failed: \(error)")
-            connectionError = "Lokálny prepis zlyhal: \(error.localizedDescription)"
-            return ""
-        }
-    }
-
-    /// True if mono PCM16 has a peak amplitude clearly above quiet-room noise — a cheap,
-    /// dependency-free stand-in for real speech energy vs. near-silence.
-    private static func hasAudibleEnergy(_ pcm16: Data) -> Bool {
-        let threshold: Int16 = 800 // ~2.4% of full scale — well above room-noise floor, well below normal speech peaks
-        return pcm16.withUnsafeBytes { raw in
-            raw.bindMemory(to: Int16.self).contains { abs(Int32($0)) > Int32(threshold) }
         }
     }
 
