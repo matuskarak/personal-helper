@@ -56,7 +56,7 @@ final class GoogleCloudTTSEngine: NSObject {
     private var playbackContinuation: CheckedContinuation<Void, Error>?
 
     // UserDefaults in development (no codesigning = Keychain returns nil).
-    // Switch to KeychainHelper for production/notarized build.
+    // Switch to the Keychain for production/notarized build.
     var apiKey: String {
         didSet {
             if apiKey.isEmpty { UserDefaults.standard.removeObject(forKey: "google.api.key") }

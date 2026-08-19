@@ -1086,7 +1086,9 @@ struct PreferencesView: View {
                 }
             } else {
                 card {
-                    VStack(spacing: 0) {
+                    // Lazy: history is uncapped (hundreds of entries and growing) and this
+                    // used to build every row eagerly on tab open — the История tab's lag.
+                    LazyVStack(spacing: 0) {
                         ForEach(Array(historyStore.entries.reversed().enumerated()), id: \.element.id) { index, entry in
                             if index > 0 { rowDivider }
                             historyRow(entry)

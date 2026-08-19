@@ -49,8 +49,10 @@ final class MenuBarController: NSObject, NSMenuDelegate {
 
         menu.addItem(.separator())
 
-        // Mic submenu — populated in menuWillOpen
-        micSubmenuItem.submenu = NSMenu()
+        // Mic submenu — populated lazily when IT opens (see rebuildMicSubmenu)
+        let micSub = NSMenu()
+        micSub.delegate = self
+        micSubmenuItem.submenu = micSub
         menu.addItem(micSubmenuItem)
 
         menu.addItem(.separator())
@@ -91,18 +93,32 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         // first open always showed the previous state — which is why "Reštartovať aplikáciu"
         // stayed visible with Developer mode off. menuWillOpen is always called on the main
         // thread, so assuming isolation here is safe.
-        MainActor.assumeIsolated { refreshDynamicItems() }
+        // nonisolated(unsafe): same "menuWillOpen is always main-thread" assumption that
+        // assumeIsolated itself rests on — NSMenu just isn't Sendable, so the compiler can't
+        // see the reference never actually crosses threads here.
+        nonisolated(unsafe) let menu = menu
+        MainActor.assumeIsolated {
+            if menu === micSubmenuItem.submenu {
+                rebuildMicSubmenu(menu)
+            } else {
+                refreshDynamicItems()
+            }
+        }
     }
 
-    private func refreshDynamicItems() {
+    /// Built only when the mic submenu itself opens — enumerating input devices means
+    /// several CoreAudio HAL property reads per device, each routed through every installed
+    /// HAL plugin (this machine runs five third-party ones: SoundSource/ARK, BlackHole,
+    /// eqMac…). Doing that synchronously on EVERY main-menu open was the dropdown lag;
+    /// hovering "Mikrofón" is the one moment the fresh list is actually needed.
+    private func rebuildMicSubmenu(_ sub: NSMenu) {
         let engine = DictationEngine.shared
         let devices = AudioDeviceManager.inputDevices()
-        let resolvedUID = engine.resolvedInputDeviceUID()
+        let resolvedUID = engine.resolvedInputDeviceUID(devices: devices)
 
-        // Rebuild mic submenu — devices ordered by priority (rank shown), then any
-        // other connected devices not yet prioritized. Clicking one makes it #1;
-        // clicking "Systémový" clears the whole priority list.
-        let sub = NSMenu()
+        // Devices ordered by priority (rank shown), then any other connected devices not
+        // yet prioritized. Clicking one makes it #1; "Systémový" clears the priority list.
+        sub.removeAllItems()
         let sysItem = NSMenuItem(title: "Systémový (predvolený)", action: #selector(selectMicSystem), keyEquivalent: "")
         sysItem.target = self
         sysItem.state = resolvedUID == nil ? .on : .off
@@ -132,7 +148,10 @@ final class MenuBarController: NSObject, NSMenuDelegate {
             item.state = dev.stableKey == resolvedKey ? .on : .off
             sub.addItem(item)
         }
-        micSubmenuItem.submenu = sub
+    }
+
+    private func refreshDynamicItems() {
+        let engine = DictationEngine.shared
 
         // History submenu — most recent first, click to insert at the current focus.
         let historyMenu = NSMenu()

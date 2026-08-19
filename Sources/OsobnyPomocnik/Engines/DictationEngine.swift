@@ -302,9 +302,11 @@ final class DictationEngine {
     /// stableKey (so a USB mic in a different port than last time still resolves) but
     /// returns the live `uid` of that instance, since callers need the actual connected
     /// device to open, not its stable identity.
-    func resolvedInputDeviceUID() -> String? {
+    /// - Parameter devices: pass an already-enumerated list to avoid a second full CoreAudio
+    ///   HAL walk when the caller (mic submenu) just did one for its own display.
+    func resolvedInputDeviceUID(devices: [AudioInputDevice]? = nil) -> String? {
         guard !micPriority.isEmpty else { return nil }
-        let byStableKey = Dictionary(AudioDeviceManager.inputDevices().map { ($0.stableKey, $0) },
+        let byStableKey = Dictionary((devices ?? AudioDeviceManager.inputDevices()).map { ($0.stableKey, $0) },
                                      uniquingKeysWith: { first, _ in first })
         guard let key = micPriority.first(where: { byStableKey[$0] != nil }) else { return nil }
         return byStableKey[key]?.uid
@@ -366,7 +368,10 @@ final class DictationEngine {
     // Target-app context — captured at recording start, consumed at stop. Needed on
     // every dictation for quality tracking; the screenshot only for Smart diktovanie.
     private var isSmartMode        = false
-    private var capturedScreenshot: CGImage?
+    // JPEG, not CGImage: encoded ONCE, in the capture task while recording is still running,
+    // instead of twice on the stop path (base64 for the vision API + again for history) —
+    // the encode is ~50-150ms of main-actor work that used to sit between stop and insert.
+    private var capturedScreenshotJPEG: Data?
     private var capturedProfile:    AppProfile?
     private var capturedAppName:    String = ""
     private var capturedBundleID:   String = ""
@@ -557,7 +562,7 @@ final class DictationEngine {
         let mySessionID = sessionID
 
         isSmartMode        = smart
-        capturedScreenshot = nil
+        capturedScreenshotJPEG = nil
         capturedProfile    = nil
         capturedAppName    = ""
         capturedBundleID   = ""
@@ -595,7 +600,7 @@ final class DictationEngine {
         contextCaptureTask = Task { [weak self] in
             let ctx = await SmartContextCapture.shared.captureFrontmostContext(captureScreenshot: smart)
             guard let self else { return }
-            self.capturedScreenshot = ctx.image
+            self.capturedScreenshotJPEG = ctx.image?.jpegData(quality: 0.75)
             self.capturedAppName    = ctx.appName ?? ""
             self.capturedBundleID   = ctx.bundleID ?? ""
             self.capturedProfile = AppProfileStore.shared.matchingProfile(
@@ -912,13 +917,13 @@ final class DictationEngine {
         var rewritten: String?
         if isSmartMode {
             if let raw = result, let profile = capturedProfile {
-                AppLogger.log("[DictationEngine] Smart rewrite starting — rawChars=\(raw.count) hasScreenshot=\(capturedScreenshot != nil) profile=\(profile.displayName)")
+                AppLogger.log("[DictationEngine] Smart rewrite starting — rawChars=\(raw.count) hasScreenshot=\(capturedScreenshotJPEG != nil) profile=\(profile.displayName)")
                 let t0 = Date()
                 isRewriting = true
                 do {
                     let output = try await SmartRewriteEngine.shared.rewrite(
                         transcript: raw,
-                        screenshot: capturedScreenshot,
+                        screenshotJPEG: capturedScreenshotJPEG,
                         profile: profile,
                         apiKey: openAIKey
                     )
@@ -963,10 +968,10 @@ final class DictationEngine {
         let bundleID = capturedBundleID
         let category = capturedProfile?.category ?? .generic
         let screenshotJPEG = SmartRewriteEngine.shared.saveScreenshotsToHistory
-            ? capturedScreenshot?.jpegData(quality: 0.75) : nil
+            ? capturedScreenshotJPEG : nil
 
         isSmartMode        = false
-        capturedScreenshot = nil
+        capturedScreenshotJPEG = nil
         capturedProfile    = nil
         sessionProfile     = nil
         capturedAppName    = ""
@@ -1013,6 +1018,12 @@ final class DictationEngine {
         addField("model", batchModel)
         addField("language", "sk")
         addField("response_format", "json")
+        // Same vocabulary hints the realtime gpt-live-transcribe path sends (default keywords
+        // + matched App profile's) — batch mode never got them, so technical/foreign terms
+        // that realtime could hit were reliably garbled here. Verified accepted by the
+        // /v1/audio/transcriptions endpoint for gpt-transcribe (HTTP 200 with `prompt`).
+        let keywords = AppProfile.parseKeywords(defaultKeywords) + (sessionProfile?.transcriptionKeywords ?? [])
+        if !keywords.isEmpty { addField("prompt", keywords.joined(separator: ", ")) }
         body.append("--\(boundary)\r\n".data(using: .utf8)!)
         body.append("Content-Disposition: form-data; name=\"file\"; filename=\"audio.wav\"\r\n".data(using: .utf8)!)
         body.append("Content-Type: audio/wav\r\n\r\n".data(using: .utf8)!)
@@ -1020,15 +1031,8 @@ final class DictationEngine {
         body.append("\r\n--\(boundary)--\r\n".data(using: .utf8)!)
         req.httpBody = body
 
-        // ponytail: 180s covers ~2min recordings (upload + OpenAI processing); shared session default is 60s which timed out
-        let batchSession: URLSession = {
-            let cfg = URLSessionConfiguration.default
-            cfg.timeoutIntervalForRequest = 180
-            cfg.timeoutIntervalForResource = 180
-            return URLSession(configuration: cfg)
-        }()
         do {
-            let (data, response) = try await batchSession.data(for: req)
+            let (data, response) = try await Self.batchSession.data(for: req)
             guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
                 let msg = String(data: data, encoding: .utf8) ?? "?"
                 AppLogger.log("[DictationEngine] ⚠️ Batch transcription HTTP error: \(msg.prefix(300))")
@@ -1050,6 +1054,17 @@ final class DictationEngine {
             return ""
         }
     }
+
+    // ponytail: 180s covers ~2min recordings (upload + OpenAI processing); shared session
+    // default is 60s which timed out. Static, not per-call: a fresh URLSession per request
+    // paid a full TCP+TLS handshake to api.openai.com on every single dictation — a shared
+    // one keeps the connection alive across them.
+    private static let batchSession: URLSession = {
+        let cfg = URLSessionConfiguration.default
+        cfg.timeoutIntervalForRequest = 180
+        cfg.timeoutIntervalForResource = 180
+        return URLSession(configuration: cfg)
+    }()
 
     /// Minimal 44-byte canonical WAV header for mono PCM16 — no dependency needed.
     private static func wavData(pcm16: Data, sampleRate: UInt32, channels: UInt16) -> Data {

@@ -1,6 +1,5 @@
 import SwiftUI
 import AVFoundation
-import Speech
 
 struct OnboardingView: View {
     /// Closes the standalone first-launch window. No-op when presented as a
@@ -9,7 +8,6 @@ struct OnboardingView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var axGranted = AXIsProcessTrusted()
     @State private var micGranted = AVCaptureDevice.authorizationStatus(for: .audio) == .authorized
-    @State private var speechGranted = SFSpeechRecognizer.authorizationStatus() == .authorized
 
     @State private var dictation = DictationEngine.shared
     @State private var google    = GoogleCloudTTSEngine.shared
@@ -23,7 +21,7 @@ struct OnboardingView: View {
     @State private var accessCodeInput = ""
     @State private var accessCodeSaved = false
 
-    var allGranted: Bool { axGranted && micGranted && speechGranted }
+    var allGranted: Bool { axGranted && micGranted }
 
     var body: some View {
         ScrollView {
@@ -51,17 +49,6 @@ struct OnboardingView: View {
             ) {
                 AVCaptureDevice.requestAccess(for: .audio) { ok in
                     DispatchQueue.main.async { micGranted = ok }
-                }
-            }
-
-            PermissionRow(
-                icon: "waveform",
-                title: "Rozpoznávanie reči",
-                description: "Potrebné pre diktovanie do textových polí.",
-                granted: speechGranted
-            ) {
-                SFSpeechRecognizer.requestAuthorization { status in
-                    DispatchQueue.main.async { speechGranted = status == .authorized }
                 }
             }
 
@@ -199,7 +186,6 @@ struct OnboardingView: View {
     private func refresh() {
         axGranted = AXIsProcessTrusted()
         micGranted = AVCaptureDevice.authorizationStatus(for: .audio) == .authorized
-        speechGranted = SFSpeechRecognizer.authorizationStatus() == .authorized
     }
 }
 

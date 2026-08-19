@@ -86,66 +86,6 @@ enum AudioDeviceManager {
         }
     }
 
-    /// Sets the system-wide default input device. Works cooperatively with SoundSource
-    /// (unlike AudioUnitSetProperty which bypasses it and causes HAL lock deadlocks).
-    @discardableResult
-    static func setSystemDefaultInput(_ device: AudioInputDevice) -> Bool {
-        var address = AudioObjectPropertyAddress(
-            mSelector: kAudioHardwarePropertyDefaultInputDevice,
-            mScope:    kAudioObjectPropertyScopeGlobal,
-            mElement:  kAudioObjectPropertyElementMain
-        )
-        var deviceID = device.id
-        let status = AudioObjectSetPropertyData(
-            AudioObjectID(kAudioObjectSystemObject), &address,
-            0, nil, UInt32(MemoryLayout<AudioDeviceID>.size), &deviceID
-        )
-        if status != noErr {
-            AppLogger.log("[AudioDeviceManager] Failed to set system default input '\(device.name)' (OSStatus \(status))")
-        }
-        return status == noErr
-    }
-
-    /// Returns the current system default input device ID.
-    static func systemDefaultInputID() -> AudioDeviceID? {
-        var address = AudioObjectPropertyAddress(
-            mSelector: kAudioHardwarePropertyDefaultInputDevice,
-            mScope:    kAudioObjectPropertyScopeGlobal,
-            mElement:  kAudioObjectPropertyElementMain
-        )
-        var deviceID: AudioDeviceID = 0
-        var size = UInt32(MemoryLayout<AudioDeviceID>.size)
-        let status = AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &size, &deviceID)
-        return status == noErr ? deviceID : nil
-    }
-
-    /// Routes the AVAudioEngine's input node to use the given Core Audio device via
-    /// AudioUnitSetProperty. NOTE: this bypasses SoundSource and can deadlock against
-    /// its Ark HAL plugin — prefer setSystemDefaultInput when SoundSource may be active.
-    @discardableResult
-    static func applyInputDevice(_ device: AudioInputDevice, to engine: AVAudioEngine) -> Bool {
-        guard let audioUnit = engine.inputNode.audioUnit else {
-            AppLogger.log("[AudioDeviceManager] inputNode.audioUnit is nil — cannot set device")
-            return false
-        }
-        var deviceID = device.id
-        let status = AudioUnitSetProperty(
-            audioUnit,
-            kAudioOutputUnitProperty_CurrentDevice,
-            kAudioUnitScope_Global,
-            0,
-            &deviceID,
-            UInt32(MemoryLayout<AudioDeviceID>.size)
-        )
-        if status != noErr {
-            AppLogger.log("[AudioDeviceManager] Failed to set input device '\(device.name)' (OSStatus \(status))")
-            return false
-        }
-        return true
-    }
-
-    // MARK: - Core Audio property helpers
-
     private static func hasInputStreams(_ deviceID: AudioDeviceID) -> Bool {
         var address = AudioObjectPropertyAddress(
             mSelector: kAudioDevicePropertyStreams,
