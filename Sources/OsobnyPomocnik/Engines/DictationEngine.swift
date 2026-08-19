@@ -941,6 +941,10 @@ final class DictationEngine {
                 } catch {
                     AppLogger.log("[DictationEngine] ⚠️ Smart rewrite failed, falling back to raw transcript: \(error)")
                     result = raw
+                    // The raw fallback is deliberately unpunctuated/uncorrected — inserting it
+                    // silently reads as "wrong text got pasted" rather than "network hiccup,
+                    // here's what you actually said". Say so.
+                    showNotice("⚠️ Smart rewrite zlyhalo (sieť/timeout) — vložený je surový prepis bez úprav.", sticky: false)
                 }
                 isRewriting = false
             } else {
@@ -1067,11 +1071,50 @@ final class DictationEngine {
             defer { try? FileManager.default.removeItem(at: tmpURL) }
             let outcome = try await LocalWhisperEngine.shared.transcribe(wavURL: tmpURL, promptKeywords: keywords)
             AppLogger.log("[DictationEngine] Local transcription completed (\(outcome.text.count) chars, \(String(format: "%.1f", outcome.seconds))s)")
-            return outcome.text
+            // WhisperKit's prompt-conditioning (`usePrefillPrompt` + `promptTokens`) occasionally
+            // makes the decoder emit nothing at all for a real, non-trivial recording — seen
+            // repeatedly in testing (dictation silently vanished, nothing inserted, nothing to
+            // recover). >0.5s of audio with zero output text is never legitimate silence, so
+            // retry once without the prompt rather than losing the dictation.
+            var finalText = outcome.text
+            if finalText.isEmpty, !keywords.isEmpty, pcmData.count > 24_000 {
+                AppLogger.log("[DictationEngine] ⚠️ Local transcription came back empty with prompt keywords — retrying without them")
+                let retry = try await LocalWhisperEngine.shared.transcribe(wavURL: tmpURL, promptKeywords: [])
+                AppLogger.log("[DictationEngine] Local retry completed (\(retry.text.count) chars, \(String(format: "%.1f", retry.seconds))s)")
+                finalText = retry.text
+            }
+            // Last resort: WhisperKit's noSpeechThreshold can misfire on real speech too (seen
+            // in testing). But relaxing it unconditionally reintroduces Whisper's well-known
+            // hallucination failure on true silence — stray boilerplate or a URL pulled from its
+            // YouTube-caption training data, which is exactly the "prepis sa vloží ako URL" bug.
+            // So only relax it when the raw PCM itself shows real energy — near-silent audio is
+            // left alone and correctly comes back empty instead of hallucinating something.
+            if finalText.isEmpty, Self.hasAudibleEnergy(pcmData) {
+                AppLogger.log("[DictationEngine] ⚠️ Still empty despite audible energy in the recording — retrying with noSpeechThreshold relaxed")
+                let retry = try await LocalWhisperEngine.shared.transcribe(wavURL: tmpURL, promptKeywords: keywords, relaxNoSpeechGuard: true)
+                AppLogger.log("[DictationEngine] Local relaxed-guard retry completed (\(retry.text.count) chars, \(String(format: "%.1f", retry.seconds))s)")
+                finalText = retry.text
+            }
+            // A non-trivial recording that still comes back empty is data loss the user can't
+            // recover from (no field to insert into memory, nothing to retry) — surface it
+            // instead of letting the pill just vanish, so at least the failure is visible.
+            if finalText.isEmpty, pcmData.count > 24_000 {
+                showNotice("⚠️ Lokálny prepis nerozpoznal žiadnu reč v tomto nahraní. Skús to prosím zopakovať.")
+            }
+            return finalText
         } catch {
             AppLogger.log("[DictationEngine] ⚠️ Local transcription failed: \(error)")
             connectionError = "Lokálny prepis zlyhal: \(error.localizedDescription)"
             return ""
+        }
+    }
+
+    /// True if mono PCM16 has a peak amplitude clearly above quiet-room noise — a cheap,
+    /// dependency-free stand-in for real speech energy vs. near-silence.
+    private static func hasAudibleEnergy(_ pcm16: Data) -> Bool {
+        let threshold: Int16 = 800 // ~2.4% of full scale — well above room-noise floor, well below normal speech peaks
+        return pcm16.withUnsafeBytes { raw in
+            raw.bindMemory(to: Int16.self).contains { abs(Int32($0)) > Int32(threshold) }
         }
     }
 

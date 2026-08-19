@@ -414,6 +414,13 @@ struct DictationIndicatorView: View {
                             Text("Čakám na server…")
                                 .foregroundStyle(.secondary)
                                 .frame(maxWidth: .infinity, alignment: .leading)
+                        } else if engine.transcriptionMode != .realtime {
+                            // Batch/local modes only get a transcript after recording stops —
+                            // no interim words to show, unlike realtime's live deltas. Naming
+                            // that explicitly avoids reading as a stuck/laggy live view.
+                            Text("Nahrávam… (prepis až po zastavení)")
+                                .foregroundStyle(.secondary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
                         } else {
                             Text("Počúvam…")
                                 .foregroundStyle(.secondary)

@@ -143,11 +143,16 @@ final class MenuBarController: NSObject, NSMenuDelegate {
             historyMenu.addItem(empty)
         } else {
             for entry in recentHistory {
-                let oneLine = entry.text.replacingOccurrences(of: "\n", with: " ")
+                // Preview and payload must be the SAME text. They weren't: the row showed the
+                // raw transcript while the click pasted the Smart-rewritten one, so the list
+                // you read wasn't the list you got — which is how you end up picking the wrong
+                // row and concluding "it inserted an older dictation".
+                let text = entry.rewrittenText ?? entry.text
+                let oneLine = text.replacingOccurrences(of: "\n", with: " ")
                 let preview = oneLine.count > 60 ? String(oneLine.prefix(60)) + "…" : oneLine
                 let item = NSMenuItem(title: preview, action: #selector(insertHistoryEntry(_:)), keyEquivalent: "")
                 item.target = self
-                item.representedObject = entry.text
+                item.representedObject = text
                 historyMenu.addItem(item)
             }
             historyMenu.addItem(.separator())
@@ -213,6 +218,9 @@ final class MenuBarController: NSObject, NSMenuDelegate {
 
     @objc private func insertHistoryEntry(_ sender: NSMenuItem) {
         guard let text = sender.representedObject as? String else { return }
+        // Logged because an unattributed TextInserter.insert() in app.log is indistinguishable
+        // from a rogue paste — this is the one path that inserts text nobody just dictated.
+        AppLogger.log("[MenuBarController] insertHistoryEntry — z histórie (\(text.count) znakov)")
         TextInserter.shared.insert(text)
     }
 
