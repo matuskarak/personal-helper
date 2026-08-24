@@ -305,7 +305,7 @@ struct ControlPanelView: View {
                 .frame(width: 30, height: 27)
                 .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.plain).pointingHandCursor()
         .disabled(disabled)
         .help(help)
 

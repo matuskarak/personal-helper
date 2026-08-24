@@ -234,7 +234,7 @@ struct PreferencesView: View {
                     RoundedRectangle(cornerRadius: 7)
                         .fill(selectedTab == tab ? accent.opacity(0.12) : .clear)
                 )
-                // Without this, .buttonStyle(.plain) only hit-tests the actual rendered
+                // Without this, .buttonStyle(.plain).pointingHandCursor() only hit-tests the actual rendered
                 // content (the icon + text), not the transparent space the Spacer() fills
                 // out to the row's edge — so clicking the highlighted-looking area next to
                 // the label silently did nothing. This is what made the sidebar feel like
@@ -242,11 +242,8 @@ struct PreferencesView: View {
                 // that were never part of the hit region.
                 .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.plain).pointingHandCursor()
             .focusEffectDisabled()
-            .onHover { hovering in
-                if hovering { NSCursor.pointingHand.push() } else { NSCursor.pop() }
-            }
 
             if showsDisclosure {
                 Button {
@@ -259,10 +256,7 @@ struct PreferencesView: View {
                         .frame(width: 20, height: 20)
                         .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
-                .onHover { hovering in
-                    if hovering { NSCursor.pointingHand.push() } else { NSCursor.pop() }
-                }
+                .buttonStyle(.plain).pointingHandCursor()
             }
         }
     }
@@ -324,7 +318,7 @@ struct PreferencesView: View {
                         expanded.toggle()
                     }
                     .font(.caption)
-                    .buttonStyle(.plain)
+                    .buttonStyle(.plain).pointingHandCursor()
                     .foregroundStyle(accent)
                 }
             }
@@ -627,7 +621,7 @@ struct PreferencesView: View {
                             Button(visionPromptExpanded ? "Zobraziť menej" : "Zobraziť viac") {
                                 visionPromptExpanded.toggle()
                             }
-                            .buttonStyle(.plain).font(.caption).foregroundStyle(accent)
+                            .buttonStyle(.plain).pointingHandCursor().font(.caption).foregroundStyle(accent)
                         }
                         .padding(.horizontal, 16).padding(.vertical, 12)
                     }
@@ -705,7 +699,7 @@ struct PreferencesView: View {
                     .font(.caption).foregroundStyle(.secondary)
                 Spacer()
                 Button("Resetovať") { dictation.resetUsageCounter() }
-                    .font(.caption).foregroundStyle(.red).buttonStyle(.plain)
+                    .font(.caption).foregroundStyle(.red).buttonStyle(.plain).pointingHandCursor()
             }
             .padding(.horizontal, 4)
         }
@@ -886,7 +880,7 @@ struct PreferencesView: View {
                         .font(.caption).foregroundStyle(.secondary)
                     Spacer()
                     Button("Resetovať") { google.resetCharacterCount() }
-                        .font(.caption).foregroundStyle(.red).buttonStyle(.plain)
+                        .font(.caption).foregroundStyle(.red).buttonStyle(.plain).pointingHandCursor()
                 }
                 .padding(.horizontal, 4)
             }
@@ -940,7 +934,7 @@ struct PreferencesView: View {
                                 } label: {
                                     Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
                                 }
-                                .buttonStyle(.plain)
+                                .buttonStyle(.plain).pointingHandCursor()
                             }
                             .padding(.vertical, 4)
                             .listRowSeparator(.hidden)
@@ -980,7 +974,7 @@ struct PreferencesView: View {
                                 .padding(.horizontal, 16).padding(.vertical, 13)
                                 .contentShape(Rectangle())
                             }
-                            .buttonStyle(.plain)
+                            .buttonStyle(.plain).pointingHandCursor()
                         }
                     }
                 }
@@ -1192,7 +1186,7 @@ struct PreferencesView: View {
             } label: {
                 Image(systemName: "trash")
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.plain).pointingHandCursor()
             .foregroundStyle(.secondary)
             .help("Vymazať túto položku")
         }
@@ -1479,6 +1473,7 @@ struct PreferencesView: View {
                             .frame(maxHeight: 200)
                             .clipShape(RoundedRectangle(cornerRadius: 6))
                             .onTapGesture { NSWorkspace.shared.open(url) }
+                            .pointingHandCursor()
                             .help("Otvoriť v plnej veľkosti")
                     }
                 }
@@ -1925,7 +1920,7 @@ struct PreferencesView: View {
             .padding(.horizontal, 16).padding(.vertical, 13)
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.plain).pointingHandCursor()
     }
 
     private var appVersion: String {

@@ -251,7 +251,7 @@ struct DictationIndicatorView: View {
         } label: {
             pillContent
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.plain).pointingHandCursor()
             .onReceive(Self.levelTicker) { _ in
                 // ponytail: the pill's NSHostingView is built once and never torn down —
                 // hide() only orderOut's the window — so without this guard the noise-floor

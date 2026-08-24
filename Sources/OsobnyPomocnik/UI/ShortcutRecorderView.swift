@@ -92,7 +92,7 @@ struct ShortcutMappingRow: View {
                         } label: {
                             Image(systemName: "plus.circle")
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(.plain).pointingHandCursor()
                         .foregroundStyle(.secondary)
                         .help("Pridať ďalšiu skratku pre túto akciu")
                     }
@@ -107,7 +107,7 @@ struct ShortcutMappingRow: View {
                         } label: {
                             Image(systemName: "xmark.circle.fill")
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(.plain).pointingHandCursor()
                         .foregroundStyle(.secondary)
                         .help("Odstrániť túto skratku")
                     } else {
