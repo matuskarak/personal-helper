@@ -280,9 +280,13 @@ struct PreferencesView: View {
             .scrollContentBackground(.hidden)
             .padding(6)
             .frame(minHeight: minHeight)
+            // The card behind this is also white, so the border is the ONLY thing marking
+            // where the input starts — a hairline at 0.18 alpha read as "no box at all".
+            // Full pixel, darker than the card's own 0.07 outline, to match the bezel the
+            // stock .roundedBorder field used to draw here.
             .background(RoundedRectangle(cornerRadius: 6).fill(.white))
             .overlay(RoundedRectangle(cornerRadius: 6)
-                .strokeBorder(Color.primary.opacity(0.18), lineWidth: 0.5))
+                .strokeBorder(Color.primary.opacity(0.28), lineWidth: 1))
     }
 
     private func card<Content: View>(@ViewBuilder _ body: () -> Content) -> some View {
