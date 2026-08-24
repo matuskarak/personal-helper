@@ -5,8 +5,9 @@ final class HotkeyManager: @unchecked Sendable {
 
     var onReadText: (() -> Void)?
     var onOCR: (() -> Void)?
-    var onDictate: (() -> Void)?
-    var onSmartDictate: (() -> Void)?
+    var onDictateRealtime: (() -> Void)?
+    var onDictateBatch: (() -> Void)?
+    var onSmartStop: (() -> Void)?
     var onInsertFromMemory: (() -> Void)?
     var onEnterStopDictation: (() -> Void)?
 
@@ -14,8 +15,9 @@ final class HotkeyManager: @unchecked Sendable {
     // Each action can have several mapped shortcuts (e.g. laptop keyboard vs external keyboard).
     private var readTextSCs: [Shortcut]         = [.defaultReadText]
     private var ocrSCs: [Shortcut]              = [.defaultOCR]
-    private var dictateSCs: [Shortcut]          = [.defaultDictate]
-    private var smartDictateSCs: [Shortcut]     = [.defaultSmartDictate]
+    private var dictateRealtimeSCs: [Shortcut]  = [.defaultDictateRealtime]
+    private var dictateBatchSCs: [Shortcut]     = [.defaultDictateBatch]
+    private var smartStopSCs: [Shortcut]        = [.defaultSmartStop]
     private var insertFromMemorySCs: [Shortcut] = [.defaultInsertFromMemory]
 
     private var eventTap: CFMachPort?
@@ -58,13 +60,14 @@ final class HotkeyManager: @unchecked Sendable {
     }
 
     func updateShortcuts(
-        readText: [Shortcut], ocr: [Shortcut], dictate: [Shortcut], smartDictate: [Shortcut],
-        insertFromMemory: [Shortcut]
+        readText: [Shortcut], ocr: [Shortcut], dictateRealtime: [Shortcut],
+        dictateBatch: [Shortcut], smartStop: [Shortcut], insertFromMemory: [Shortcut]
     ) {
-        readTextSCs         = readText
+        readTextSCs          = readText
         ocrSCs               = ocr
-        dictateSCs           = dictate
-        smartDictateSCs      = smartDictate
+        dictateRealtimeSCs   = dictateRealtime
+        dictateBatchSCs      = dictateBatch
+        smartStopSCs         = smartStop
         insertFromMemorySCs  = insertFromMemory
     }
 
@@ -91,12 +94,16 @@ final class HotkeyManager: @unchecked Sendable {
             DispatchQueue.main.async { self.onOCR?() }
             return nil
         }
-        if matchesAny(event, shortcuts: dictateSCs) {
-            DispatchQueue.main.async { self.onDictate?() }
+        if matchesAny(event, shortcuts: dictateRealtimeSCs) {
+            DispatchQueue.main.async { self.onDictateRealtime?() }
             return nil
         }
-        if matchesAny(event, shortcuts: smartDictateSCs) {
-            DispatchQueue.main.async { self.onSmartDictate?() }
+        if matchesAny(event, shortcuts: dictateBatchSCs) {
+            DispatchQueue.main.async { self.onDictateBatch?() }
+            return nil
+        }
+        if matchesAny(event, shortcuts: smartStopSCs) {
+            DispatchQueue.main.async { self.onSmartStop?() }
             return nil
         }
         if matchesAny(event, shortcuts: insertFromMemorySCs) {
