@@ -269,26 +269,78 @@ struct PreferencesView: View {
 
     // MARK: - Shared components
 
-    @ViewBuilder
-    /// Multi-line text input. Deliberately NOT `TextField(axis: .vertical)`: on macOS that
-    /// control submits on Return instead of inserting a newline, so a "one entry per line"
-    /// list is literally untypable in it. TextEditor is the real multi-line control — Return
-    /// does what it should, and it takes focus reliably.
-    private func multilineField(_ text: Binding<String>, minHeight: CGFloat = 72) -> some View {
-        TextEditor(text: text)
-            .font(.body)
-            .scrollContentBackground(.hidden)
-            .padding(6)
-            .frame(minHeight: minHeight)
-            // The card behind this is also white, so the border is the ONLY thing marking
-            // where the input starts — a hairline at 0.18 alpha read as "no box at all".
-            // Full pixel, darker than the card's own 0.07 outline, to match the bezel the
-            // stock .roundedBorder field used to draw here.
-            .background(RoundedRectangle(cornerRadius: 6).fill(.white))
-            .overlay(RoundedRectangle(cornerRadius: 6)
-                .strokeBorder(Color.primary.opacity(0.28), lineWidth: 1))
+    /// Multi-line text input, collapsed to a few rows with a show-more toggle.
+    ///
+    /// Deliberately NOT `TextField(axis: .vertical)`: on macOS that control submits on Return
+    /// instead of inserting a newline, so a "one entry per line" list is literally untypable
+    /// in it. TextEditor is the real multi-line control — Return does what it should.
+    ///
+    /// Collapsing matters because these lists grow: a 30-line keyword list rendered in full
+    /// pushes everything below it off the screen. Collapsed rows are still scrollable and
+    /// editable inside the editor, so nothing becomes unreachable — only quieter.
+    private struct MultilineField: View {
+        @Binding var text: String
+        var collapsedLines = 5
+        var minLines = 3
+        var accent = Color(red: 0.357, green: 0.498, blue: 0.651)
+
+        @State private var expanded = false
+
+        // .body is the 13pt system font — ~17pt per rendered line, plus the 6pt inset above
+        // and below. Approximate on purpose: a wrong guess costs a few points of whitespace,
+        // not a broken layout, and measuring real text metrics here isn't worth the code.
+        private static let lineHeight: CGFloat = 17
+        private static let inset: CGFloat = 12
+        /// Expanded still needs a ceiling — the Settings window is only 520pt tall, so a long
+        /// list would otherwise push every control below it out of reach.
+        private static let maxExpandedLines = 18
+
+        private var lineCount: Int {
+            max(text.split(separator: "\n", omittingEmptySubsequences: false).count, minLines)
+        }
+        private var overflows: Bool { lineCount > collapsedLines }
+        private var visibleLines: Int {
+            guard overflows else { return lineCount }
+            return expanded ? min(lineCount, Self.maxExpandedLines) : collapsedLines
+        }
+
+        var body: some View {
+            VStack(alignment: .leading, spacing: 4) {
+                TextEditor(text: $text)
+                    .font(.body)
+                    .scrollContentBackground(.hidden)
+                    .padding(6)
+                    .frame(height: CGFloat(visibleLines) * Self.lineHeight + Self.inset)
+                    // The card behind this is also white, so the border is the ONLY thing
+                    // marking where the input starts — a hairline at 0.18 alpha read as
+                    // "no box at all". Full pixel, darker than the card's own 0.07 outline.
+                    .background(RoundedRectangle(cornerRadius: 6).fill(.white))
+                    .overlay(RoundedRectangle(cornerRadius: 6)
+                        .strokeBorder(Color.primary.opacity(0.28), lineWidth: 1))
+                if overflows {
+                    Button(expanded
+                           ? "Zobraziť menej"
+                           : "Zobraziť viac (\(lineCount - collapsedLines) \(Self.rowWord(lineCount - collapsedLines)))") {
+                        expanded.toggle()
+                    }
+                    .font(.caption)
+                    .buttonStyle(.plain)
+                    .foregroundStyle(accent)
+                }
+            }
+        }
+
+        /// Slovak needs three forms here — "1 riadok", "2 riadky", "5 riadkov".
+        private static func rowWord(_ n: Int) -> String {
+            switch n {
+            case 1:    "riadok"
+            case 2...4: "riadky"
+            default:   "riadkov"
+            }
+        }
     }
 
+    @ViewBuilder
     private func card<Content: View>(@ViewBuilder _ body: () -> Content) -> some View {
         VStack(spacing: 0) { body() }
             .background(.white)
@@ -452,7 +504,7 @@ struct PreferencesView: View {
                     Text("Predvolené kľúčové slová").font(.body)
                     Text("Platia pri každom diktovaní v oboch režimoch, nezávisle od appky — jedno slovo alebo fráza na riadok. Napríklad tvoje meno, názvy klientov, nástrojov a odborné termíny, ktoré bežne diktuješ. Sú to nápovede pre model, nie príkazy — pomáhajú hlavne pri anglických výrazoch v slovenskej vete. Pri diktovaní do konkrétnej appky sa k nim pridajú aj kľúčové slová z jej App profilu.")
                         .font(.caption).foregroundStyle(.secondary)
-                    multilineField($dictation.defaultKeywords, minHeight: 140)
+                    MultilineField(text: $dictation.defaultKeywords, accent: accent)
                 }
                 .padding(.horizontal, 16).padding(.vertical, 12)
             }
@@ -623,11 +675,11 @@ struct PreferencesView: View {
                                         }
                                         Text("Určuje rubriku hodnotenia na karte Kvalita a (pri gpt-live-transcribe) kontextovú vetu poslanú modelu — napr. pre AI chat: \"Používateľ diktuje prompt pre AI nástroj.\" Needituje sa ručne.")
                                             .font(.caption2).foregroundStyle(.secondary)
-                                        multilineField($profile.instructions, minHeight: 60)
+                                        MultilineField(text: $profile.instructions, collapsedLines: 4, accent: accent)
                                         Text("Kľúčové slová").font(.callout)
                                         Text("Platia iba pri diktovaní do TEJTO appky, naviac k predvoleným v Nastaveniach → Diktovanie. Nápoveda pre gpt-live-transcribe, jedno slovo/fráza na riadok.")
                                             .font(.caption2).foregroundStyle(.secondary)
-                                        multilineField($profile.keywords, minHeight: 72)
+                                        MultilineField(text: $profile.keywords, accent: accent)
                                         HStack {
                                             Spacer()
                                             Button("Odstrániť", role: .destructive) {
