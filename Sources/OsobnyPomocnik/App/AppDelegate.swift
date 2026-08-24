@@ -104,11 +104,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         HotkeyManager.shared.onOCR = { [weak self] in
             self?.handleOCR()
         }
-        HotkeyManager.shared.onDictate = { [weak self] in
-            Task { @MainActor in self?.handleDictate() }
+        HotkeyManager.shared.onDictateRealtime = { [weak self] in
+            Task { @MainActor in self?.handleDictate(mode: .realtime) }
         }
-        HotkeyManager.shared.onSmartDictate = { [weak self] in
-            Task { @MainActor in self?.handleSmartDictate() }
+        HotkeyManager.shared.onDictateBatch = { [weak self] in
+            Task { @MainActor in self?.handleDictate(mode: .batch) }
+        }
+        HotkeyManager.shared.onSmartStop = { [weak self] in
+            Task { @MainActor in self?.handleSmartStop() }
         }
         HotkeyManager.shared.onInsertFromMemory = { [weak self] in
             self?.handleInsertFromMemory()
@@ -159,8 +162,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         switch action {
         case "readText":         Task { @MainActor in await self.handleReadText() }
         case "ocr":               handleOCR()
-        case "dictate":           handleDictate()
-        case "smartDictate":      handleSmartDictate()
+        // "dictate"/"smartDictate" kept for existing Logi/Shortcuts.app triggers.
+        case "dictate", "dictateRealtime": handleDictate(mode: .realtime)
+        case "dictateBatch", "transcribe": handleDictate(mode: .batch)
+        case "smartDictate", "smartStop":  handleSmartStop()
         case "insertFromMemory":  handleInsertFromMemory()
         default: AppLogger.log("[AppDelegate] URL trigger — neznáma akcia: \(action)")
         }
@@ -201,12 +206,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         OCROverlayWindowController.shared.show()
     }
 
-    func handleDictate() {
-        AppLogger.log("[AppDelegate] handleDictate — skratka stlačená (isRecording: \(DictationEngine.shared.isRecording))")
+    /// Start/stop for one dictation mode. The start shortcut picks the mode; while
+    /// recording, ONLY the same mode's shortcut stops it (raw insert) — the other mode's
+    /// shortcut is deliberately ignored so muscle memory stays unambiguous: what started
+    /// the dictation is what stops it. Smart stop is the one exception (handleSmartStop).
+    func handleDictate(mode: DictationEngine.TranscriptionMode) {
         let engine = DictationEngine.shared
+        AppLogger.log("[AppDelegate] handleDictate(\(mode.rawValue)) — skratka stlačená (isRecording: \(engine.isRecording))")
         if engine.isRecording {
+            guard engine.transcriptionMode == mode else {
+                AppLogger.log("[AppDelegate] handleDictate(\(mode.rawValue)) — ignorované, beží \(engine.transcriptionMode.rawValue) diktovanie (zastaví ho len jeho vlastná skratka alebo Smart)")
+                return
+            }
             DictationSounds.playStop()
-            Task { @MainActor in await self.finishDictation(engine: engine, label: "handleDictate") }
+            Task { @MainActor in await self.finishDictation(engine: engine, label: "handleDictate(\(mode.rawValue))", smart: false) }
         } else {
             // Show the indicator immediately — startRecording() now has a multi-second
             // grace period for slow-to-connect mics (Bluetooth/Continuity), so the user
@@ -214,11 +227,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             DictationIndicatorController.shared.show()
             Task { @MainActor in
                 do {
-                    let smart = engine.smartAlwaysOn && RemoteConfig.shared.smartDictationAllowed
-                    try await engine.startRecording(smart: smart)
+                    try await engine.startRecording(mode: mode)
                     DictationSounds.playStart()
                 } catch {
-                    AppLogger.log("[AppDelegate] handleDictate — startRecording zlyhalo: \(error.localizedDescription)")
+                    AppLogger.log("[AppDelegate] handleDictate(\(mode.rawValue)) — startRecording zlyhalo: \(error.localizedDescription)")
                     // Pill is already showing (from show() above) — just surface the reason in it.
                     if engine.connectionError == nil {
                         menuBarController?.showError("⚠️ \(error.localizedDescription)")
@@ -228,43 +240,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    /// Same flow as handleDictate, but captures screenshot + app context at start
-    /// and rewrites the transcript for that context (Slack tone, AI prompt clarity, …) before inserting.
-    /// No-ops while Smart diktovanie is remotely disabled for this user (feature-flags.json) —
-    /// keeps the shortcut harmless instead of erroring for regular users.
-    func handleSmartDictate() {
-        guard RemoteConfig.shared.smartDictationAllowed else {
-            AppLogger.log("[AppDelegate] handleSmartDictate — ignorované (smartDictationAllowed=false)")
+    /// Smart stop: ends the running dictation (either mode) and rewrites the transcript
+    /// with screen context before inserting. Pressed with no dictation running it does
+    /// nothing at all — Smart is a way of FINISHING a dictation, not a mode of its own.
+    func handleSmartStop() {
+        let engine = DictationEngine.shared
+        guard engine.isRecording else {
+            AppLogger.log("[AppDelegate] handleSmartStop — ignorované (nebeží diktovanie)")
             return
         }
-        AppLogger.log("[AppDelegate] handleSmartDictate — skratka stlačená (isRecording: \(DictationEngine.shared.isRecording))")
-        let engine = DictationEngine.shared
-        if engine.isRecording {
-            DictationSounds.playStop()
-            Task { @MainActor in await self.finishDictation(engine: engine, label: "handleSmartDictate") }
-        } else {
-            DictationIndicatorController.shared.show()
-            Task { @MainActor in
-                do {
-                    try await engine.startRecording(smart: true)
-                    DictationSounds.playStart()
-                } catch {
-                    AppLogger.log("[AppDelegate] handleSmartDictate — startRecording zlyhalo: \(error.localizedDescription)")
-                    if engine.connectionError == nil {
-                        menuBarController?.showError("⚠️ \(error.localizedDescription)")
-                    }
-                }
-            }
+        guard RemoteConfig.shared.smartDictationAllowed else {
+            AppLogger.log("[AppDelegate] handleSmartStop — ignorované (smartDictationAllowed=false)")
+            return
         }
+        AppLogger.log("[AppDelegate] handleSmartStop — ukončujem so Smart spracovaním")
+        DictationSounds.playStop()
+        Task { @MainActor in await self.finishDictation(engine: engine, label: "handleSmartStop", smart: true) }
     }
 
-    /// Shared "stop → transcribe → insert (or remember)" tail for both dictation flows.
-    /// - If no audio was ever captured, surfaces a clear "audio didn't work" notice.
-    /// - If audio worked but transcript came back empty, just hides (nothing to insert).
-    /// - If there's a focused editable field, inserts there.
-    /// - Otherwise saves to DictationMemoryStore and shows a notice with the recall shortcut.
-    private func finishDictation(engine: DictationEngine, label: String) async {
-        guard let text = await engine.stopAndTranscribe(), !text.isEmpty else {
+    private func finishDictation(engine: DictationEngine, label: String, smart: Bool = false) async {
+        guard let text = await engine.stopAndTranscribe(smart: smart), !text.isEmpty else {
             if engine.didLiveInsert {
                 AppLogger.log("[AppDelegate] \(label) — live-insert dokončený")
                 DictationIndicatorController.shared.hide()

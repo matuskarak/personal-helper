@@ -368,79 +368,51 @@ struct PreferencesView: View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Diktovanie").font(.title2.bold())
 
-            // Toggles — Live vkladanie funguje iba v Realtime režime a mimo Smart diktovania
-            // (deltas sa v inom stave netypujú, viď DictationEngine), takže sa zobrazuje iba
-            // vtedy, keď reálne môže fungovať, namiesto ponechania zapnutého s upozornením.
+            // How the shortcut scheme works — the mode/processing split lives in the
+            // shortcuts now, so the settings only pick MODELS per mode, not the mode itself.
+            Text("Režim prepisu voliš skratkou, ktorou diktovanie SPUSTÍŠ (\(scLabel(.dictateRealtime)) = realtime, \(scLabel(.dictateBatch)) = po nahraní). Skratka, ktorou diktovanie UKONČÍŠ, rozhoduje o spracovaní: tá istá ako pri štarte = vloží sa čistý prepis; \(scLabel(.smartStop)) = text pred vložením upraví AI s kontextom obrazovky (Smart). Iné diktovacie skratky sa počas nahrávania ignorujú.")
+                .font(.caption).foregroundStyle(.secondary).padding(.horizontal, 4)
+
             card {
-                if remoteConfig.smartDictationAllowed {
-                    toggleRow(title: "Smart diktovanie",
-                              subtitle: dictation.transcriptionMode == .realtime
-                                  ? "Pred vložením text prepíše AI s kontextom obrazovky. Vypína Live vkladanie."
-                                  : "Pred vložením text prepíše AI s kontextom obrazovky",
-                              isOn: $dictation.smartAlwaysOn)
-                    if dictation.smartAlwaysOn && !CGPreflightScreenCaptureAccess() {
-                        warningBanner(
-                            "Bez povolenia 'Nahrávanie obrazovky' Smart diktovanie neuvidí obsah obrazovky — funguje len ako oprava gramatiky.",
-                            action: ("Otvoriť nastavenia", { PermissionsChecker.shared.openScreenRecordingSettings() })
-                        )
-                        .padding(.horizontal, 16)
-                        .padding(.bottom, 12)
-                    }
-                }
-                if canUseLiveInsert {
-                    if remoteConfig.smartDictationAllowed { rowDivider }
-                    toggleRow(title: "Live vkladanie",
-                              subtitle: "Píše text do poľa priebežne počas diktovania",
-                              isOn: $dictation.liveInsertEnabled)
-                    if dictation.liveInsertEnabled {
-                        rowDivider
-                        toggleRow(title: "Enter zastaví diktovanie",
-                                  subtitle: "Stlačenie Enter automaticky ukončí nahrávanie",
-                                  isOn: $dictation.enterAutoStop)
-                    }
+                toggleRow(title: "Live vkladanie",
+                          subtitle: "Píše text do poľa priebežne počas realtime diktovania. Kým je zapnuté, Smart ukončenie (\(scLabel(.smartStop))) sa pri realtime nedá použiť — text je už vložený.",
+                          isOn: $dictation.liveInsertEnabled)
+                if dictation.liveInsertEnabled {
+                    rowDivider
+                    toggleRow(title: "Enter zastaví diktovanie",
+                              subtitle: "Stlačenie Enter automaticky ukončí nahrávanie",
+                              isOn: $dictation.enterAutoStop)
                 }
             }
 
-            // Režim + VAD
+            // Realtime mode — model + keywords + VAD (VAD is a realtime-socket setting)
+            Text("Realtime diktovanie — skratka \(scLabel(.dictateRealtime))").font(.headline)
             card {
-                pickerRow(title: "Režim", selection: $dictation.transcriptionMode) {
-                    Text("Realtime (živý náhľad) — \(Pricing.perMinuteLabel(realtime: true))")
-                        .tag(DictationEngine.TranscriptionMode.realtime)
-                    Text("Po nahraní (presnejší, lacnejší)")
-                        .tag(DictationEngine.TranscriptionMode.batch)
+                Text("Slová nabiehajú priebežne už počas rozprávania — najrýchlejšia cesta pre krátke diktovania. \(Pricing.perMinuteLabel(realtime: true)).")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .padding(.horizontal, 16).padding(.top, 10)
+                rowDivider
+                // Both realtime models cost the same, so no price in the labels here.
+                pickerRow(title: "Model", selection: $dictation.realtimeModel) {
+                    ForEach(DictationEngine.RealtimeModel.allCases, id: \.self) { model in
+                        Text(model.label).tag(model)
+                    }
                 }
-                if dictation.transcriptionMode == .batch {
+                if dictation.realtimeModel == .live {
                     rowDivider
-                    pickerRow(title: "Model", selection: $dictation.batchModel) {
-                        ForEach(DictationEngine.batchModels, id: \.self) { model in
-                            Text("\(model)\(Self.modelNote(model)) — \(Pricing.perMinuteLabel(realtime: false, batchModel: model))")
-                                .tag(model)
-                        }
-                    }
-                } else {
+                    Text("gpt-live-transcribe je vyhradený prepisovací model — na rozdiel od pôvodného gpt-realtime-whisper vie využiť kľúčové slová a kontext appky nižšie, čo mu pomáha pri menách, skratkách a názvoch funkcií. Cena je rovnaká.")
+                        .font(.caption).foregroundStyle(.secondary)
+                        .padding(.horizontal, 16).padding(.vertical, 10)
                     rowDivider
-                    // Both realtime models cost the same, so no price in the labels here.
-                    pickerRow(title: "Model", selection: $dictation.realtimeModel) {
-                        ForEach(DictationEngine.RealtimeModel.allCases, id: \.self) { model in
-                            Text(model.label).tag(model)
-                        }
-                    }
-                    if dictation.realtimeModel == .live {
-                        rowDivider
-                        Text("gpt-live-transcribe je vyhradený prepisovací model — na rozdiel od pôvodného gpt-realtime-whisper vie využiť kľúčové slová a kontext appky nižšie, čo mu pomáha pri menách, skratkách a názvoch funkcií. Cena je rovnaká.")
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Predvolené kľúčové slová").font(.body)
+                        Text("Platia pri každom diktovaní, nezávisle od appky — jedno slovo/fráza na riadok. Napríklad tvoje meno alebo časté pojmy z tvojej práce. Sú to nápovede pre model, nie príkazy. Pri diktovaní do konkrétnej appky sa k nim pridajú aj kľúčové slová z jej App profilu nižšie.")
                             .font(.caption).foregroundStyle(.secondary)
-                            .padding(.horizontal, 16).padding(.vertical, 10)
-                        rowDivider
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text("Predvolené kľúčové slová").font(.body)
-                            Text("Platia pri každom diktovaní, nezávisle od appky — jedno slovo/fráza na riadok. Napríklad tvoje meno alebo časté pojmy z tvojej práce. Sú to nápovede pre model, nie príkazy. Pri diktovaní do konkrétnej appky sa k nim pridajú aj kľúčové slová z jej App profilu nižšie.")
-                                .font(.caption).foregroundStyle(.secondary)
-                            TextField("napr. Matúš Karák\nOsobný pomocník", text: $dictation.defaultKeywords, axis: .vertical)
-                                .lineLimit(2...5)
-                                .textFieldStyle(.roundedBorder)
-                        }
-                        .padding(.horizontal, 16).padding(.vertical, 12)
+                        TextField("napr. Matúš Karák\nOsobný pomocník", text: $dictation.defaultKeywords, axis: .vertical)
+                            .lineLimit(2...5)
+                            .textFieldStyle(.roundedBorder)
                     }
+                    .padding(.horizontal, 16).padding(.vertical, 12)
                 }
                 rowDivider
                 HStack(alignment: .top) {
@@ -460,6 +432,21 @@ struct PreferencesView: View {
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 12)
+            }
+
+            // Batch mode — model only
+            Text("Diktovanie po nahraní — skratka \(scLabel(.dictateBatch))").font(.headline)
+            card {
+                Text("Celé sa najprv nahrá a prepíše až po zastavení — presnejšie a lacnejšie, vhodné na dlhšie diktovania. Počas nahrávania sa nezobrazujú priebežné slová.")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .padding(.horizontal, 16).padding(.top, 10)
+                rowDivider
+                pickerRow(title: "Model", selection: $dictation.batchModel) {
+                    ForEach(DictationEngine.batchModels, id: \.self) { model in
+                        Text("\(model)\(Self.modelNote(model)) — \(Pricing.perMinuteLabel(realtime: false, batchModel: model))")
+                            .tag(model)
+                    }
+                }
             }
 
             // Pozícia pilulky
@@ -524,7 +511,20 @@ struct PreferencesView: View {
 
             if remoteConfig.smartDictationAllowed {
                 // Smart rewrite model
+                Text("Smart spracovanie — ukonči diktovanie skratkou \(scLabel(.smartStop))").font(.headline)
                 card {
+                    Text("Smart nie je samostatný režim — je to spôsob UKONČENIA. Diktovanie spustíš hociktorou z dvoch skratiek vyššie; keď ho ukončíš skratkou \(scLabel(.smartStop)), AI pred vložením prepis upraví podľa kontextu obrazovky (opraví názvy, formu, appke primeraný tón). Stlačená mimo diktovania nerobí nič.")
+                        .font(.caption).foregroundStyle(.secondary)
+                        .padding(.horizontal, 16).padding(.top, 10)
+                    if !CGPreflightScreenCaptureAccess() {
+                        warningBanner(
+                            "Bez povolenia 'Nahrávanie obrazovky' Smart spracovanie neuvidí obsah obrazovky — funguje len ako oprava gramatiky.",
+                            action: ("Otvoriť nastavenia", { PermissionsChecker.shared.openScreenRecordingSettings() })
+                        )
+                        .padding(.horizontal, 16)
+                        .padding(.top, 8)
+                    }
+                    rowDivider
                     pickerRow(title: "Model Smart prepisu", selection: $smartModelInput) {
                         Text("gpt-4o-mini (rýchly, odporúčaný)").tag("gpt-4o-mini")
                         Text("gpt-4o (presnejší)").tag("gpt-4o")
@@ -638,16 +638,11 @@ struct PreferencesView: View {
             }
             .padding(.horizontal, 4)
         }
-        .onChange(of: dictation.smartAlwaysOn) { _, on in
-            if on { dictation.liveInsertEnabled = false }
-        }
     }
 
-    /// Live vkladanie píše deltas do poľa počas realtime prepisu — v batch režime žiadne
-    /// deltas nie sú a v Smart móde sa netypujú (viď DictationEngine.handleRealtimeEvent),
-    /// takže mimo tejto kombinácie sa toggle vôbec nezobrazuje.
-    private var canUseLiveInsert: Bool {
-        dictation.transcriptionMode == .realtime && !dictation.smartAlwaysOn
+    /// First shortcut mapped to the action, for inline mentions in explanations.
+    private func scLabel(_ action: ShortcutStore.Action) -> String {
+        ShortcutStore.shared.shortcuts(for: action).first?.displayString ?? "?"
     }
 
     private var vadSubtitle: String {
@@ -1170,6 +1165,7 @@ struct PreferencesView: View {
                 }
             } else {
                 qualitySummaryCard(analyzed)
+                modeUsageCard()
                 topFillersCard(analyzed)
                 perAppCard(analyzed)
                 recentDictationsCard(analyzed)
@@ -1197,6 +1193,47 @@ struct PreferencesView: View {
                          color: ratingColor(DictationQualityEngine.paceRating(wpm: avgWPM)))
             }
             .padding(.vertical, 16)
+        }
+    }
+
+    /// How dictation is actually used: realtime vs batch, raw vs Smart finish.
+    /// Reads all entries that carry the mode field (added 2026-08-20) — older ones can't tell.
+    private func modeUsageCard() -> some View {
+        let tracked = DictationHistoryStore.shared.entries.filter { $0.mode != nil }
+        let combos: [(label: String, count: Int)] = [
+            ("Realtime — čisté",      tracked.filter { $0.mode == "realtime" && $0.smart != true }.count),
+            ("Realtime + Smart",      tracked.filter { $0.mode == "realtime" && $0.smart == true }.count),
+            ("Po nahraní — čisté",    tracked.filter { $0.mode == "batch"    && $0.smart != true }.count),
+            ("Po nahraní + Smart",    tracked.filter { $0.mode == "batch"    && $0.smart == true }.count),
+        ]
+        let total = tracked.count
+
+        return card {
+            VStack(alignment: .leading, spacing: 0) {
+                Text("Využitie režimov").font(.body)
+                    .padding(.horizontal, 16).padding(.vertical, 12)
+                rowDivider
+                if total == 0 {
+                    Text("Zatiaľ žiadne dáta — režim sa zaznamenáva pri nových diktovaniach.")
+                        .font(.callout).foregroundStyle(.secondary)
+                        .padding(.horizontal, 16).padding(.vertical, 12)
+                } else {
+                    ForEach(Array(combos.enumerated()), id: \.offset) { index, combo in
+                        if index > 0 { rowDivider }
+                        HStack {
+                            Text(combo.label).font(.callout)
+                            Spacer()
+                            Text("\(combo.count)× (\(Int((Double(combo.count) / Double(total) * 100).rounded())) %)")
+                                .font(.callout.monospacedDigit()).foregroundStyle(.secondary)
+                        }
+                        .padding(.horizontal, 16).padding(.vertical, 10)
+                    }
+                    rowDivider
+                    Text("Spolu \(total) diktovaní so zaznamenaným režimom. Staršie záznamy režim nemajú a nepočítajú sa.")
+                        .font(.caption).foregroundStyle(.secondary)
+                        .padding(.horizontal, 16).padding(.vertical, 10)
+                }
+            }
         }
     }
 
@@ -1597,10 +1634,12 @@ struct PreferencesView: View {
             Text("Klávesové skratky").font(.title2.bold())
 
             card {
-                ShortcutMappingRow(label: "Diktovanie", action: .dictate)
+                ShortcutMappingRow(label: "Diktovanie — realtime", action: .dictateRealtime)
+                rowDivider
+                ShortcutMappingRow(label: "Diktovanie — po nahraní", action: .dictateBatch)
                 if remoteConfig.smartDictationAllowed {
                     rowDivider
-                    ShortcutMappingRow(label: "Smart diktovanie", action: .smartDictate)
+                    ShortcutMappingRow(label: "Smart ukončenie diktovania", action: .smartStop)
                 }
                 rowDivider
                 ShortcutMappingRow(label: "Čítať text", action: .readText)
@@ -1611,7 +1650,7 @@ struct PreferencesView: View {
             }
             .id(shortcutsResetToken) // forces each row to reload from the store after a reset
 
-            Text("Klikni na skratku a stlač novú kombináciu (vyžaduje aspoň jeden modifier). Tlačidlom „+“ pridáš ďalšiu skratku pre tú istú akciu — napríklad inú kombináciu na externej klávesnici než na notebooku (max \(ShortcutStore.maxPerAction)).")
+            Text("Diktovacia skratka režim aj spúšťa aj zastavuje (zastaví ho len tá istá skratka, ktorou začal). „Smart ukončenie“ nie je samostatné diktovanie — ukončí bežiace diktovanie a prepis pred vložením upraví AI.\n\nKlikni na skratku a stlač novú kombináciu (vyžaduje aspoň jeden modifier). Tlačidlom „+“ pridáš ďalšiu skratku pre tú istú akciu — napríklad inú kombináciu na externej klávesnici než na notebooku (max \(ShortcutStore.maxPerAction)).")
                 .font(.caption).foregroundStyle(.secondary).padding(.horizontal, 4)
 
             Button("Obnoviť predvolené skratky") { showResetShortcutsConfirm = true }

@@ -349,9 +349,6 @@ final class DictationEngine {
         didSet { UserDefaults.standard.set(liveInsertEnabled, forKey: "dictation.liveInsert") }
     }
     // When true, regular Diktovanie (⇧⌘D) always runs in Smart mode (context capture + rewrite).
-    var smartAlwaysOn: Bool {
-        didSet { UserDefaults.standard.set(smartAlwaysOn, forKey: "dictation.smartAlwaysOn") }
-    }
     var enterAutoStop: Bool {
         didSet { UserDefaults.standard.set(enterAutoStop, forKey: "dictation.enterAutoStop") }
     }
@@ -376,6 +373,7 @@ final class DictationEngine {
     private var capturedAppName:    String = ""
     private var capturedBundleID:   String = ""
     private var contextCaptureTask: Task<Void, Never>?
+    private var apiProbeTask: Task<Void, Never>?
 
     // Profile resolved synchronously at recording start, purely so its keywords can go into
     // the very FIRST session.update. capturedProfile above can't serve here: it's filled by
@@ -429,7 +427,6 @@ final class DictationEngine {
         self.batchModel             = UserDefaults.standard.string(forKey: "dictation.batchModel") ?? "gpt-transcribe"
         self.liveInsertEnabled      = UserDefaults.standard.object(forKey: "dictation.liveInsert") as? Bool ?? true
         self.enterAutoStop          = UserDefaults.standard.bool(forKey: "dictation.enterAutoStop")
-        self.smartAlwaysOn          = UserDefaults.standard.bool(forKey: "dictation.smartAlwaysOn")
     }
 
     func resetUsageCounter() { totalSecondsRecorded = 0 }
@@ -479,8 +476,12 @@ final class DictationEngine {
 
     // MARK: - Public API
 
-    func startRecording(smart: Bool = false) async throws {
+    func startRecording(mode: TranscriptionMode) async throws {
         guard hasOpenAIKey else { throw DictationError.noAPIKey }
+        // The start shortcut picks the transcription mode per session (S = realtime,
+        // D = batch). Persisted via didSet only as "last used" — the menu-bar toggle
+        // and the cost estimate read it between sessions.
+        transcriptionMode = mode
         guard !isStarting else {
             AppLogger.log("[DictationEngine] startRecording — already starting, ignoring duplicate call")
             return
@@ -494,7 +495,7 @@ final class DictationEngine {
         tapRestartCount = 0
         tapNeedsReinstall = false
         let micAuth = AVCaptureDevice.authorizationStatus(for: .audio)
-        AppLogger.log("[DictationEngine] startRecording(smart: \(smart)) — mic permission: \(micAuth.description)")
+        AppLogger.log("[DictationEngine] startRecording(mode: \(mode.rawValue)) — mic permission: \(micAuth.description)")
 
         stopSession()
 
@@ -561,7 +562,7 @@ final class DictationEngine {
         sessionID += 1
         let mySessionID = sessionID
 
-        isSmartMode        = smart
+        isSmartMode        = false  // decided by the STOP shortcut — see stopAndTranscribe(smart:)
         capturedScreenshotJPEG = nil
         capturedProfile    = nil
         capturedAppName    = ""
@@ -596,9 +597,13 @@ final class DictationEngine {
             AppLogger.log("[DictationEngine] Session profile: \(sessionProfile?.displayName ?? "—"), keywords: \(sessionProfile?.transcriptionKeywords.count ?? 0)")
         }
 
-        AppLogger.log("[DictationEngine] context capture task launched (smart: \(smart))")
+        // Screenshot captured whenever Smart is available — whether it's used is only
+        // known at stop time (Smart stop shortcut). Capture runs in parallel with the
+        // recording, so the extra work never delays audio or the transcript.
+        let wantScreenshot = RemoteConfig.shared.smartDictationAllowed
+        AppLogger.log("[DictationEngine] context capture task launched (screenshot: \(wantScreenshot))")
         contextCaptureTask = Task { [weak self] in
-            let ctx = await SmartContextCapture.shared.captureFrontmostContext(captureScreenshot: smart)
+            let ctx = await SmartContextCapture.shared.captureFrontmostContext(captureScreenshot: wantScreenshot)
             guard let self else { return }
             self.capturedScreenshotJPEG = ctx.image?.jpegData(quality: 0.75)
             self.capturedAppName    = ctx.appName ?? ""
@@ -607,6 +612,20 @@ final class DictationEngine {
                 bundleID: ctx.bundleID, windowTitle: ctx.windowTitle
             )
             AppLogger.log("[DictationEngine] context capture task finished — profile=\(self.capturedProfile?.displayName ?? "?") hasScreenshot=\(ctx.image != nil)")
+        }
+
+        // Reachability probe running ALONGSIDE the recording, not before it: a blocking
+        // pre-flight check would add latency to the one path we spent the most effort
+        // shortening, and it still couldn't promise the network survives the next 10 seconds.
+        // NWPathMonitor is deliberately not used — during the 2026-08-21 outage macOS reported
+        // the path as `satisfied` while DNS was dead, so only a real request tells us anything.
+        // Doubles as a TLS warm-up for the upload that follows.
+        apiProbeTask?.cancel()
+        apiProbeTask = Task { [weak self] in
+            guard let self, await Self.apiUnreachable(apiKey: self.openAIKey) else { return }
+            guard !Task.isCancelled, self.isRecording, self.sessionID == mySessionID else { return }
+            AppLogger.log("[DictationEngine] ⚠️ probe — API nedostupné počas štartu diktovania")
+            self.showNotice("⚠️ API je nedostupné — hovor ďalej, nahrávka sa uloží a prepíšeš ju neskôr.", sticky: false)
         }
 
         do {
@@ -623,6 +642,7 @@ final class DictationEngine {
                 switch transcriptionMode {
                 case .realtime:
                     openRealtimeSocket(sessionID: mySessionID)
+                    _ = batchAudioBuffer.drain()
                     let tapQueue = sendQueue
                     capture.onBuffer = { buf in
                         sendChunkOverWebSocket(
@@ -657,6 +677,7 @@ final class DictationEngine {
                 switch transcriptionMode {
                 case .realtime:
                     openRealtimeSocket(sessionID: mySessionID)
+                    _ = batchAudioBuffer.drain()
                     AppLogger.log("[DictationEngine] WS task started, audio tap installing...")
                     let tapQueue = sendQueue
                     inputNode.installTap(onBus: 0, bufferSize: 2_400, format: inputFormat) { buf, _ in
@@ -819,7 +840,18 @@ final class DictationEngine {
 
 
     /// Stops mic, commits audio buffer, waits for server's completed transcript, then returns it.
-    func stopAndTranscribe() async -> String? {
+    /// `smart` comes from the STOP shortcut: same shortcut as start = raw insert,
+    /// Smart shortcut = rewrite with screen context before inserting.
+    func stopAndTranscribe(smart: Bool = false) async -> String? {
+        if smart {
+            if liveInsertActive || didLiveInsert {
+                // Live insert already typed the raw text into the field as it was spoken —
+                // there's nothing left to rewrite. Say why instead of silently ignoring A.
+                showNotice("⚠️ Live vkladanie už text priebežne vložilo — Smart úprava sa nedá použiť. Vypni Live vkladanie v Nastaveniach.")
+            } else {
+                isSmartMode = true
+            }
+        }
         let elapsed = recordingStartDate.map { Int(Date().timeIntervalSince($0)) } ?? 0
         recordingStartDate = nil
         // A slow/hung network call (e.g. Smart rewrite) can still be in flight when the user
@@ -837,7 +869,7 @@ final class DictationEngine {
         lastRecordingCapturedAudio = chunkCounter.hasRealAudio
         AppLogger.log("[DictationEngine] Recording stopped. Chunks sent: \(chunkCounter.sent), failed: \(chunkCounter.failed), firstChunkBytes: \(firstInfo.bytes), firstChunkMaxAmplitude: \(firstInfo.maxAmplitude)/32767, secondsSinceLastChunk: \(chunkCounter.secondsSinceLastChunk.map { String(format: "%.1f", $0) } ?? "n/a")")
 
-        let transcript: String
+        var transcript: String
         switch transcriptionMode {
         case .realtime:
             // Commit the audio buffer — enqueue behind any still-pending chunks so it's
@@ -872,7 +904,20 @@ final class DictationEngine {
             }
 
         case .batch:
-            transcript = await transcribeBatch()
+            transcript = await transcribeBatch(seconds: elapsed)
+        }
+
+        // Realtime streams audio as it's spoken, so a dropped socket normally takes the whole
+        // dictation with it. We now keep a local PCM copy for exactly this case — upload it as
+        // a batch job instead of handing the user back nothing.
+        if transcriptionMode == .realtime {
+            if transcript.isEmpty, !didLiveInsert, lastRecordingCapturedAudio, !batchAudioBuffer.isEmpty {
+                AppLogger.log("[DictationEngine] realtime bez transkriptu — skúšam batch upload z lokálnej kópie")
+                showNotice("⏳ Realtime spojenie zlyhalo — prepisujem z uloženej nahrávky…")
+                transcript = await transcribeBatch(seconds: elapsed)
+            } else {
+                _ = batchAudioBuffer.drain()  // realtime succeeded — drop the fallback copy now
+            }
         }
 
         var result = transcript.isEmpty ? nil : transcript
@@ -969,6 +1014,7 @@ final class DictationEngine {
         let category = capturedProfile?.category ?? .generic
         let screenshotJPEG = SmartRewriteEngine.shared.saveScreenshotsToHistory
             ? capturedScreenshotJPEG : nil
+        let wasSmart = isSmartMode  // captured before the reset below — logged to history
 
         isSmartMode        = false
         capturedScreenshotJPEG = nil
@@ -986,7 +1032,8 @@ final class DictationEngine {
             UsageStore.shared.logDictation(seconds: elapsed, text: dictatedText, model: model)
             DictationHistoryStore.shared.log(dictatedText, appName: appName, bundleID: bundleID,
                                              category: category, seconds: elapsed,
-                                             rewrittenText: rewritten, screenshotJPEG: screenshotJPEG)
+                                             rewrittenText: rewritten, screenshotJPEG: screenshotJPEG,
+                                             mode: transcriptionMode.rawValue, smart: wasSmart)
         }
         return result
     }
@@ -996,17 +1043,148 @@ final class DictationEngine {
     /// Wraps the recorded PCM16 buffer in a WAV header and uploads it to the
     /// REST transcription endpoint. Used by .batch mode instead of the
     /// realtime WebSocket commit/wait flow.
-    private func transcribeBatch() async -> String {
+    /// Uploads the just-recorded audio and returns the transcript, or "" if it couldn't be
+    /// transcribed. On failure the recording is left in PendingDictationStore so the user can
+    /// retry it — losing it was the old behaviour and it made every network blip destructive.
+    private func transcribeBatch(seconds: Int) async -> String {
         let pcmData = batchAudioBuffer.drain()
         AppLogger.log("[DictationEngine] Batch transcribe — \(pcmData.count) bytes PCM, model: \(batchModel)")
         guard !pcmData.isEmpty else { return "" }
 
         let wav = Self.wavData(pcm16: pcmData, sampleRate: 24_000, channels: 1)
 
+        // Written to disk BEFORE the request goes out. This function used to drain the buffer
+        // and then return "" on any network error, which destroyed the recording outright —
+        // the words were gone with no way back. Now a failed upload just leaves a file behind.
+        let pending = PendingDictationStore.shared.save(
+            wav: wav, mode: transcriptionMode.rawValue,
+            appName: capturedAppName, bundleID: capturedBundleID, seconds: seconds
+        )
+
+        let keywords = AppProfile.parseKeywords(defaultKeywords) + (sessionProfile?.transcriptionKeywords ?? [])
+
+        // Nothing visible changes between "recording stopped" and "text inserted", so a stalled
+        // upload is indistinguishable from a frozen app. Escalating notices say what's going on
+        // and — the part that matters — that the recording is safe either way.
+        let watchdog = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(6))
+            guard let self, !Task.isCancelled else { return }
+            self.showNotice("⏳ Prepis trvá dlhšie než zvyčajne — nahrávka je uložená, nič sa nestratí.")
+            try? await Task.sleep(for: .seconds(14))
+            guard !Task.isCancelled else { return }
+            self.showNotice("⚠️ Server neodpovedá. Nahrávka je uložená — skús ju znova cez menu → Čakajúce nahrávky.")
+        }
+        defer { watchdog.cancel() }
+
+        do {
+            let text = try await Self.upload(wav: wav, model: batchModel, keywords: keywords, apiKey: openAIKey)
+            if let pending { PendingDictationStore.shared.remove(pending) }
+            watchdog.cancel()
+            clearNotice()
+            AppLogger.log("[DictationEngine] Batch transcription completed (\(text.count) chars)")
+            return text
+        } catch {
+            AppLogger.log("[DictationEngine] ⚠️ Batch transcription failed: \(error)")
+            connectionError = "Sieťová chyba: \(error.localizedDescription)"
+            watchdog.cancel()
+            if pending != nil {
+                showNotice("⚠️ Prepis zlyhal — nahrávka je uložená. Skús ju znova cez menu → Čakajúce nahrávky.")
+            }
+            return ""
+        }
+    }
+
+    /// Re-uploads a recording whose transcription failed earlier. The text goes to history and
+    /// the insert-from-memory slot rather than straight into whatever happens to be focused —
+    /// minutes may have passed and the field it was dictated into is probably long gone.
+    func retryPending(_ item: PendingDictation) async {
+        guard hasOpenAIKey else {
+            showNotice("⚠️ OpenAI API kľúč nie je nastavený.")
+            return
+        }
+        guard let wav = PendingDictationStore.shared.wav(for: item) else {
+            AppLogger.log("[DictationEngine] retryPending — WAV chýba, mažem záznam \(item.id)")
+            PendingDictationStore.shared.remove(item)
+            return
+        }
+        AppLogger.log("[DictationEngine] retryPending \(item.id) — \(wav.count) B")
+        isTranscribing = true
+        defer { isTranscribing = false }
+        showNotice("⏳ Skúšam prepis uloženej nahrávky…")
+        do {
+            // App-profile keywords aren't reused here: sessionProfile belongs to the live
+            // session, and the recording's own profile wasn't persisted. Defaults still apply.
+            let text = try await Self.upload(wav: wav, model: batchModel,
+                                             keywords: AppProfile.parseKeywords(defaultKeywords),
+                                             apiKey: openAIKey)
+            PendingDictationStore.shared.remove(item)
+            guard !text.isEmpty else {
+                showNotice("⚠️ Nahrávka neobsahovala rozpoznateľnú reč.")
+                return
+            }
+            DictationHistoryStore.shared.log(text, appName: item.appName, bundleID: item.bundleID,
+                                             seconds: item.seconds, mode: item.mode, smart: false)
+            DictationMemoryStore.shared.store(text)
+            showNotice("✅ Prepis dokončený (\(text.count) znakov) — vlož ho cez ⌃⌥V alebo z histórie.")
+        } catch {
+            AppLogger.log("[DictationEngine] retryPending zlyhalo: \(error)")
+            showNotice("⚠️ Prepis stále zlyháva: \(error.localizedDescription). Nahrávka ostáva uložená.")
+        }
+    }
+
+    enum TranscriptionError: LocalizedError {
+        case http(Int, String)
+        case badResponse
+
+        var errorDescription: String? {
+            switch self {
+            case .http(let code, let msg): "Server odpovedal \(code): \(msg.prefix(120))"
+            case .badResponse:             "Neočakávaná odpoveď servera."
+            }
+        }
+        /// 4xx means the request itself is wrong (bad key, bad audio) — repeating it verbatim
+        /// can only fail the same way. Rate limits and 5xx are worth another go.
+        var isRetryable: Bool {
+            if case .http(let code, _) = self { return code == 429 || code >= 500 }
+            return true
+        }
+    }
+
+    /// One transcription, retried on transient failures. Most real-world drops (a DNS blip,
+    /// a wifi handover) clear within seconds — a single attempt turned those into a lost
+    /// dictation, which is exactly what kept happening.
+    private static func upload(wav: Data, model: String, keywords: [String], apiKey: String) async throws -> String {
+        var lastError: Error = TranscriptionError.badResponse
+        for attempt in 1...3 {
+            if attempt > 1 { try? await Task.sleep(for: .seconds(attempt == 2 ? 1 : 4)) }
+            do {
+                return try await uploadOnce(wav: wav, model: model, keywords: keywords, apiKey: apiKey)
+            } catch let error as TranscriptionError where !error.isRetryable {
+                throw error
+            } catch {
+                lastError = error
+                AppLogger.log("[DictationEngine] upload pokus \(attempt)/3 zlyhal: \(error.localizedDescription)")
+            }
+        }
+        throw lastError
+    }
+
+    /// True only when the endpoint can't be reached at all. A 401 counts as reachable — a bad
+    /// key is a different problem, surfaced elsewhere, and not something to warn about here.
+    private static func apiUnreachable(apiKey: String) async -> Bool {
+        guard !apiKey.isEmpty else { return false }
+        var req = URLRequest(url: URL(string: "https://api.openai.com/v1/models")!)
+        req.httpMethod = "HEAD"
+        req.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        req.timeoutInterval = 4
+        do { _ = try await batchSession.data(for: req); return false } catch { return true }
+    }
+
+    private static func uploadOnce(wav: Data, model: String, keywords: [String], apiKey: String) async throws -> String {
         let boundary = "Boundary-\(UUID().uuidString)"
         var req = URLRequest(url: URL(string: "https://api.openai.com/v1/audio/transcriptions")!)
         req.httpMethod = "POST"
-        req.setValue("Bearer \(openAIKey)", forHTTPHeaderField: "Authorization")
+        req.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         req.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
 
         var body = Data()
@@ -1015,14 +1193,13 @@ final class DictationEngine {
             body.append("Content-Disposition: form-data; name=\"\(name)\"\r\n\r\n".data(using: .utf8)!)
             body.append("\(value)\r\n".data(using: .utf8)!)
         }
-        addField("model", batchModel)
+        addField("model", model)
         addField("language", "sk")
         addField("response_format", "json")
         // Same vocabulary hints the realtime gpt-live-transcribe path sends (default keywords
         // + matched App profile's) — batch mode never got them, so technical/foreign terms
         // that realtime could hit were reliably garbled here. Verified accepted by the
         // /v1/audio/transcriptions endpoint for gpt-transcribe (HTTP 200 with `prompt`).
-        let keywords = AppProfile.parseKeywords(defaultKeywords) + (sessionProfile?.transcriptionKeywords ?? [])
         if !keywords.isEmpty { addField("prompt", keywords.joined(separator: ", ")) }
         body.append("--\(boundary)\r\n".data(using: .utf8)!)
         body.append("Content-Disposition: form-data; name=\"file\"; filename=\"audio.wav\"\r\n".data(using: .utf8)!)
@@ -1031,28 +1208,19 @@ final class DictationEngine {
         body.append("\r\n--\(boundary)--\r\n".data(using: .utf8)!)
         req.httpBody = body
 
-        do {
-            let (data, response) = try await Self.batchSession.data(for: req)
-            guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
-                let msg = String(data: data, encoding: .utf8) ?? "?"
-                AppLogger.log("[DictationEngine] ⚠️ Batch transcription HTTP error: \(msg.prefix(300))")
-                connectionError = "Prepis zlyhal: \(msg.prefix(150))"
-                return ""
-            }
-            guard
-                let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                let text = json["text"] as? String
-            else {
-                AppLogger.log("[DictationEngine] ⚠️ Batch transcription — unexpected response: \(String(data: data, encoding: .utf8)?.prefix(300) ?? "?")")
-                return ""
-            }
-            AppLogger.log("[DictationEngine] Batch transcription completed (\(text.count) chars)")
-            return text
-        } catch {
-            AppLogger.log("[DictationEngine] ⚠️ Batch transcription network error: \(error)")
-            connectionError = "Sieťová chyba: \(error.localizedDescription)"
-            return ""
+        let (data, response) = try await batchSession.data(for: req)
+        guard let http = response as? HTTPURLResponse else { throw TranscriptionError.badResponse }
+        guard http.statusCode == 200 else {
+            throw TranscriptionError.http(http.statusCode, String(data: data, encoding: .utf8) ?? "?")
         }
+        guard
+            let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+            let text = json["text"] as? String
+        else {
+            AppLogger.log("[DictationEngine] ⚠️ neočakávaná odpoveď: \(String(data: data, encoding: .utf8)?.prefix(300) ?? "?")")
+            throw TranscriptionError.badResponse
+        }
+        return text
     }
 
     // ponytail: 180s covers ~2min recordings (upload + OpenAI processing); shared session
@@ -1388,6 +1556,8 @@ final class DictationEngine {
     }
 
     private func stopSession() {
+        apiProbeTask?.cancel()
+        apiProbeTask = nil
         stopAudio()
         closeWebSocket()
     }
@@ -1571,8 +1741,17 @@ private final class BatchAudioBuffer: @unchecked Sendable {
     private let lock = NSLock()
     private var data = Data()
 
+    // ponytail: ~48 KB/s at 24kHz mono PCM16, so this is ~14 minutes. Past that we stop
+    // growing rather than trimming the front — a truncated tail is obvious to the user,
+    // a silently missing beginning isn't.
+    private let ceiling = 40 * 1024 * 1024
+
+    var isEmpty: Bool { lock.lock(); defer { lock.unlock() }; return data.isEmpty }
+
     func append(_ bytes: Data) {
-        lock.lock(); data.append(bytes); lock.unlock()
+        lock.lock(); defer { lock.unlock() }
+        guard data.count < ceiling else { return }
+        data.append(bytes)
     }
     func drain() -> Data {
         lock.lock(); defer { lock.unlock() }
@@ -1648,6 +1827,10 @@ private func sendChunkOverWebSocket(
     queue: AudioSendQueue
 ) {
     guard let bytes = convertChunk(buffer: buffer, inputSampleRate: inputSampleRate, converter: converter, pcm16Format: pcm16Format) else { return }
+    // Also kept locally. Streamed audio is gone the moment the socket drops — this copy is what
+    // lets stopAndTranscribe() retry the whole thing as a batch upload instead of losing the
+    // dictation. Costs ~48 KB/s of RAM, capped in BatchAudioBuffer.
+    batchAudioBuffer.append(bytes)
     // base64 encoding happens in AudioSendQueue.drainLoop (cooperative pool), not here on the audio thread.
     queue.enqueueAudio(bytes)
 }

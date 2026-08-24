@@ -9,8 +9,12 @@ struct Shortcut: Codable, Equatable, Sendable {
     // MARK: Defaults
     static let defaultReadText    = Shortcut(keyCode: 15, modifierFlags: [.command, .shift])
     static let defaultOCR         = Shortcut(keyCode: 31, modifierFlags: [.command, .shift])
-    static let defaultDictate     = Shortcut(keyCode: 2,  modifierFlags: [.command, .shift])
-    static let defaultSmartDictate = Shortcut(keyCode: 5,  modifierFlags: [.command, .shift])
+    // Dictation scheme: the START shortcut picks the transcription mode (S = realtime,
+    // D = record-then-transcribe), the STOP shortcut picks the processing (same key = raw
+    // insert, A = Smart rewrite). See AppDelegate.handleDictate/handleSmartStop.
+    static let defaultDictateRealtime = Shortcut(keyCode: 1, modifierFlags: [.command, .shift])  // S
+    static let defaultDictateBatch    = Shortcut(keyCode: 2, modifierFlags: [.command, .shift])  // D
+    static let defaultSmartStop       = Shortcut(keyCode: 0, modifierFlags: [.command, .shift])  // A
     static let defaultInsertFromMemory = Shortcut(keyCode: 9, modifierFlags: [.control, .option])
 
     init(keyCode: Int, modifierFlags: NSEvent.ModifierFlags) {
@@ -81,35 +85,50 @@ final class ShortcutStore {
     static let maxPerAction = 3
 
     enum Action: String, CaseIterable {
-        case readText, ocr, dictate, smartDictate, insertFromMemory
+        case readText, ocr, dictateRealtime, dictateBatch, smartStop, insertFromMemory
 
         var defaultShortcut: Shortcut {
             switch self {
             case .readText:         .defaultReadText
             case .ocr:               .defaultOCR
-            case .dictate:           .defaultDictate
-            case .smartDictate:      .defaultSmartDictate
+            case .dictateRealtime:  .defaultDictateRealtime
+            case .dictateBatch:     .defaultDictateBatch
+            case .smartStop:        .defaultSmartStop
             case .insertFromMemory:  .defaultInsertFromMemory
             }
+        }
+
+        /// Pre-mode-split storage key whose stored list this action inherits, if any.
+        /// ponytail: the old generic `dictate` list is deliberately NOT migrated — mapping
+        /// it onto one of the two new mode actions would collide with the other one's
+        /// default (both defaulted to ⌘⇧D historically). New defaults S/D/A apply instead;
+        /// a custom smart shortcut carries over to smartStop, same gesture, new meaning.
+        fileprivate var legacyRawValue: String? {
+            self == .smartStop ? "smartDictate" : nil
         }
     }
 
     func shortcuts(for action: Action) -> [Shortcut] {
-        let key = "sc.\(action.rawValue).list"
-        if let data = UserDefaults.standard.data(forKey: key),
+        if let list = storedList(rawValue: action.rawValue) { return list }
+        if let legacy = action.legacyRawValue, let list = storedList(rawValue: legacy) { return list }
+        return [action.defaultShortcut]
+    }
+
+    private func storedList(rawValue: String) -> [Shortcut]? {
+        if let data = UserDefaults.standard.data(forKey: "sc.\(rawValue).list"),
            let list = try? JSONDecoder().decode([Shortcut].self, from: data),
            !list.isEmpty {
             return Array(list.prefix(Self.maxPerAction))
         }
         // Migrate the old single-shortcut keys (sc.<action>.kc/.mf) if present.
-        let legacyKey = "sc.\(action.rawValue)"
+        let legacyKey = "sc.\(rawValue)"
         if UserDefaults.standard.object(forKey: legacyKey + ".kc") != nil,
            UserDefaults.standard.object(forKey: legacyKey + ".mf") != nil {
             let kc = UserDefaults.standard.integer(forKey: legacyKey + ".kc")
             let mf = UInt(bitPattern: UserDefaults.standard.integer(forKey: legacyKey + ".mf"))
             return [Shortcut(keyCode: kc, rawModifiers: mf)]
         }
-        return [action.defaultShortcut]
+        return nil
     }
 
     func setShortcuts(_ list: [Shortcut], for action: Action) {
@@ -135,8 +154,9 @@ final class ShortcutStore {
         HotkeyManager.shared.updateShortcuts(
             readText: shortcuts(for: .readText),
             ocr: shortcuts(for: .ocr),
-            dictate: shortcuts(for: .dictate),
-            smartDictate: shortcuts(for: .smartDictate),
+            dictateRealtime: shortcuts(for: .dictateRealtime),
+            dictateBatch: shortcuts(for: .dictateBatch),
+            smartStop: shortcuts(for: .smartStop),
             insertFromMemory: shortcuts(for: .insertFromMemory)
         )
     }

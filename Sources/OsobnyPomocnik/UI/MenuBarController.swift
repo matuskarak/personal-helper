@@ -9,6 +9,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     // Placeholders refreshed in menuWillOpen
     private var micSubmenuItem      = NSMenuItem(title: "Mikrofón", action: nil, keyEquivalent: "")
     private var historySubmenuItem  = NSMenuItem(title: "História diktovania", action: nil, keyEquivalent: "")
+    private var pendingSubmenuItem  = NSMenuItem(title: "Čakajúce nahrávky", action: nil, keyEquivalent: "")
     private var restartItem         = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     private var diagnosticsItem     = NSMenuItem(title: "", action: nil, keyEquivalent: "")
 
@@ -34,11 +35,11 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         menu.addItem(NSMenuItem(title: "OCR oblasť", action: #selector(startOCR), keyEquivalent: "o")
             .configured { $0.keyEquivalentModifierMask = [.command, .shift]; $0.target = self })
 
-        menu.addItem(NSMenuItem(title: "Diktovanie", action: #selector(toggleDictation), keyEquivalent: "d")
+        menu.addItem(NSMenuItem(title: "Diktovanie (realtime)", action: #selector(toggleDictationRealtime), keyEquivalent: "s")
             .configured { $0.keyEquivalentModifierMask = [.command, .shift]; $0.target = self })
 
-        menu.addItem(NSMenuItem(title: "Smart diktovanie", action: #selector(toggleSmartAlwaysOn), keyEquivalent: "g")
-            .configured { $0.keyEquivalentModifierMask = [.command, .shift]; $0.target = self; $0.tag = 42 })
+        menu.addItem(NSMenuItem(title: "Diktovanie (po nahraní)", action: #selector(toggleDictationBatch), keyEquivalent: "d")
+            .configured { $0.keyEquivalentModifierMask = [.command, .shift]; $0.target = self })
 
         menu.addItem(NSMenuItem(title: "Vložiť z pamäte", action: #selector(insertFromMemory), keyEquivalent: "v")
             .configured { $0.keyEquivalentModifierMask = [.control, .option]; $0.target = self })
@@ -46,6 +47,11 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         // History submenu — populated in menuWillOpen
         historySubmenuItem.submenu = NSMenu()
         menu.addItem(historySubmenuItem)
+
+        // Recordings whose transcription failed — hidden entirely when there are none, so it
+        // only shows up when there's actually something to recover.
+        pendingSubmenuItem.submenu = NSMenu()
+        menu.addItem(pendingSubmenuItem)
 
         menu.addItem(.separator())
 
@@ -151,8 +157,6 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     }
 
     private func refreshDynamicItems() {
-        let engine = DictationEngine.shared
-
         // History submenu — most recent first, click to insert at the current focus.
         let historyMenu = NSMenu()
         let recentHistory = DictationHistoryStore.shared.entries.suffix(10).reversed()
@@ -181,11 +185,23 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         }
         historySubmenuItem.submenu = historyMenu
 
-        // Smart diktovanie — hidden for regular users while it's remotely disabled
-        // (feature-flags.json); dev mode always sees it for testing.
-        if let smartItem = statusItem.menu?.item(withTag: 42) {
-            smartItem.isHidden = !RemoteConfig.shared.smartDictationAllowed
-            smartItem.state = engine.smartAlwaysOn ? .on : .off
+        // Pending (failed) recordings
+        let pendingItems = PendingDictationStore.shared.pending
+        pendingSubmenuItem.isHidden = pendingItems.isEmpty
+        if !pendingItems.isEmpty {
+            pendingSubmenuItem.title = "Čakajúce nahrávky (\(pendingItems.count))"
+            let pendingMenu = NSMenu()
+            for item in pendingItems.reversed() {
+                let entry = NSMenuItem(title: item.displayName, action: #selector(retryPending(_:)), keyEquivalent: "")
+                entry.target = self
+                entry.representedObject = item.id.uuidString
+                pendingMenu.addItem(entry)
+            }
+            pendingMenu.addItem(.separator())
+            let clear = NSMenuItem(title: "Zmazať všetky čakajúce", action: #selector(clearPending), keyEquivalent: "")
+            clear.target = self
+            pendingMenu.addItem(clear)
+            pendingSubmenuItem.submenu = pendingMenu
         }
 
         let dev = DeveloperMode.isEnabled
@@ -222,17 +238,30 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         (NSApp.delegate as? AppDelegate)?.handleOCR()
     }
 
-    @objc private func toggleDictation() {
-        (NSApp.delegate as? AppDelegate)?.handleDictate()
+    @objc private func toggleDictationRealtime() {
+        (NSApp.delegate as? AppDelegate)?.handleDictate(mode: .realtime)
     }
 
-
-    @objc private func toggleSmartAlwaysOn() {
-        DictationEngine.shared.smartAlwaysOn.toggle()
+    @objc private func toggleDictationBatch() {
+        (NSApp.delegate as? AppDelegate)?.handleDictate(mode: .batch)
     }
 
     @objc private func insertFromMemory() {
         (NSApp.delegate as? AppDelegate)?.handleInsertFromMemory()
+    }
+
+    @objc private func retryPending(_ sender: NSMenuItem) {
+        guard let raw = sender.representedObject as? String, let id = UUID(uuidString: raw),
+              let item = PendingDictationStore.shared.pending.first(where: { $0.id == id })
+        else { return }
+        AppLogger.log("[MenuBarController] retryPending — \(item.displayName)")
+        DictationIndicatorController.shared.show()
+        Task { @MainActor in await DictationEngine.shared.retryPending(item) }
+    }
+
+    @objc private func clearPending() {
+        AppLogger.log("[MenuBarController] clearPending — mažem \(PendingDictationStore.shared.pending.count) nahrávok")
+        PendingDictationStore.shared.removeAll()
     }
 
     @objc private func insertHistoryEntry(_ sender: NSMenuItem) {

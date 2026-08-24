@@ -17,14 +17,18 @@ struct DictationHistoryEntry: Codable, Identifiable {
     let rewrittenText: String?    // Smart diktovanie output, when it ran
     let metrics: DictationMetrics?
     let hasScreenshot: Bool       // true → a JPEG sits at DictationHistoryStore.screenshotURL(for: id)
+    let mode: String?             // TranscriptionMode.rawValue ("realtime"/"batch"); nil on old entries
+    let smart: Bool?              // Smart stop requested (even if the rewrite then fell back to raw)
 
     init(id: UUID = UUID(), date: Date, text: String, appName: String = "", bundleID: String = "",
          category: AppCategory = .generic, seconds: Int = 0,
-         rewrittenText: String? = nil, metrics: DictationMetrics? = nil, hasScreenshot: Bool = false) {
+         rewrittenText: String? = nil, metrics: DictationMetrics? = nil, hasScreenshot: Bool = false,
+         mode: String? = nil, smart: Bool? = nil) {
         self.id = id; self.date = date; self.text = text
         self.appName = appName; self.bundleID = bundleID; self.category = category
         self.seconds = seconds; self.rewrittenText = rewrittenText; self.metrics = metrics
         self.hasScreenshot = hasScreenshot
+        self.mode = mode; self.smart = smart
     }
 
     // ponytail: hand-written decode so the added fields don't destroy existing history.
@@ -42,6 +46,8 @@ struct DictationHistoryEntry: Codable, Identifiable {
         rewrittenText = try c.decodeIfPresent(String.self, forKey: .rewrittenText)
         metrics       = try c.decodeIfPresent(DictationMetrics.self, forKey: .metrics)
         hasScreenshot = try c.decodeIfPresent(Bool.self, forKey: .hasScreenshot) ?? false
+        mode          = try c.decodeIfPresent(String.self, forKey: .mode)
+        smart         = try c.decodeIfPresent(Bool.self, forKey: .smart)
     }
 }
 
@@ -85,7 +91,7 @@ final class DictationHistoryStore {
 
     func log(_ text: String, appName: String = "", bundleID: String = "",
              category: AppCategory = .generic, seconds: Int = 0, rewrittenText: String? = nil,
-             screenshotJPEG: Data? = nil) {
+             screenshotJPEG: Data? = nil, mode: String? = nil, smart: Bool? = nil) {
         guard !text.isEmpty else { return }
         let id = UUID()
         if let screenshotJPEG {
@@ -95,7 +101,7 @@ final class DictationHistoryStore {
             id: id, date: Date(), text: text, appName: appName, bundleID: bundleID,
             category: category, seconds: seconds, rewrittenText: rewrittenText,
             metrics: DictationQualityEngine.analyze(text: text, rewritten: rewrittenText, seconds: seconds),
-            hasScreenshot: screenshotJPEG != nil
+            hasScreenshot: screenshotJPEG != nil, mode: mode, smart: smart
         ))
         if entries.count > safetyCeiling {
             let overflow = entries.prefix(entries.count - safetyCeiling)
