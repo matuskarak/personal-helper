@@ -100,6 +100,7 @@ struct PreferencesView: View {
     @State private var pillFollowsField = PillPosition.followFocusedField
     @State private var showResetShortcutsConfirm = false
     @State private var shortcutsResetToken = 0
+    @State private var qualityStats = QualityStats(entries: [])
     @State private var usagePeriod: UsagePeriod = .today
     @State private var chartMetric: ChartMetric = .timeSaved
     @State private var chartKind: ChartKind = .bar
@@ -269,6 +270,21 @@ struct PreferencesView: View {
     // MARK: - Shared components
 
     @ViewBuilder
+    /// Multi-line text input. Deliberately NOT `TextField(axis: .vertical)`: on macOS that
+    /// control submits on Return instead of inserting a newline, so a "one entry per line"
+    /// list is literally untypable in it. TextEditor is the real multi-line control — Return
+    /// does what it should, and it takes focus reliably.
+    private func multilineField(_ text: Binding<String>, minHeight: CGFloat = 72) -> some View {
+        TextEditor(text: text)
+            .font(.body)
+            .scrollContentBackground(.hidden)
+            .padding(6)
+            .frame(minHeight: minHeight)
+            .background(RoundedRectangle(cornerRadius: 6).fill(.white))
+            .overlay(RoundedRectangle(cornerRadius: 6)
+                .strokeBorder(Color.primary.opacity(0.18), lineWidth: 0.5))
+    }
+
     private func card<Content: View>(@ViewBuilder _ body: () -> Content) -> some View {
         VStack(spacing: 0) { body() }
             .background(.white)
@@ -400,19 +416,9 @@ struct PreferencesView: View {
                 }
                 if dictation.realtimeModel == .live {
                     rowDivider
-                    Text("gpt-live-transcribe je vyhradený prepisovací model — na rozdiel od pôvodného gpt-realtime-whisper vie využiť kľúčové slová a kontext appky nižšie, čo mu pomáha pri menách, skratkách a názvoch funkcií. Cena je rovnaká.")
+                    Text("gpt-live-transcribe je vyhradený prepisovací model — na rozdiel od pôvodného gpt-realtime-whisper vie využiť kľúčové slová a kontext appky. Cena je rovnaká.")
                         .font(.caption).foregroundStyle(.secondary)
                         .padding(.horizontal, 16).padding(.vertical, 10)
-                    rowDivider
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Predvolené kľúčové slová").font(.body)
-                        Text("Platia pri každom diktovaní, nezávisle od appky — jedno slovo/fráza na riadok. Napríklad tvoje meno alebo časté pojmy z tvojej práce. Sú to nápovede pre model, nie príkazy. Pri diktovaní do konkrétnej appky sa k nim pridajú aj kľúčové slová z jej App profilu nižšie.")
-                            .font(.caption).foregroundStyle(.secondary)
-                        TextField("napr. Matúš Karák\nOsobný pomocník", text: $dictation.defaultKeywords, axis: .vertical)
-                            .lineLimit(2...5)
-                            .textFieldStyle(.roundedBorder)
-                    }
-                    .padding(.horizontal, 16).padding(.vertical, 12)
                 }
                 rowDivider
                 HStack(alignment: .top) {
@@ -432,6 +438,19 @@ struct PreferencesView: View {
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 12)
+            }
+
+            // Keywords apply to BOTH modes — the batch path forwards them as `prompt` too —
+            // so this gets its own card instead of living under the realtime model.
+            Text("Kľúčové slová").font(.headline)
+            card {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Predvolené kľúčové slová").font(.body)
+                    Text("Platia pri každom diktovaní v oboch režimoch, nezávisle od appky — jedno slovo alebo fráza na riadok. Napríklad tvoje meno, názvy klientov, nástrojov a odborné termíny, ktoré bežne diktuješ. Sú to nápovede pre model, nie príkazy — pomáhajú hlavne pri anglických výrazoch v slovenskej vete. Pri diktovaní do konkrétnej appky sa k nim pridajú aj kľúčové slová z jej App profilu.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    multilineField($dictation.defaultKeywords, minHeight: 140)
+                }
+                .padding(.horizontal, 16).padding(.vertical, 12)
             }
 
             // Batch mode — model only
@@ -600,15 +619,11 @@ struct PreferencesView: View {
                                         }
                                         Text("Určuje rubriku hodnotenia na karte Kvalita a (pri gpt-live-transcribe) kontextovú vetu poslanú modelu — napr. pre AI chat: \"Používateľ diktuje prompt pre AI nástroj.\" Needituje sa ručne.")
                                             .font(.caption2).foregroundStyle(.secondary)
-                                        TextField("Instrukcie pre prepis", text: $profile.instructions,
-                                                  axis: .vertical)
-                                            .lineLimit(2...4)
+                                        multilineField($profile.instructions, minHeight: 60)
                                         Text("Kľúčové slová").font(.callout)
                                         Text("Platia iba pri diktovaní do TEJTO appky, naviac k predvoleným v Nastaveniach → Diktovanie. Nápoveda pre gpt-live-transcribe, jedno slovo/fráza na riadok.")
                                             .font(.caption2).foregroundStyle(.secondary)
-                                        TextField("napr. resolvedInputDeviceUID\nDictationEngine",
-                                                  text: $profile.keywords, axis: .vertical)
-                                            .lineLimit(2...5)
+                                        multilineField($profile.keywords, minHeight: 72)
                                         HStack {
                                             Spacer()
                                             Button("Odstrániť", role: .destructive) {
@@ -1131,10 +1146,71 @@ struct PreferencesView: View {
 
     // MARK: - Kvalita diktovania
 
-    /// Only entries logged since quality tracking shipped carry metrics — older history
-    /// has no numbers to show, so everything here is computed off this filtered list.
-    private var analyzedEntries: [(entry: DictationHistoryEntry, metrics: DictationMetrics)] {
-        historyStore.entries.compactMap { e in e.metrics.map { (entry: e, metrics: $0) } }
+    /// Everything the Kvalita tab draws, derived in ONE pass over the history.
+    ///
+    /// ponytail: recomputed on appear and whenever the history grows — not on every render.
+    /// Each card used to walk the full history itself (analyzed list, filler totals, per-app
+    /// grouping, four mode filters), so a tab with 570+ entries did six full passes every
+    /// time any unrelated observable changed. Upgrade path if history reaches six figures:
+    /// keep running totals in the store instead of rebuilding here.
+    private struct QualityStats {
+        var analyzed: [(entry: DictationHistoryEntry, metrics: DictationMetrics)] = []
+        var avgWPM = 0
+        var avgFillers = 0.0
+        var topFillers: [(word: String, count: Int)] = []
+        var perApp: [(name: String, count: Int, paced: Int, avgFillers: Double, category: AppCategory)] = []
+        var modeCombos: [(label: String, count: Int)] = []
+        var modeTotal = 0
+
+        /// Only entries logged since quality tracking shipped carry metrics — older history
+        /// has no numbers to show, so everything here is computed off that filtered list.
+        init(entries: [DictationHistoryEntry]) {
+            analyzed = entries.compactMap { e in e.metrics.map { (entry: e, metrics: $0) } }
+
+            var wpmSum = 0, paced = 0
+            var fillerRateSum = 0.0
+            var fillerTotals: [String: Int] = [:]
+            var groups: [String: (count: Int, fillerRateSum: Double, paced: Int, category: AppCategory)] = [:]
+            for item in analyzed {
+                if item.metrics.wordsPerMinute > 0 {
+                    wpmSum += item.metrics.wordsPerMinute
+                    fillerRateSum += item.metrics.fillersPerMinute
+                    paced += 1
+                }
+                for (word, count) in item.metrics.fillers { fillerTotals[word, default: 0] += count }
+
+                let key = item.entry.appName.isEmpty ? "Neznáma appka" : item.entry.appName
+                var g = groups[key] ?? (0, 0, 0, item.entry.category)
+                g.count += 1
+                if item.metrics.wordsPerMinute > 0 {
+                    g.fillerRateSum += item.metrics.fillersPerMinute
+                    g.paced += 1
+                }
+                groups[key] = g
+            }
+            if paced > 0 {
+                avgWPM = Int((Double(wpmSum) / Double(paced)).rounded())
+                avgFillers = fillerRateSum / Double(paced)
+            }
+            topFillers = fillerTotals
+                .sorted { $0.value == $1.value ? $0.key < $1.key : $0.value > $1.value }
+                .prefix(5).map { (word: $0.key, count: $0.value) }
+            perApp = groups
+                .sorted { $0.value.count > $1.value.count }
+                .map { (name: $0.key, count: $0.value.count, paced: $0.value.paced,
+                        avgFillers: $0.value.paced > 0 ? $0.value.fillerRateSum / Double($0.value.paced) : 0,
+                        category: $0.value.category) }
+
+            // Mode/Smart split — only entries recorded since per-shortcut modes shipped.
+            let tracked = entries.filter { $0.mode != nil }
+            modeTotal = tracked.count
+            modeCombos = [
+                ("Realtime — čisté",   tracked.filter { $0.mode == "realtime" && $0.smart != true }.count),
+                ("Realtime + Smart",   tracked.filter { $0.mode == "realtime" && $0.smart == true }.count),
+                ("Po nahraní — čisté", tracked.filter { $0.mode == "batch"    && $0.smart != true }.count),
+                ("Po nahraní + Smart", tracked.filter { $0.mode == "batch"    && $0.smart == true }.count),
+            ].map { (label: $0.0, count: $0.1) }
+        }
     }
 
     private func ratingColor(_ rating: DictationQualityEngine.Rating) -> Color {
@@ -1146,7 +1222,8 @@ struct PreferencesView: View {
     }
 
     private var qualityTab: some View {
-        let analyzed = analyzedEntries
+        let stats = qualityStats
+        let analyzed = stats.analyzed
         return VStack(alignment: .leading, spacing: 16) {
             Text("Kvalita diktovania").font(.title2.bold())
             Text("Vyhodnotené lokálne z tvojej histórie diktovania — nič sa neposiela nikam von a nič to nestojí. Ukazuje, ako naozaj diktuješ, aby si sa v tom mohol zlepšovať.")
@@ -1164,72 +1241,59 @@ struct PreferencesView: View {
                     .padding(24)
                 }
             } else {
-                qualitySummaryCard(analyzed)
-                modeUsageCard()
-                topFillersCard(analyzed)
-                perAppCard(analyzed)
+                qualitySummaryCard(stats)
+                modeUsageCard(stats)
+                topFillersCard(stats)
+                perAppCard(stats)
                 recentDictationsCard(analyzed)
             }
         }
+        .onAppear { qualityStats = QualityStats(entries: historyStore.entries) }
+        .onChange(of: historyStore.entries.count) { _, _ in
+            qualityStats = QualityStats(entries: historyStore.entries)
+        }
     }
 
-    private func qualitySummaryCard(
-        _ analyzed: [(entry: DictationHistoryEntry, metrics: DictationMetrics)]
-    ) -> some View {
-        let paced = analyzed.filter { $0.metrics.wordsPerMinute > 0 }
-        let avgWPM = paced.isEmpty ? 0
-            : Int((Double(paced.map(\.metrics.wordsPerMinute).reduce(0, +)) / Double(paced.count)).rounded())
-        let avgFillers = paced.isEmpty ? 0
-            : paced.map(\.metrics.fillersPerMinute).reduce(0, +) / Double(paced.count)
-
-        return card {
+    private func qualitySummaryCard(_ stats: QualityStats) -> some View {
+        card {
             HStack(spacing: 0) {
-                statTile(value: "\(analyzed.count)", label: "diktovaní", color: .primary)
+                statTile(value: "\(stats.analyzed.count)", label: "diktovaní", color: .primary)
                 Divider().frame(height: 44)
-                statTile(value: String(format: "%.1f", avgFillers), label: "výplňových slov / min",
-                         color: ratingColor(DictationQualityEngine.fillerRating(perMinute: avgFillers)))
+                statTile(value: String(format: "%.1f", stats.avgFillers), label: "výplňových slov / min",
+                         color: ratingColor(DictationQualityEngine.fillerRating(perMinute: stats.avgFillers)))
                 Divider().frame(height: 44)
-                statTile(value: avgWPM > 0 ? "\(avgWPM)" : "–", label: "slov / min",
-                         color: ratingColor(DictationQualityEngine.paceRating(wpm: avgWPM)))
+                statTile(value: stats.avgWPM > 0 ? "\(stats.avgWPM)" : "–", label: "slov / min",
+                         color: ratingColor(DictationQualityEngine.paceRating(wpm: stats.avgWPM)))
             }
             .padding(.vertical, 16)
         }
     }
 
     /// How dictation is actually used: realtime vs batch, raw vs Smart finish.
-    /// Reads all entries that carry the mode field (added 2026-08-20) — older ones can't tell.
-    private func modeUsageCard() -> some View {
-        let tracked = DictationHistoryStore.shared.entries.filter { $0.mode != nil }
-        let combos: [(label: String, count: Int)] = [
-            ("Realtime — čisté",      tracked.filter { $0.mode == "realtime" && $0.smart != true }.count),
-            ("Realtime + Smart",      tracked.filter { $0.mode == "realtime" && $0.smart == true }.count),
-            ("Po nahraní — čisté",    tracked.filter { $0.mode == "batch"    && $0.smart != true }.count),
-            ("Po nahraní + Smart",    tracked.filter { $0.mode == "batch"    && $0.smart == true }.count),
-        ]
-        let total = tracked.count
-
-        return card {
+    /// Only entries recorded since per-shortcut modes shipped can tell — older ones can't.
+    private func modeUsageCard(_ stats: QualityStats) -> some View {
+        card {
             VStack(alignment: .leading, spacing: 0) {
                 Text("Využitie režimov").font(.body)
                     .padding(.horizontal, 16).padding(.vertical, 12)
                 rowDivider
-                if total == 0 {
+                if stats.modeTotal == 0 {
                     Text("Zatiaľ žiadne dáta — režim sa zaznamenáva pri nových diktovaniach.")
                         .font(.callout).foregroundStyle(.secondary)
                         .padding(.horizontal, 16).padding(.vertical, 12)
                 } else {
-                    ForEach(Array(combos.enumerated()), id: \.offset) { index, combo in
+                    ForEach(Array(stats.modeCombos.enumerated()), id: \.offset) { index, combo in
                         if index > 0 { rowDivider }
                         HStack {
                             Text(combo.label).font(.callout)
                             Spacer()
-                            Text("\(combo.count)× (\(Int((Double(combo.count) / Double(total) * 100).rounded())) %)")
+                            Text("\(combo.count)× (\(Int((Double(combo.count) / Double(stats.modeTotal) * 100).rounded())) %)")
                                 .font(.callout.monospacedDigit()).foregroundStyle(.secondary)
                         }
                         .padding(.horizontal, 16).padding(.vertical, 10)
                     }
                     rowDivider
-                    Text("Spolu \(total) diktovaní so zaznamenaným režimom. Staršie záznamy režim nemajú a nepočítajú sa.")
+                    Text("Spolu \(stats.modeTotal) diktovaní so zaznamenaným režimom. Staršie záznamy režim nemajú a nepočítajú sa.")
                         .font(.caption).foregroundStyle(.secondary)
                         .padding(.horizontal, 16).padding(.vertical, 10)
                 }
@@ -1246,31 +1310,23 @@ struct PreferencesView: View {
         .frame(maxWidth: .infinity)
     }
 
-    private func topFillersCard(
-        _ analyzed: [(entry: DictationHistoryEntry, metrics: DictationMetrics)]
-    ) -> some View {
-        var totals: [String: Int] = [:]
-        for item in analyzed {
-            for (word, count) in item.metrics.fillers { totals[word, default: 0] += count }
-        }
-        let top = totals.sorted { $0.value == $1.value ? $0.key < $1.key : $0.value > $1.value }.prefix(5)
-
-        return card {
+    private func topFillersCard(_ stats: QualityStats) -> some View {
+        card {
             VStack(alignment: .leading, spacing: 0) {
                 Text("Najčastejšie výplňové slová")
                     .font(.body).padding(.horizontal, 16).padding(.vertical, 12)
                 rowDivider
-                if top.isEmpty {
+                if stats.topFillers.isEmpty {
                     Text("Žiadne — čisté diktovanie.")
                         .font(.callout).foregroundStyle(.secondary)
                         .padding(.horizontal, 16).padding(.vertical, 12)
                 } else {
-                    ForEach(Array(top.enumerated()), id: \.element.key) { index, pair in
+                    ForEach(Array(stats.topFillers.enumerated()), id: \.element.word) { index, pair in
                         if index > 0 { rowDivider }
                         HStack {
-                            Text("„\(pair.key)”").font(.callout)
+                            Text("„\(pair.word)”").font(.callout)
                             Spacer()
-                            Text("\(pair.value)×").font(.callout.monospacedDigit())
+                            Text("\(pair.count)×").font(.callout.monospacedDigit())
                                 .foregroundStyle(.secondary)
                         }
                         .padding(.horizontal, 16).padding(.vertical, 10)
@@ -1280,45 +1336,29 @@ struct PreferencesView: View {
         }
     }
 
-    private func perAppCard(
-        _ analyzed: [(entry: DictationHistoryEntry, metrics: DictationMetrics)]
-    ) -> some View {
-        // Group by the app we dictated into — the whole point is seeing that you speak
-        // differently to ChatGPT than to Slack.
-        var groups: [String: (count: Int, fillerRateSum: Double, paced: Int, category: AppCategory)] = [:]
-        for item in analyzed {
-            let key = item.entry.appName.isEmpty ? "Neznáma appka" : item.entry.appName
-            var g = groups[key] ?? (0, 0, 0, item.entry.category)
-            g.count += 1
-            if item.metrics.wordsPerMinute > 0 {
-                g.fillerRateSum += item.metrics.fillersPerMinute
-                g.paced += 1
-            }
-            groups[key] = g
-        }
-        let rows = groups.sorted { $0.value.count > $1.value.count }
-
-        return card {
+    /// Grouped by the app dictated into — the whole point is seeing that you speak
+    /// differently to ChatGPT than to Slack.
+    private func perAppCard(_ stats: QualityStats) -> some View {
+        card {
             VStack(alignment: .leading, spacing: 0) {
                 Text("Podľa aplikácie")
                     .font(.body).padding(.horizontal, 16).padding(.vertical, 12)
                 rowDivider
-                ForEach(Array(rows.enumerated()), id: \.element.key) { index, pair in
+                ForEach(Array(stats.perApp.enumerated()), id: \.element.name) { index, row in
                     if index > 0 { rowDivider }
-                    let avg = pair.value.paced > 0 ? pair.value.fillerRateSum / Double(pair.value.paced) : 0
                     HStack(spacing: 12) {
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(pair.key).font(.callout)
-                            Text(pair.value.category.label)
+                            Text(row.name).font(.callout)
+                            Text(row.category.label)
                                 .font(.caption2).foregroundStyle(.tertiary)
                         }
                         Spacer()
-                        Text("\(pair.value.count)× diktovanie")
+                        Text("\(row.count)× diktovanie")
                             .font(.caption).foregroundStyle(.secondary)
-                        if pair.value.paced > 0 {
-                            Text(String(format: "%.1f fill./min", avg))
+                        if row.paced > 0 {
+                            Text(String(format: "%.1f fill./min", row.avgFillers))
                                 .font(.caption.monospacedDigit())
-                                .foregroundStyle(ratingColor(DictationQualityEngine.fillerRating(perMinute: avg)))
+                                .foregroundStyle(ratingColor(DictationQualityEngine.fillerRating(perMinute: row.avgFillers)))
                         }
                     }
                     .padding(.horizontal, 16).padding(.vertical, 10)
