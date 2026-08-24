@@ -276,7 +276,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         DictationHistoryStore.shared.clearAll()
     }
 
-    @objc private func openPreferences() {
+    @objc func openPreferences() {
         if preferencesWindowController == nil {
             let window = NSWindow(
                 contentRect: NSRect(x: 0, y: 0, width: 720, height: 520),
@@ -293,6 +293,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         preferencesWindowController?.showWindow(nil)
         preferencesWindowController?.window?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+
     }
 
     @objc private func checkForUpdates() {

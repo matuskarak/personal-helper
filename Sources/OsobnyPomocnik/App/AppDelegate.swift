@@ -167,6 +167,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case "dictateBatch", "transcribe": handleDictate(mode: .batch)
         case "smartDictate", "smartStop":  handleSmartStop()
         case "insertFromMemory":  handleInsertFromMemory()
+        case "preferences":       menuBarController?.openPreferences()
         default: AppLogger.log("[AppDelegate] URL trigger — neznáma akcia: \(action)")
         }
     }
