@@ -839,6 +839,51 @@ final class DictationEngine {
     }
 
 
+    /// Throws the running dictation away: mic off, recorded audio dropped, nothing uploaded,
+    /// nothing inserted, nothing logged to history or usage. For the "I misspoke" case, where
+    /// the alternative is letting it transcribe, waiting, and deleting the inserted text.
+    ///
+    /// Returns false if there was nothing to cancel, so the caller can stay silent instead of
+    /// beeping at a keypress that did nothing.
+    @discardableResult
+    func cancelDictation() -> Bool {
+        guard isRecording else { return false }
+        let elapsed = recordingStartDate.map { Int(Date().timeIntervalSince($0)) } ?? 0
+        AppLogger.log("[DictationEngine] ✋ cancelDictation — session #\(sessionID) zahodená po \(elapsed)s (mode: \(transcriptionMode.rawValue))")
+
+        // Bump first: any in-flight work from this session (reconnects, a slow context capture,
+        // a socket event still arriving) checks sessionID and now discards itself instead of
+        // inserting text or resetting state that no longer belongs to it.
+        sessionID += 1
+
+        stopSession()
+        contextCaptureTask?.cancel()
+        contextCaptureTask = nil
+        recordingStartDate = nil
+        _ = batchAudioBuffer.drain()   // the whole point — the audio must not survive
+
+        isTranscribing  = false
+        isSmartMode     = false
+        liveText        = ""
+        accumulatedText = ""
+        capturedScreenshotJPEG = nil
+        capturedProfile  = nil
+        sessionProfile   = nil
+        capturedAppName  = ""
+        capturedBundleID = ""
+
+        // Live insert types as you speak, so by the time you cancel, the words are already in
+        // the field — cancelling can't un-type them. Say so rather than implying it undid them.
+        if didLiveInsert || liveInsertActive {
+            showNotice("⚠️ Diktovanie zrušené, ale Live vkladanie už časť textu vložilo — treba ho zmazať ručne.")
+        } else {
+            showNotice("🗑️ Diktovanie zrušené — nahrávka sa zahodila.", sticky: false)
+        }
+        didLiveInsert    = false
+        liveInsertActive = false
+        return true
+    }
+
     /// Stops mic, commits audio buffer, waits for server's completed transcript, then returns it.
     /// `smart` comes from the STOP shortcut: same shortcut as start = raw insert,
     /// Smart shortcut = rewrite with screen context before inserting.

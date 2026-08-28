@@ -8,6 +8,7 @@ final class HotkeyManager: @unchecked Sendable {
     var onDictateRealtime: (() -> Void)?
     var onDictateBatch: (() -> Void)?
     var onSmartStop: (() -> Void)?
+    var onCancelDictation: (() -> Void)?
     var onInsertFromMemory: (() -> Void)?
     var onEnterStopDictation: (() -> Void)?
 
@@ -18,6 +19,7 @@ final class HotkeyManager: @unchecked Sendable {
     private var dictateRealtimeSCs: [Shortcut]  = [.defaultDictateRealtime]
     private var dictateBatchSCs: [Shortcut]     = [.defaultDictateBatch]
     private var smartStopSCs: [Shortcut]        = [.defaultSmartStop]
+    private var cancelDictationSCs: [Shortcut]  = [.defaultCancelDictation]
     private var insertFromMemorySCs: [Shortcut] = [.defaultInsertFromMemory]
 
     private var eventTap: CFMachPort?
@@ -61,13 +63,15 @@ final class HotkeyManager: @unchecked Sendable {
 
     func updateShortcuts(
         readText: [Shortcut], ocr: [Shortcut], dictateRealtime: [Shortcut],
-        dictateBatch: [Shortcut], smartStop: [Shortcut], insertFromMemory: [Shortcut]
+        dictateBatch: [Shortcut], smartStop: [Shortcut], cancelDictation: [Shortcut],
+        insertFromMemory: [Shortcut]
     ) {
         readTextSCs          = readText
         ocrSCs               = ocr
         dictateRealtimeSCs   = dictateRealtime
         dictateBatchSCs      = dictateBatch
         smartStopSCs         = smartStop
+        cancelDictationSCs   = cancelDictation
         insertFromMemorySCs  = insertFromMemory
     }
 
@@ -104,6 +108,10 @@ final class HotkeyManager: @unchecked Sendable {
         }
         if matchesAny(event, shortcuts: smartStopSCs) {
             DispatchQueue.main.async { self.onSmartStop?() }
+            return nil
+        }
+        if matchesAny(event, shortcuts: cancelDictationSCs) {
+            DispatchQueue.main.async { self.onCancelDictation?() }
             return nil
         }
         if matchesAny(event, shortcuts: insertFromMemorySCs) {
