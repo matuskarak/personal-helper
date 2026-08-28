@@ -15,6 +15,7 @@ struct Shortcut: Codable, Equatable, Sendable {
     static let defaultDictateRealtime = Shortcut(keyCode: 1, modifierFlags: [.command, .shift])  // S
     static let defaultDictateBatch    = Shortcut(keyCode: 2, modifierFlags: [.command, .shift])  // D
     static let defaultSmartStop       = Shortcut(keyCode: 0, modifierFlags: [.command, .shift])  // A
+    static let defaultCancelDictation = Shortcut(keyCode: 7, modifierFlags: [.command, .shift])  // X
     static let defaultInsertFromMemory = Shortcut(keyCode: 9, modifierFlags: [.control, .option])
 
     init(keyCode: Int, modifierFlags: NSEvent.ModifierFlags) {
@@ -85,7 +86,7 @@ final class ShortcutStore {
     static let maxPerAction = 3
 
     enum Action: String, CaseIterable {
-        case readText, ocr, dictateRealtime, dictateBatch, smartStop, insertFromMemory
+        case readText, ocr, dictateRealtime, dictateBatch, smartStop, cancelDictation, insertFromMemory
 
         var defaultShortcut: Shortcut {
             switch self {
@@ -94,6 +95,7 @@ final class ShortcutStore {
             case .dictateRealtime:  .defaultDictateRealtime
             case .dictateBatch:     .defaultDictateBatch
             case .smartStop:        .defaultSmartStop
+            case .cancelDictation:  .defaultCancelDictation
             case .insertFromMemory:  .defaultInsertFromMemory
             }
         }
@@ -157,6 +159,7 @@ final class ShortcutStore {
             dictateRealtime: shortcuts(for: .dictateRealtime),
             dictateBatch: shortcuts(for: .dictateBatch),
             smartStop: shortcuts(for: .smartStop),
+            cancelDictation: shortcuts(for: .cancelDictation),
             insertFromMemory: shortcuts(for: .insertFromMemory)
         )
     }

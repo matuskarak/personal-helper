@@ -113,6 +113,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         HotkeyManager.shared.onSmartStop = { [weak self] in
             Task { @MainActor in self?.handleSmartStop() }
         }
+        HotkeyManager.shared.onCancelDictation = { [weak self] in
+            Task { @MainActor in self?.handleCancelDictation() }
+        }
         HotkeyManager.shared.onInsertFromMemory = { [weak self] in
             self?.handleInsertFromMemory()
         }
@@ -166,6 +169,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case "dictate", "dictateRealtime": handleDictate(mode: .realtime)
         case "dictateBatch", "transcribe": handleDictate(mode: .batch)
         case "smartDictate", "smartStop":  handleSmartStop()
+        case "cancelDictation":            handleCancelDictation()
         case "insertFromMemory":  handleInsertFromMemory()
         case "preferences":       menuBarController?.openPreferences()
         default: AppLogger.log("[AppDelegate] URL trigger — neznáma akcia: \(action)")
@@ -257,6 +261,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         AppLogger.log("[AppDelegate] handleSmartStop — ukončujem so Smart spracovaním")
         DictationSounds.playStop()
         Task { @MainActor in await self.finishDictation(engine: engine, label: "handleSmartStop", smart: true) }
+    }
+
+    /// Throws the running dictation away — nothing is transcribed, inserted or logged.
+    /// For misspeaking mid-sentence, where the alternative is waiting out the transcription
+    /// just to delete the text again. Pressed with no dictation running it does nothing.
+    func handleCancelDictation() {
+        guard DictationEngine.shared.cancelDictation() else {
+            AppLogger.log("[AppDelegate] handleCancelDictation — ignorované (nebeží diktovanie)")
+            return
+        }
+        // Deliberately the stop sound, not a new one: the recording really did stop, and a
+        // distinct "error" beep would read as something went wrong. The pill says the rest.
+        DictationSounds.playStop()
     }
 
     private func finishDictation(engine: DictationEngine, label: String, smart: Bool = false) async {

@@ -436,7 +436,7 @@ struct PreferencesView: View {
 
             // How the shortcut scheme works — the mode/processing split lives in the
             // shortcuts now, so the settings only pick MODELS per mode, not the mode itself.
-            Text("Režim prepisu voliš skratkou, ktorou diktovanie SPUSTÍŠ (\(scLabel(.dictateRealtime)) = realtime, \(scLabel(.dictateBatch)) = po nahraní). Skratka, ktorou diktovanie UKONČÍŠ, rozhoduje o spracovaní: tá istá ako pri štarte = vloží sa čistý prepis; \(scLabel(.smartStop)) = text pred vložením upraví AI s kontextom obrazovky (Smart). Iné diktovacie skratky sa počas nahrávania ignorujú.")
+            Text("Režim prepisu voliš skratkou, ktorou diktovanie SPUSTÍŠ (\(scLabel(.dictateRealtime)) = realtime, \(scLabel(.dictateBatch)) = po nahraní). Skratka, ktorou diktovanie UKONČÍŠ, rozhoduje o spracovaní: tá istá ako pri štarte = vloží sa čistý prepis; \(scLabel(.smartStop)) = text pred vložením upraví AI s kontextom obrazovky (Smart). Iné diktovacie skratky sa počas nahrávania ignorujú. Ak sa pri diktovaní pomýliš, \(scLabel(.cancelDictation)) ho zruší — nahrávka sa zahodí, nič sa neprepíše ani nevloží.")
                 .font(.caption).foregroundStyle(.secondary).padding(.horizontal, 4)
 
             card {
@@ -1732,6 +1732,8 @@ struct PreferencesView: View {
                     rowDivider
                     ShortcutMappingRow(label: "Smart ukončenie diktovania", action: .smartStop)
                 }
+                rowDivider
+                ShortcutMappingRow(label: "Zrušiť diktovanie", action: .cancelDictation)
                 rowDivider
                 ShortcutMappingRow(label: "Čítať text", action: .readText)
                 rowDivider
