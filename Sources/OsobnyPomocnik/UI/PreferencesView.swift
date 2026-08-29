@@ -564,6 +564,13 @@ struct PreferencesView: View {
                     }
                     .padding(.horizontal, 16).padding(.vertical, 12)
                 }
+                rowDivider
+                toggleRow(title: "Porovnávať s druhým modelom (tieňový prepis)",
+                          subtitle: dictation.canShadowCompare
+                            ? "Každú nahrávku prepíše aj \(dictation.shadowModelName) a výsledok uloží k diktovaniu. Vkladá sa vždy len text zvoleného modelu — druhý slúži na porovnanie v záložke Kvalita. Kým je zapnuté, platíš oba prepisy."
+                            : "Vyžaduje nastavený OpenAI aj Gemini kľúč — porovnanie beží medzi dvoma poskytovateľmi.",
+                          isOn: $dictation.shadowCompareEnabled)
+                    .disabled(!dictation.canShadowCompare)
             }
 
             // Pozícia pilulky
@@ -1261,6 +1268,10 @@ struct PreferencesView: View {
         var modeTotal = 0
         var modelUsage: [(name: String, count: Int, avgSeconds: Int)] = []
         var modelTotal = 0
+        var shadowPairs: [(entry: DictationHistoryEntry, agreement: Double,
+                           primary: [String], shadow: [String])] = []
+        var shadowAgreement = 0.0
+        var shadowIdentical = 0
 
         /// Only entries logged since quality tracking shipped carry metrics — older history
         /// has no numbers to show, so everything here is computed off that filtered list.
@@ -1324,6 +1335,18 @@ struct PreferencesView: View {
                 .sorted { $0.value.count > $1.value.count }
                 .map { (name: $0.key, count: $0.value.count,
                         avgSeconds: $0.value.count > 0 ? $0.value.seconds / $0.value.count : 0) }
+
+            // Shadow A/B — same audio, two providers. Newest first: the interesting ones are
+            // the recent dictations the user still remembers saying.
+            shadowPairs = entries.reversed().compactMap { entry in
+                guard let shadow = entry.shadowText else { return nil }
+                let diff = TranscriptDiff.differences(entry.text, shadow)
+                return (entry, TranscriptDiff.agreement(entry.text, shadow), diff.onlyA, diff.onlyB)
+            }
+            shadowIdentical = shadowPairs.filter { $0.primary.isEmpty && $0.shadow.isEmpty }.count
+            if !shadowPairs.isEmpty {
+                shadowAgreement = shadowPairs.reduce(0) { $0 + $1.agreement } / Double(shadowPairs.count)
+            }
         }
     }
 
@@ -1358,6 +1381,7 @@ struct PreferencesView: View {
                 qualitySummaryCard(stats)
                 modeUsageCard(stats)
                 modelUsageCard(stats)
+                shadowCompareCard(stats)
                 topFillersCard(stats)
                 perAppCard(stats)
                 recentDictationsCard(analyzed)
@@ -1386,6 +1410,72 @@ struct PreferencesView: View {
 
     /// How dictation is actually used: realtime vs batch, raw vs Smart finish.
     /// Only entries recorded since per-shortcut modes shipped can tell — older ones can't.
+    @ViewBuilder
+    private func shadowCompareCard(_ stats: QualityStats) -> some View {
+        if !stats.shadowPairs.isEmpty {
+            card {
+                VStack(alignment: .leading, spacing: 0) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Porovnanie modelov na tej istej nahrávke").font(.body)
+                        Text("Zhoda \(Int((stats.shadowAgreement * 100).rounded())) % na \(stats.shadowPairs.count) porovnaniach · \(stats.shadowIdentical)× úplne zhodné")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    .padding(.horizontal, 16).padding(.vertical, 12)
+                    rowDivider
+                    ForEach(Array(stats.shadowPairs.prefix(25).enumerated()), id: \.offset) { index, pair in
+                        if index > 0 { rowDivider }
+                        shadowRow(pair)
+                    }
+                    rowDivider
+                    HStack {
+                        Text("Porovnania sa ukladajú k diktovaniam. Vymazanie nechá diktovania nedotknuté.")
+                            .font(.caption).foregroundStyle(.secondary)
+                        Spacer()
+                        Button("Vymazať porovnania") { historyStore.clearShadows()
+                            qualityStats = QualityStats(entries: historyStore.entries) }
+                            .buttonStyle(.bordered)
+                    }
+                    .padding(.horizontal, 16).padding(.vertical, 10)
+                }
+            }
+        }
+    }
+
+    private func shadowRow(_ pair: (entry: DictationHistoryEntry, agreement: Double,
+                                    primary: [String], shadow: [String])) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text(pair.entry.date.formatted(date: .omitted, time: .shortened))
+                    .font(.callout.monospacedDigit())
+                Text(pair.entry.appName.isEmpty ? "—" : pair.entry.appName)
+                    .font(.caption).foregroundStyle(.secondary)
+                Spacer()
+                Text("\(Int((pair.agreement * 100).rounded())) %")
+                    .font(.callout.monospacedDigit())
+                    // Below ~90 % the two providers genuinely heard different words; above it
+                    // they mostly differ on a filler or two, which isn't worth flagging.
+                    .foregroundStyle(pair.agreement >= 0.9 ? .secondary : Color.orange)
+            }
+            if pair.primary.isEmpty && pair.shadow.isEmpty {
+                Text("zhodné").font(.caption).foregroundStyle(.secondary)
+            } else {
+                diffLine(pair.entry.model ?? "zvolený", pair.primary, .primary)
+                diffLine(pair.entry.shadowModel ?? "tieňový", pair.shadow, .secondary)
+            }
+        }
+        .padding(.horizontal, 16).padding(.vertical, 10)
+    }
+
+    private func diffLine(_ model: String, _ words: [String], _ style: HierarchicalShapeStyle) -> some View {
+        HStack(alignment: .top, spacing: 6) {
+            Text(model).font(.caption.monospaced()).foregroundStyle(.secondary)
+                .frame(width: 150, alignment: .leading)
+            Text(words.isEmpty ? "—" : words.prefix(12).joined(separator: ", "))
+                .font(.caption).foregroundStyle(style)
+                .textSelection(.enabled)
+        }
+    }
+
     private func modelUsageCard(_ stats: QualityStats) -> some View {
         card {
             VStack(alignment: .leading, spacing: 0) {

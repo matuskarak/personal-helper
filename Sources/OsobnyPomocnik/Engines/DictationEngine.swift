@@ -301,6 +301,23 @@ final class DictationEngine {
     var batchAPIKey: String { Self.isGemini(batchModel) ? geminiKey : openAIKey }
     var hasBatchKey: Bool { !batchAPIKey.isEmpty }
 
+    /// Transcribe every recording a second time with the other provider and keep that result
+    /// next to the first one. Only the selected model's text is ever inserted — the shadow is
+    /// evidence, not a fallback. Doubles the transcription bill while it's on, which is the
+    /// reason it's a switch you turn off rather than something that runs forever.
+    var shadowCompareEnabled: Bool {
+        didSet { UserDefaults.standard.set(shadowCompareEnabled, forKey: "dictation.shadowCompare") }
+    }
+
+    /// The other provider's comparable model. One model each side — comparing Gemini against
+    /// four OpenAI variants would need four uploads and answers a question nobody asked.
+    static func shadowModel(for model: String) -> String {
+        isGemini(model) ? "gpt-transcribe" : "gemini-3.5-transcribe"
+    }
+    var shadowModelName: String { Self.shadowModel(for: batchModel) }
+    /// Both providers must be configured — the shadow uses the key the primary doesn't.
+    var canShadowCompare: Bool { !openAIKey.isEmpty && !geminiKey.isEmpty }
+
     /// $/minute for whichever mode+model is currently selected — used for the usage cost estimate.
     /// ponytail: applies the CURRENT rate to the whole accumulated counter, not a historical
     /// mix of rates if the user switched modes mid-way. Fine until someone needs split billing.
@@ -393,6 +410,8 @@ final class DictationEngine {
     private var capturedAppName:    String = ""
     private var capturedBundleID:   String = ""
     private var contextCaptureTask: Task<Void, Never>?
+    /// History entry id for the dictation currently being transcribed — see stopAndTranscribe.
+    private var currentEntryID = UUID()
     private var apiProbeTask: Task<Void, Never>?
 
     // Profile resolved synchronously at recording start, purely so its keywords can go into
@@ -448,6 +467,7 @@ final class DictationEngine {
         self.batchModel             = UserDefaults.standard.string(forKey: "dictation.batchModel") ?? "gpt-transcribe"
         self.liveInsertEnabled      = UserDefaults.standard.object(forKey: "dictation.liveInsert") as? Bool ?? true
         self.enterAutoStop          = UserDefaults.standard.bool(forKey: "dictation.enterAutoStop")
+        self.shadowCompareEnabled   = UserDefaults.standard.bool(forKey: "dictation.shadowCompare")
     }
 
     func resetUsageCounter() { totalSecondsRecorded = 0 }
@@ -948,6 +968,9 @@ final class DictationEngine {
         }
         let elapsed = recordingStartDate.map { Int(Date().timeIntervalSince($0)) } ?? 0
         recordingStartDate = nil
+        // Generated up front: the shadow transcription needs something to attach itself to,
+        // and it can finish before the history entry that will carry it even exists.
+        currentEntryID = UUID()
         // A slow/hung network call (e.g. Smart rewrite) can still be in flight when the user
         // starts a brand-new session before this one finishes — startRecording() bumps
         // sessionID. Checked again below, right before this call would otherwise mutate
@@ -1124,7 +1147,8 @@ final class DictationEngine {
         if !dictatedText.isEmpty {
             let model = transcriptionMode == .realtime ? realtimeModel.rawValue : batchModel
             UsageStore.shared.logDictation(seconds: elapsed, text: dictatedText, model: model)
-            DictationHistoryStore.shared.log(dictatedText, appName: appName, bundleID: bundleID,
+            DictationHistoryStore.shared.log(dictatedText, id: currentEntryID,
+                                             appName: appName, bundleID: bundleID,
                                              category: category, seconds: elapsed,
                                              rewrittenText: rewritten, screenshotJPEG: screenshotJPEG,
                                              mode: transcriptionMode.rawValue, smart: wasSmart,
@@ -1177,6 +1201,9 @@ final class DictationEngine {
             watchdog.cancel()
             clearNotice()
             AppLogger.log("[DictationEngine] Batch transcription completed (\(text.count) chars)")
+            // Started only after the primary is done: the inserted text must never wait on a
+            // comparison the user isn't reading yet.
+            startShadowTranscription(wav: wav, keywords: keywords, seconds: seconds)
             return text
         } catch {
             AppLogger.log("[DictationEngine] ⚠️ Batch transcription failed: \(error)")
@@ -1186,6 +1213,34 @@ final class DictationEngine {
                 showNotice("⚠️ Prepis zlyhal — nahrávka je uložená. Skús ju znova cez menu → Čakajúce nahrávky.")
             }
             return ""
+        }
+    }
+
+    /// Second opinion on the same audio from the other provider, for the A/B in Nastavenia.
+    /// Detached and at background priority so it can't slow the dictation that spawned it, and
+    /// silent on failure — a missing comparison is a gap in a report, not a lost dictation.
+    private func startShadowTranscription(wav: Data, keywords: [String], seconds: Int) {
+        guard shadowCompareEnabled else { return }
+        let model = shadowModelName
+        let key = Self.isGemini(model) ? geminiKey : openAIKey
+        guard !key.isEmpty else {
+            AppLogger.log("[DictationEngine] tieňový prepis preskočený — chýba kľúč pre \(model)")
+            return
+        }
+        let entryID = currentEntryID
+        Task.detached(priority: .background) {
+            do {
+                let text = try await Self.upload(wav: wav, model: model, keywords: keywords, apiKey: key)
+                await MainActor.run {
+                    DictationHistoryStore.shared.attachShadow(to: entryID, text: text, model: model)
+                    // Counted too — it is real money, and a usage total that ignored it would
+                    // understate the bill by exactly half while this is on.
+                    UsageStore.shared.logDictation(seconds: seconds, text: text, model: model)
+                }
+                AppLogger.log("[DictationEngine] tieňový prepis (\(model)) hotový — \(text.count) znakov")
+            } catch {
+                AppLogger.log("[DictationEngine] ⚠️ tieňový prepis (\(model)) zlyhal: \(error.localizedDescription)")
+            }
         }
     }
 
