@@ -63,6 +63,26 @@ struct AudioInputDevice: Identifiable, Hashable, Sendable {
 /// Enumerates Core Audio input devices and applies a selected one to an AVAudioEngine's input unit.
 enum AudioDeviceManager {
 
+    /// Loads the CoreAudio HAL into this process ahead of the first dictation.
+    ///
+    /// Measured over 191 dictations: opening the mic took a median 8 ms — except on the first
+    /// dictation after launch, where it took 0.7–9.7 s (median 7.6 s). The cost is the HAL's
+    /// one-time bootstrap in a cold process: connecting to coreaudiod and loading every
+    /// installed driver plugin, which on this machine includes third-party ones (SoundSource's
+    /// ARK, ParrotAudioPlugin). The first enumeration pays it; every call after is warm.
+    ///
+    /// ponytail: enumerates devices, deliberately without opening one. Opening would warm the
+    /// device path too, but it lights up the orange "mic in use" indicator at launch while
+    /// nothing is recording — a worse trade than shaving off the remaining milliseconds.
+    /// If the first dictation is still slow, opening + immediately closing is the next step.
+    static func warmUp() {
+        DispatchQueue.global(qos: .utility).async {
+            let t0 = Date()
+            let devices = inputDevices()
+            AppLogger.log("[AudioDeviceManager] HAL warm-up: \(devices.count) vstupných zariadení za \(Int(Date().timeIntervalSince(t0) * 1000)) ms")
+        }
+    }
+
     static func inputDevices() -> [AudioInputDevice] {
         var address = AudioObjectPropertyAddress(
             mSelector: kAudioHardwarePropertyDevices,
