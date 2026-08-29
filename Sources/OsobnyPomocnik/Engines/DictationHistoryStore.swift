@@ -20,16 +20,23 @@ struct DictationHistoryEntry: Codable, Identifiable {
     let mode: String?             // TranscriptionMode.rawValue ("realtime"/"batch"); nil on old entries
     let smart: Bool?              // Smart stop requested (even if the rewrite then fell back to raw)
     let model: String?            // transcription model actually used, e.g. "gemini-3.5-transcribe"
+    // Shadow comparison: the same audio transcribed a second time by the OTHER provider, for
+    // A/B-ing accuracy on identical input. Only present while that setting is on, and both
+    // fields are wiped together by clearShadows().
+    var shadowText: String?
+    var shadowModel: String?
 
     init(id: UUID = UUID(), date: Date, text: String, appName: String = "", bundleID: String = "",
          category: AppCategory = .generic, seconds: Int = 0,
          rewrittenText: String? = nil, metrics: DictationMetrics? = nil, hasScreenshot: Bool = false,
-         mode: String? = nil, smart: Bool? = nil, model: String? = nil) {
+         mode: String? = nil, smart: Bool? = nil, model: String? = nil,
+         shadowText: String? = nil, shadowModel: String? = nil) {
         self.id = id; self.date = date; self.text = text
         self.appName = appName; self.bundleID = bundleID; self.category = category
         self.seconds = seconds; self.rewrittenText = rewrittenText; self.metrics = metrics
         self.hasScreenshot = hasScreenshot
         self.mode = mode; self.smart = smart; self.model = model
+        self.shadowText = shadowText; self.shadowModel = shadowModel
     }
 
     // ponytail: hand-written decode so the added fields don't destroy existing history.
@@ -50,6 +57,8 @@ struct DictationHistoryEntry: Codable, Identifiable {
         mode          = try c.decodeIfPresent(String.self, forKey: .mode)
         smart         = try c.decodeIfPresent(Bool.self, forKey: .smart)
         model         = try c.decodeIfPresent(String.self, forKey: .model)
+        shadowText    = try c.decodeIfPresent(String.self, forKey: .shadowText)
+        shadowModel   = try c.decodeIfPresent(String.self, forKey: .shadowModel)
     }
 }
 
@@ -59,6 +68,8 @@ final class DictationHistoryStore {
     static let shared = DictationHistoryStore()
 
     private(set) var entries: [DictationHistoryEntry] = []  // oldest first
+    /// Shadow transcripts that beat their own history entry to the punch — see attachShadow.
+    private var parkedShadows: [UUID: (text: String, model: String)] = [:]
 
     // ponytail: measured ~755 bytes/entry (150KB / 200 entries) before this change.
     // Uncapped storage was requested to build up a real dataset for the quality-analysis
@@ -91,12 +102,13 @@ final class DictationHistoryStore {
 
     private init() { load() }
 
-    func log(_ text: String, appName: String = "", bundleID: String = "",
+    /// `id` is passed in when the caller needs to reference the entry before it exists —
+    /// the shadow transcription finishes on its own schedule and attaches to this id later.
+    func log(_ text: String, id: UUID = UUID(), appName: String = "", bundleID: String = "",
              category: AppCategory = .generic, seconds: Int = 0, rewrittenText: String? = nil,
              screenshotJPEG: Data? = nil, mode: String? = nil, smart: Bool? = nil,
              model: String? = nil) {
         guard !text.isEmpty else { return }
-        let id = UUID()
         if let screenshotJPEG {
             try? screenshotJPEG.write(to: screenshotURL(for: id), options: .atomic)
         }
@@ -104,13 +116,39 @@ final class DictationHistoryStore {
             id: id, date: Date(), text: text, appName: appName, bundleID: bundleID,
             category: category, seconds: seconds, rewrittenText: rewrittenText,
             metrics: DictationQualityEngine.analyze(text: text, rewritten: rewrittenText, seconds: seconds),
-            hasScreenshot: screenshotJPEG != nil, mode: mode, smart: smart, model: model
+            hasScreenshot: screenshotJPEG != nil, mode: mode, smart: smart, model: model,
+            // A shadow that finished before the primary did is parked here waiting for us.
+            shadowText: parkedShadows[id]?.text, shadowModel: parkedShadows[id]?.model
         ))
+        parkedShadows[id] = nil
         if entries.count > safetyCeiling {
             let overflow = entries.prefix(entries.count - safetyCeiling)
             overflow.forEach { if $0.hasScreenshot { try? FileManager.default.removeItem(at: screenshotURL(for: $0.id)) } }
             entries.removeFirst(entries.count - safetyCeiling)
         }
+        save()
+    }
+
+    /// Second opinion for `id`. Usually arrives after the entry exists; if the shadow won the
+    /// race it's parked until log() creates the entry, which happens within a second or two.
+    func attachShadow(to id: UUID, text: String, model: String) {
+        guard let index = entries.firstIndex(where: { $0.id == id }) else {
+            parkedShadows[id] = (text, model)
+            return
+        }
+        entries[index].shadowText = text
+        entries[index].shadowModel = model
+        save()
+    }
+
+    /// Drops every stored second opinion, keeping the dictations themselves. Called from the
+    /// comparison card once the A/B has served its purpose.
+    func clearShadows() {
+        for index in entries.indices where entries[index].shadowText != nil {
+            entries[index].shadowText = nil
+            entries[index].shadowModel = nil
+        }
+        parkedShadows.removeAll()
         save()
     }
 
