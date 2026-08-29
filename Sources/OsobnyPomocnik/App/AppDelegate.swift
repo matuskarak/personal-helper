@@ -221,6 +221,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if engine.isRecording {
             guard engine.transcriptionMode == mode else {
                 AppLogger.log("[AppDelegate] handleDictate(\(mode.rawValue)) — ignorované, beží \(engine.transcriptionMode.rawValue) diktovanie (zastaví ho len jeho vlastná skratka alebo Smart)")
+                // The rule itself is intentional, the silence wasn't: a mis-hit start key
+                // left the wrong mode running and every stop press did nothing at all, which
+                // is indistinguishable from a hung app. Measured once: eight presses over
+                // 26 seconds, then a restart that threw away a 9-minute recording.
+                DictationSounds.playRefused()
+                // Named off the RUNNING mode, not the pressed one — the shortcut the user
+                // needs is the one that started what's actually recording.
+                let running = engine.transcriptionMode
+                let stopKey = ShortcutStore.shared
+                    .shortcuts(for: running == .realtime ? .dictateRealtime : .dictateBatch)
+                    .first?.displayString ?? "?"
+                let cancelKey = ShortcutStore.shared.shortcuts(for: .cancelDictation).first?.displayString ?? "?"
+                engine.showNotice("⚠️ Beží \(running == .realtime ? "realtime" : "nahrávacie") diktovanie — ukonči ho \(stopKey), alebo \(cancelKey) ho zruší.", sticky: false)
+                DictationIndicatorController.shared.show()
                 return
             }
             DictationSounds.playStop()
@@ -256,6 +270,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         guard RemoteConfig.shared.smartDictationAllowed else {
             AppLogger.log("[AppDelegate] handleSmartStop — ignorované (smartDictationAllowed=false)")
+            // Also a stop attempt that does nothing — same buzz, same reason.
+            DictationSounds.playRefused()
             return
         }
         AppLogger.log("[AppDelegate] handleSmartStop — ukončujem so Smart spracovaním")
@@ -348,6 +364,10 @@ private enum DictationSounds {
     private static let start:    NSSound? = load("Tink")
     private static let stop_:    NSSound? = load("Pop")
     private static let inserted: NSSound? = load("Submarine")
+    // Deliberately the system's error sound and nothing softer: it fires when a keypress
+    // that should have ended a dictation did nothing, and the whole point is to break the
+    // "the app is frozen" reading before the user presses it another seven times.
+    private static let refused:  NSSound? = load("Basso")
 
     private static func load(_ name: String) -> NSSound? {
         let s = NSSound(contentsOfFile: "/System/Library/Sounds/\(name).aiff", byReference: false)
@@ -358,6 +378,7 @@ private enum DictationSounds {
     static func playStart()    { play(start) }
     static func playStop()     { play(stop_) }
     static func playInserted() { play(inserted) }
+    static func playRefused()  { play(refused) }
 
     private static func play(_ sound: NSSound?) {
         soundQ.async {
