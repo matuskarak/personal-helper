@@ -115,6 +115,10 @@ struct PreferencesView: View {
     @State private var apiKeySaved    = false
     @State private var openAIKeyInput = ""
     @State private var openAIKeySaved = false
+    @State private var geminiKeyInput = ""
+    @State private var geminiKeySaved = false
+    @State private var geminiKeyTestResult: String?
+    @State private var geminiKeyTestRunning = false
     @State private var availableGoogleVoices: [GoogleVoice] = []
     @State private var loadingVoices = false
     @State private var voiceError: String?
@@ -170,6 +174,8 @@ struct PreferencesView: View {
             apiKeySaved      = google.hasAPIKey
             openAIKeyInput   = dictation.openAIKey
             openAIKeySaved   = dictation.hasOpenAIKey
+            geminiKeyInput   = dictation.geminiKey
+            geminiKeySaved   = dictation.hasGeminiKey
             rateInput        = rateString(tts.rate)
             smartModelInput  = rewriteEngine.model
             inputDevices     = AudioDeviceManager.inputDevices()
@@ -184,6 +190,7 @@ struct PreferencesView: View {
         }
         .onChange(of: apiKeyInput)    { _, _ in apiKeySaved    = false }
         .onChange(of: openAIKeyInput) { _, _ in openAIKeySaved = false }
+        .onChange(of: geminiKeyInput) { _, _ in geminiKeySaved = false }
         .onChange(of: accessCodeInput) { _, _ in accessCodeSaved = false }
     }
 
@@ -515,6 +522,47 @@ struct PreferencesView: View {
                         Text("\(model)\(Self.modelNote(model)) — \(Pricing.perMinuteLabel(realtime: false, batchModel: model))")
                             .tag(model)
                     }
+                }
+                // Only when it's actually selected — a second API key is noise for everyone
+                // who stays on OpenAI, and this way the field appears right where the choice
+                // that requires it was made.
+                if DictationEngine.isGemini(dictation.batchModel) {
+                    rowDivider
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Gemini API kľúč").font(.body)
+                        Text("Gemini beží na Google účte, nie na OpenAI kľúči vyššie. Realtime diktovanie a Smart spracovanie používajú naďalej OpenAI.")
+                            .font(.caption).foregroundStyle(.secondary)
+                        HStack {
+                            SecureField("AIza…", text: $geminiKeyInput).textFieldStyle(.roundedBorder)
+                            Button(geminiKeySaved ? "Uložené ✓" : "Uložiť") {
+                                dictation.geminiKey = geminiKeyInput
+                                geminiKeySaved = true
+                            }
+                            .disabled(geminiKeyInput.isEmpty)
+                            .buttonStyle(.borderedProminent).tint(accent)
+                        }
+                        if let result = geminiKeyTestResult {
+                            Text(result).font(.caption)
+                                .foregroundStyle(result.hasPrefix("✅") ? .green : .red)
+                        }
+                        HStack {
+                            Button("Testovať kľúč") {
+                                Task {
+                                    geminiKeyTestRunning = true
+                                    geminiKeyTestResult = await dictation.testGeminiKey()
+                                    geminiKeyTestRunning = false
+                                }
+                            }
+                            .buttonStyle(.bordered)
+                            .disabled(geminiKeyTestRunning || !dictation.hasGeminiKey)
+                            if geminiKeyTestRunning { ProgressView().controlSize(.small) }
+                            Spacer()
+                            Link("Získať kľúč →",
+                                 destination: URL(string: "https://aistudio.google.com/apikey")!)
+                                .font(.caption)
+                        }
+                    }
+                    .padding(.horizontal, 16).padding(.vertical, 12)
                 }
             }
 
@@ -1892,6 +1940,7 @@ struct PreferencesView: View {
     private static func modelNote(_ model: String) -> String {
         switch model {
         case "gpt-transcribe":         return " (odporúčaný, najpresnejší)"
+        case "gemini-3.5-transcribe":  return " (Google, preview — vlastný slovník)"
         case "gpt-4o-mini-transcribe": return " (staršia generácia)"
         default:                       return ""
         }
