@@ -66,20 +66,35 @@ enum AudioDeviceManager {
     /// Loads the CoreAudio HAL into this process ahead of the first dictation.
     ///
     /// Measured over 191 dictations: opening the mic took a median 8 ms — except on the first
-    /// dictation after launch, where it took 0.7–9.7 s (median 7.6 s). The cost is the HAL's
-    /// one-time bootstrap in a cold process: connecting to coreaudiod and loading every
-    /// installed driver plugin, which on this machine includes third-party ones (SoundSource's
-    /// ARK, ParrotAudioPlugin). The first enumeration pays it; every call after is warm.
+    /// dictation after launch, where it took 0.7–9.7 s. Doing it here means the user never
+    /// waits for it.
+    ///
+    /// Where that time goes, measured per device on this machine: HAL bootstrap ~1.0 s, then
+    /// the first property read of each device — iPhone Continuity mic 4.9 s, Sonos Ace
+    /// (Bluetooth) 0.4 s, HyperX (USB) 1.0 s, built-in mic 2 ms. It is wireless devices macOS
+    /// has to reach over the air, not the driver plugins. A second enumeration costs 7 ms.
     ///
     /// ponytail: enumerates devices, deliberately without opening one. Opening would warm the
     /// device path too, but it lights up the orange "mic in use" indicator at launch while
     /// nothing is recording — a worse trade than shaving off the remaining milliseconds.
-    /// If the first dictation is still slow, opening + immediately closing is the next step.
     static func warmUp() {
-        DispatchQueue.global(qos: .utility).async {
+        // .userInitiated, not .utility: this races the rest of app launch, and a throttled
+        // background thread stretches it into the window where a dictation still pays it.
+        DispatchQueue.global(qos: .userInitiated).async {
             let t0 = Date()
             let devices = inputDevices()
-            AppLogger.log("[AudioDeviceManager] HAL warm-up: \(devices.count) vstupných zariadení za \(Int(Date().timeIntervalSince(t0) * 1000)) ms")
+            let total = Int(Date().timeIntervalSince(t0) * 1000)
+            AppLogger.log("[AudioDeviceManager] HAL warm-up: \(devices.count) vstupných zariadení za \(total) ms")
+            // Only when it was actually slow, and only the culprit: a wireless device that
+            // takes seconds to answer is worth naming (it can be turned off at the source),
+            // but printing four device timings on every launch is noise.
+            guard total > 2000 else { return }
+            let slowest = devices.map { device -> (String, Int) in
+                let t = Date()
+                _ = deviceName(device.id)
+                return (device.name, Int(Date().timeIntervalSince(t) * 1000))
+            }.max { $0.1 < $1.1 }
+            if let slowest { AppLogger.log("[AudioDeviceManager] ⚠️ pomalé zahrievanie — najpomalšie zariadenie teraz: '\(slowest.0)' \(slowest.1) ms") }
         }
     }
 
@@ -117,7 +132,7 @@ enum AudioDeviceManager {
         return size > 0
     }
 
-    private static func deviceName(_ deviceID: AudioDeviceID) -> String? {
+    static func deviceName(_ deviceID: AudioDeviceID) -> String? {
         var address = AudioObjectPropertyAddress(
             mSelector: kAudioObjectPropertyName,
             mScope:    kAudioObjectPropertyScopeGlobal,
