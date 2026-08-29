@@ -1259,6 +1259,8 @@ struct PreferencesView: View {
         var perApp: [(name: String, count: Int, paced: Int, avgFillers: Double, category: AppCategory)] = []
         var modeCombos: [(label: String, count: Int)] = []
         var modeTotal = 0
+        var modelUsage: [(name: String, count: Int, avgSeconds: Int)] = []
+        var modelTotal = 0
 
         /// Only entries logged since quality tracking shipped carry metrics — older history
         /// has no numbers to show, so everything here is computed off that filtered list.
@@ -1308,6 +1310,20 @@ struct PreferencesView: View {
                 ("Po nahraní — čisté", tracked.filter { $0.mode == "batch"    && $0.smart != true }.count),
                 ("Po nahraní + Smart", tracked.filter { $0.mode == "batch"    && $0.smart == true }.count),
             ].map { (label: $0.0, count: $0.1) }
+
+            // Which transcription model actually produced each transcript — the split that
+            // makes an A/B between providers readable without digging through app.log.
+            var models: [String: (count: Int, seconds: Int)] = [:]
+            for entry in entries {
+                guard let model = entry.model else { continue }
+                models[model, default: (0, 0)].count += 1
+                models[model, default: (0, 0)].seconds += entry.seconds
+            }
+            modelTotal = models.values.reduce(0) { $0 + $1.count }
+            modelUsage = models
+                .sorted { $0.value.count > $1.value.count }
+                .map { (name: $0.key, count: $0.value.count,
+                        avgSeconds: $0.value.count > 0 ? $0.value.seconds / $0.value.count : 0) }
         }
     }
 
@@ -1341,6 +1357,7 @@ struct PreferencesView: View {
             } else {
                 qualitySummaryCard(stats)
                 modeUsageCard(stats)
+                modelUsageCard(stats)
                 topFillersCard(stats)
                 perAppCard(stats)
                 recentDictationsCard(analyzed)
@@ -1369,6 +1386,40 @@ struct PreferencesView: View {
 
     /// How dictation is actually used: realtime vs batch, raw vs Smart finish.
     /// Only entries recorded since per-shortcut modes shipped can tell — older ones can't.
+    private func modelUsageCard(_ stats: QualityStats) -> some View {
+        card {
+            VStack(alignment: .leading, spacing: 0) {
+                Text("Použité modely").font(.body)
+                    .padding(.horizontal, 16).padding(.vertical, 12)
+                rowDivider
+                if stats.modelTotal == 0 {
+                    Text("Zatiaľ žiadne dáta — model sa zaznamenáva pri nových diktovaniach.")
+                        .font(.callout).foregroundStyle(.secondary)
+                        .padding(.horizontal, 16).padding(.vertical, 12)
+                } else {
+                    ForEach(Array(stats.modelUsage.enumerated()), id: \.offset) { index, model in
+                        if index > 0 { rowDivider }
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(model.name).font(.callout)
+                                Text("priemerne \(model.avgSeconds) s na diktovanie")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Text("\(model.count)× (\(Int((Double(model.count) / Double(stats.modelTotal) * 100).rounded())) %)")
+                                .font(.callout.monospacedDigit()).foregroundStyle(.secondary)
+                        }
+                        .padding(.horizontal, 16).padding(.vertical, 10)
+                    }
+                    rowDivider
+                    Text("Spolu \(stats.modelTotal) diktovaní so zaznamenaným modelom. Staršie záznamy model nemajú a nepočítajú sa.")
+                        .font(.caption).foregroundStyle(.secondary)
+                        .padding(.horizontal, 16).padding(.vertical, 10)
+                }
+            }
+        }
+    }
+
     private func modeUsageCard(_ stats: QualityStats) -> some View {
         card {
             VStack(alignment: .leading, spacing: 0) {
