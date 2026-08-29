@@ -28,6 +28,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         AppProfile.selfCheck()
         #endif
         PermissionsChecker.shared.requestAllIfNeeded()
+        AudioDeviceManager.warmUp()
         _ = UpdaterController.shared // starts Sparkle's background update checks
         _ = RemoteConfig.shared      // starts feature-flag fetch
         menuBarController = MenuBarController()
