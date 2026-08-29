@@ -27,8 +27,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         DictationQualityEngine.selfCheck()
         AppProfile.selfCheck()
         #endif
-        PermissionsChecker.shared.requestAllIfNeeded()
+        // First thing that touches anything slow: it runs on its own thread and the rest of
+        // launch overlaps with it, so starting it later only delays the window in which an
+        // early dictation still waits.
         AudioDeviceManager.warmUp()
+        PermissionsChecker.shared.requestAllIfNeeded()
         _ = UpdaterController.shared // starts Sparkle's background update checks
         _ = RemoteConfig.shared      // starts feature-flag fetch
         menuBarController = MenuBarController()
