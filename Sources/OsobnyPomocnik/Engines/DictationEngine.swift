@@ -214,6 +214,17 @@ final class DictationEngine {
     }
     var hasOpenAIKey: Bool { !openAIKey.isEmpty }
 
+    /// Google AI Studio key — only the Gemini batch models use it. Deliberately a second key
+    /// rather than a general "provider" abstraction: nothing else in the app talks to Google,
+    /// and one more String is cheaper than a protocol with two conformances.
+    var geminiKey: String {
+        didSet {
+            if geminiKey.isEmpty { UserDefaults.standard.removeObject(forKey: "gemini.dictation.key") }
+            else                 { UserDefaults.standard.set(geminiKey, forKey: "gemini.dictation.key") }
+        }
+    }
+    var hasGeminiKey: Bool { !geminiKey.isEmpty }
+
     // Latency tradeoff, same five values on both realtime models:
     // "minimal"|"low"|"medium"|"high"|"xhigh"
     var transcriptionDelay: String {
@@ -279,7 +290,16 @@ final class DictationEngine {
     // gpt-transcribe listed first: OpenAI's newer, more accurate replacement for the
     // gpt-4o-*/whisper-1 family (WER 15.21% -> 8.98% on OpenAI's own benchmark) — see
     // Pricing.swift for the rate and the "not truly live" caveat on all these numbers.
-    static let batchModels = ["gpt-transcribe", "gpt-4o-mini-transcribe", "gpt-4o-transcribe", "whisper-1"]
+    static let batchModels = ["gpt-transcribe", "gemini-3.5-transcribe",
+                              "gpt-4o-mini-transcribe", "gpt-4o-transcribe", "whisper-1"]
+
+    /// Which provider a batch model belongs to. Prefix match rather than a stored enum: the
+    /// model is already persisted as a String and a second stored field could disagree with it.
+    static func isGemini(_ model: String) -> Bool { model.hasPrefix("gemini") }
+
+    /// The key for whichever provider the current batch model needs.
+    var batchAPIKey: String { Self.isGemini(batchModel) ? geminiKey : openAIKey }
+    var hasBatchKey: Bool { !batchAPIKey.isEmpty }
 
     /// $/minute for whichever mode+model is currently selected — used for the usage cost estimate.
     /// ponytail: applies the CURRENT rate to the whole accumulated counter, not a historical
@@ -414,6 +434,7 @@ final class DictationEngine {
             if migrated != stored { UserDefaults.standard.set(migrated, forKey: "dictation.micPriority") }
         }
         self.openAIKey              = UserDefaults.standard.string(forKey: "openai.dictation.key") ?? ""
+        self.geminiKey              = UserDefaults.standard.string(forKey: "gemini.dictation.key") ?? ""
         self.transcriptionDelay     = UserDefaults.standard.string(forKey: "whisper.delay") ?? "low"
         // A stored "local" is from the removed on-device WhisperKit mode. Falling through to
         // the `?? .realtime` default would silently move those users to the pricier streaming
@@ -433,6 +454,26 @@ final class DictationEngine {
 
     /// Validates the OpenAI key and checks whether the account has access to the
     /// specific realtime/transcription models this app depends on.
+    /// Same shape as testAPIKey, against Google. Lists models rather than sending audio —
+    /// a bad key must fail here, before it can cost a real dictation.
+    func testGeminiKey() async -> String {
+        guard hasGeminiKey else { return "❌ Žiadny Gemini kľúč nie je nastavený." }
+        var req = URLRequest(url: URL(string: "https://generativelanguage.googleapis.com/v1beta/models")!)
+        req.setValue(geminiKey, forHTTPHeaderField: "x-goog-api-key")
+        do {
+            let (data, response) = try await URLSession.shared.data(for: req)
+            guard let http = response as? HTTPURLResponse else { return "❌ Neplatná odpoveď servera." }
+            guard http.statusCode == 200 else {
+                let msg = String(data: data, encoding: .utf8) ?? "?"
+                AppLogger.log("[DictationEngine] Gemini key test FAILED [\(http.statusCode)]: \(msg.prefix(300))")
+                return "❌ Chyba \(http.statusCode): \(msg.prefix(200))"
+            }
+            return "✅ Gemini kľúč je platný."
+        } catch {
+            return "❌ Sieťová chyba: \(error.localizedDescription)"
+        }
+    }
+
     func testAPIKey() async -> String {
         guard hasOpenAIKey else { return "❌ Žiadny API kľúč nie je nastavený." }
 
@@ -477,7 +518,11 @@ final class DictationEngine {
     // MARK: - Public API
 
     func startRecording(mode: TranscriptionMode) async throws {
-        guard hasOpenAIKey else { throw DictationError.noAPIKey }
+        // Realtime is OpenAI-only; batch may be pointed at Gemini, which has its own key.
+        guard mode == .batch ? hasBatchKey : hasOpenAIKey else {
+            throw Self.isGemini(batchModel) && mode == .batch
+                ? DictationError.noGeminiKey : DictationError.noAPIKey
+        }
         // The start shortcut picks the transcription mode per session (S = realtime,
         // D = batch). Persisted via didSet only as "last used" — the menu-bar toggle
         // and the cost estimate read it between sessions.
@@ -622,7 +667,11 @@ final class DictationEngine {
         // Doubles as a TLS warm-up for the upload that follows.
         apiProbeTask?.cancel()
         apiProbeTask = Task { [weak self] in
-            guard let self, await Self.apiUnreachable(apiKey: self.openAIKey) else { return }
+            let usesGemini = mode == .batch && Self.isGemini(self?.batchModel ?? "")
+            guard let self,
+                  await Self.apiUnreachable(apiKey: usesGemini ? self.geminiKey : self.openAIKey,
+                                            gemini: usesGemini)
+            else { return }
             guard !Task.isCancelled, self.isRecording, self.sessionID == mySessionID else { return }
             AppLogger.log("[DictationEngine] ⚠️ probe — API nedostupné počas štartu diktovania")
             self.showNotice("⚠️ API je nedostupné — hovor ďalej, nahrávka sa uloží a prepíšeš ju neskôr.", sticky: false)
@@ -1122,7 +1171,7 @@ final class DictationEngine {
         defer { watchdog.cancel() }
 
         do {
-            let text = try await Self.upload(wav: wav, model: batchModel, keywords: keywords, apiKey: openAIKey)
+            let text = try await Self.upload(wav: wav, model: batchModel, keywords: keywords, apiKey: batchAPIKey)
             if let pending { PendingDictationStore.shared.remove(pending) }
             watchdog.cancel()
             clearNotice()
@@ -1143,8 +1192,8 @@ final class DictationEngine {
     /// the insert-from-memory slot rather than straight into whatever happens to be focused —
     /// minutes may have passed and the field it was dictated into is probably long gone.
     func retryPending(_ item: PendingDictation) async {
-        guard hasOpenAIKey else {
-            showNotice("⚠️ OpenAI API kľúč nie je nastavený.")
+        guard hasBatchKey else {
+            showNotice("⚠️ \(Self.isGemini(batchModel) ? "Gemini" : "OpenAI") API kľúč nie je nastavený.")
             return
         }
         guard let wav = PendingDictationStore.shared.wav(for: item) else {
@@ -1161,7 +1210,7 @@ final class DictationEngine {
             // session, and the recording's own profile wasn't persisted. Defaults still apply.
             let text = try await Self.upload(wav: wav, model: batchModel,
                                              keywords: AppProfile.parseKeywords(defaultKeywords),
-                                             apiKey: openAIKey)
+                                             apiKey: batchAPIKey)
             PendingDictationStore.shared.remove(item)
             guard !text.isEmpty else {
                 showNotice("⚠️ Nahrávka neobsahovala rozpoznateľnú reč.")
@@ -1180,17 +1229,20 @@ final class DictationEngine {
     enum TranscriptionError: LocalizedError {
         case http(Int, String)
         case badResponse
+        case tooLong
 
         var errorDescription: String? {
             switch self {
             case .http(let code, let msg): "Server odpovedal \(code): \(msg.prefix(120))"
             case .badResponse:             "Neočakávaná odpoveď servera."
+            case .tooLong:                 "Nahrávka je príliš dlhá pre Gemini (limit ~5 min). Prepni model na gpt-transcribe."
             }
         }
         /// 4xx means the request itself is wrong (bad key, bad audio) — repeating it verbatim
         /// can only fail the same way. Rate limits and 5xx are worth another go.
         var isRetryable: Bool {
             if case .http(let code, _) = self { return code == 429 || code >= 500 }
+            if case .tooLong = self { return false }   // retrying can't shrink the recording
             return true
         }
     }
@@ -1216,16 +1268,24 @@ final class DictationEngine {
 
     /// True only when the endpoint can't be reached at all. A 401 counts as reachable — a bad
     /// key is a different problem, surfaced elsewhere, and not something to warn about here.
-    private static func apiUnreachable(apiKey: String) async -> Bool {
+    private static func apiUnreachable(apiKey: String, gemini: Bool = false) async -> Bool {
         guard !apiKey.isEmpty else { return false }
-        var req = URLRequest(url: URL(string: "https://api.openai.com/v1/models")!)
+        // Must point at the host the upload will actually use — probing OpenAI while the
+        // transcript goes to Google would miss a Google-side outage entirely.
+        let url = gemini ? "https://generativelanguage.googleapis.com/v1beta/models"
+                         : "https://api.openai.com/v1/models"
+        var req = URLRequest(url: URL(string: url)!)
         req.httpMethod = "HEAD"
-        req.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        if gemini { req.setValue(apiKey, forHTTPHeaderField: "x-goog-api-key") }
+        else      { req.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization") }
         req.timeoutInterval = 4
         do { _ = try await batchSession.data(for: req); return false } catch { return true }
     }
 
     private static func uploadOnce(wav: Data, model: String, keywords: [String], apiKey: String) async throws -> String {
+        if isGemini(model) {
+            return try await uploadOnceGemini(wav: wav, model: model, keywords: keywords, apiKey: apiKey)
+        }
         let boundary = "Boundary-\(UUID().uuidString)"
         var req = URLRequest(url: URL(string: "https://api.openai.com/v1/audio/transcriptions")!)
         req.httpMethod = "POST"
@@ -1263,6 +1323,30 @@ final class DictationEngine {
             let text = json["text"] as? String
         else {
             AppLogger.log("[DictationEngine] ⚠️ neočakávaná odpoveď: \(String(data: data, encoding: .utf8)?.prefix(300) ?? "?")")
+            throw TranscriptionError.badResponse
+        }
+        return text
+    }
+
+    /// Same contract as `uploadOnce`, against Google's Interactions API instead of OpenAI's.
+    /// Body/response shaping lives in GeminiTranscription; this is just the transport.
+    private static func uploadOnceGemini(wav: Data, model: String, keywords: [String], apiKey: String) async throws -> String {
+        let encoded = wav.base64EncodedString()
+        guard encoded.count < GeminiTranscription.maxInlineBase64Chars else { throw TranscriptionError.tooLong }
+
+        var req = URLRequest(url: GeminiTranscription.endpoint)
+        req.httpMethod = "POST"
+        req.setValue(apiKey, forHTTPHeaderField: "x-goog-api-key")
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = try GeminiTranscription.requestBody(base64WAV: encoded, model: model, keywords: keywords)
+
+        let (data, response) = try await batchSession.data(for: req)
+        guard let http = response as? HTTPURLResponse else { throw TranscriptionError.badResponse }
+        guard http.statusCode == 200 else {
+            throw TranscriptionError.http(http.statusCode, String(data: data, encoding: .utf8) ?? "?")
+        }
+        guard let text = GeminiTranscription.transcript(from: data) else {
+            AppLogger.log("[DictationEngine] ⚠️ neočakávaná Gemini odpoveď: \(String(data: data, encoding: .utf8)?.prefix(500) ?? "?")")
             throw TranscriptionError.badResponse
         }
         return text
@@ -1610,10 +1694,11 @@ final class DictationEngine {
     // MARK: - Errors
 
     enum DictationError: LocalizedError {
-        case noAPIKey, audioSetupFailed
+        case noAPIKey, noGeminiKey, audioSetupFailed
         var errorDescription: String? {
             switch self {
             case .noAPIKey:        "OpenAI API kľúč nie je nastavený. Nastav ho v Nastaveniach."
+            case .noGeminiKey:     "Gemini API kľúč nie je nastavený. Zvolený je model Gemini — kľúč doplň v Nastaveniach → Diktovanie."
             case .audioSetupFailed: "Nepodarilo sa inicializovať audio konvertor."
             }
         }

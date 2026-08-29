@@ -47,6 +47,9 @@ enum Pricing {
         switch batchModel {
         case "gpt-4o-mini-transcribe": return 0.003
         case "gpt-transcribe":         return 0.0045
+        // Google bills audio-in + text-out separately ($2/1M + $12/1M tokens); this is their
+        // own published blended per-minute figure. Preview pricing — recheck before trusting.
+        case "gemini-3.5-transcribe":  return 0.005
         default:                       return 0.006 // gpt-4o-transcribe, whisper-1
         }
     }
