@@ -1127,7 +1127,8 @@ final class DictationEngine {
             DictationHistoryStore.shared.log(dictatedText, appName: appName, bundleID: bundleID,
                                              category: category, seconds: elapsed,
                                              rewrittenText: rewritten, screenshotJPEG: screenshotJPEG,
-                                             mode: transcriptionMode.rawValue, smart: wasSmart)
+                                             mode: transcriptionMode.rawValue, smart: wasSmart,
+                                             model: model)
         }
         return result
     }
@@ -1217,7 +1218,10 @@ final class DictationEngine {
                 return
             }
             DictationHistoryStore.shared.log(text, appName: item.appName, bundleID: item.bundleID,
-                                             seconds: item.seconds, mode: item.mode, smart: false)
+                                             seconds: item.seconds, mode: item.mode, smart: false,
+                                             // The model that finally succeeded, not the one
+                                             // that failed when the recording was made.
+                                             model: batchModel)
             DictationMemoryStore.shared.store(text)
             showNotice("✅ Prepis dokončený (\(text.count) znakov) — vlož ho cez ⌃⌥V alebo z histórie.")
         } catch {
