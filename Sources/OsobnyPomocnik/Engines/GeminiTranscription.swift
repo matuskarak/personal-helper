@@ -40,15 +40,24 @@ enum GeminiTranscription {
     /// so fall back to walking `steps[].content[]`. Only each content item's own `text` is
     /// read — `annotations` holds one entry per word, and folding those in would return the
     /// whole transcript a second time, word by word.
+    ///
+    /// Returns `""` for a completed interaction that carries no text at all: Gemini answers
+    /// silence with `status: completed` and zero output tokens, which is an answer ("no speech
+    /// here"), not a failure. Treating it as malformed cost three retries and a 12-second wait
+    /// before telling the user the transcription had failed, which it hadn't.
+    /// `nil` is reserved for a response we genuinely can't read — that one is worth retrying.
     static func transcript(from data: Data) -> String? {
         guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
-        if let direct = json["output_text"] as? String, !direct.isEmpty { return direct }
-        guard let steps = json["steps"] as? [[String: Any]] else { return nil }
-        let parts = steps
-            .compactMap { $0["content"] as? [[String: Any]] }
-            .flatMap { $0 }
-            .compactMap { $0["text"] as? String }
-        let joined = parts.joined()
-        return joined.isEmpty ? nil : joined
+        if let direct = json["output_text"] as? String { return direct }
+        if let steps = json["steps"] as? [[String: Any]] {
+            return steps
+                .compactMap { $0["content"] as? [[String: Any]] }
+                .flatMap { $0 }
+                .compactMap { $0["text"] as? String }
+                .joined()
+        }
+        // No output section at all, but the envelope is a real interaction — empty transcript.
+        if json["status"] is String, json["id"] is String { return "" }
+        return nil
     }
 }
