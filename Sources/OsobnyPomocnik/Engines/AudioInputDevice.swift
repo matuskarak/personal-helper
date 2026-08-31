@@ -85,6 +85,11 @@ enum AudioDeviceManager {
             let devices = inputDevices()
             let total = Int(Date().timeIntervalSince(t0) * 1000)
             AppLogger.log("[AudioDeviceManager] HAL warm-up: \(devices.count) vstupných zariadení za \(total) ms")
+            // Kept in the audio-health file too: app.log gets cleared, and a launch that took
+            // ten minutes to find zero microphones is exactly the evidence worth keeping.
+            if Double(total) / 1000 > AudioHealth.slowEnumeration || devices.isEmpty {
+                AudioHealth.record("⚠️ zahrievanie HAL pri štarte: \(devices.count) vstupov za \(total) ms")
+            }
             // Only when it was actually slow, and only the culprit: a wireless device that
             // takes seconds to answer is worth naming (it can be turned off at the source),
             // but printing four device timings on every launch is noise.
@@ -95,6 +100,33 @@ enum AudioDeviceManager {
                 return (device.name, Int(Date().timeIntervalSince(t) * 1000))
             }.max { $0.1 < $1.1 }
             if let slowest { AppLogger.log("[AudioDeviceManager] ⚠️ pomalé zahrievanie — najpomalšie zariadenie teraz: '\(slowest.0)' \(slowest.1) ms") }
+        }
+    }
+
+    /// Enumeration with a ceiling, for the dictation path.
+    ///
+    /// Returns nil when the HAL didn't answer in time. The plain `inputDevices()` can block for
+    /// as long as coreaudiod stays wedged — measured 2026-08-31: **630 seconds**, after which it
+    /// returned zero devices. The app just sat there. A dictation that can't find a microphone
+    /// has to say so, not wait.
+    ///
+    /// The abandoned call runs on its own queue rather than the cooperative pool on purpose: a
+    /// blocking call that may take minutes would starve every other task in the app.
+    static func inputDevices(timeout: Duration) async -> [AudioInputDevice]? {
+        await withTaskGroup(of: [AudioInputDevice]?.self) { group in
+            group.addTask {
+                await withCheckedContinuation { cont in
+                    DispatchQueue.global(qos: .userInitiated).async { cont.resume(returning: inputDevices()) }
+                }
+            }
+            group.addTask {
+                // Cancelled means the enumeration already won — that is the normal path.
+                do { try await Task.sleep(for: timeout) } catch { return nil }
+                return nil
+            }
+            let first = await group.next() ?? nil
+            group.cancelAll()
+            return first
         }
     }
 
