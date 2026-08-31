@@ -2012,6 +2012,20 @@ struct PreferencesView: View {
                             .buttonStyle(.bordered).foregroundStyle(.red)
                     }
                     .padding(.horizontal, 16).padding(.vertical, 12)
+                    rowDivider
+
+                    HStack(spacing: 8) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Záznam audio problémov").font(.body)
+                            Text("Odpojenia a pripojenia mikrofónov, pomalé alebo zaseknuté odpovede audio subsystému. Samostatný súbor — nemaže sa spolu so záznamom vyššie, aby sa dal spätne dohľadať vzorec.")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Button("Zobraziť") { NSWorkspace.shared.activateFileViewerSelecting([AudioHealth.fileURL]) }
+                            .buttonStyle(.bordered)
+                            .disabled(!FileManager.default.fileExists(atPath: AudioHealth.fileURL.path))
+                    }
+                    .padding(.horizontal, 16).padding(.vertical, 12)
 
                     if let name = exportedLogName {
                         rowDivider

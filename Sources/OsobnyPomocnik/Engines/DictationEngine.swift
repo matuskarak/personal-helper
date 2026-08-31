@@ -570,11 +570,27 @@ final class DictationEngine {
         let inputFormat: AVAudioFormat
         let converter: AVAudioConverter
 
-        if let uid = resolvedInputDeviceUID() {
+        // Enumerated once, with a ceiling: this is where the app hung on 2026-08-31 when the
+        // HAL stopped answering, and there is nothing useful to do without a device list.
+        let enumStart = Date()
+        guard let devices = await AudioDeviceManager.inputDevices(timeout: .seconds(6)) else {
+            AudioHealth.record("⏱️ zoznam zariadení neodpovedal do 6 s pri štarte diktovania — audio subsystém je zaseknutý")
+            connectionError = "Audio subsystém neodpovedá. V Termináli spusti: sudo killall coreaudiod"
+            throw DictationError.audioSetupFailed
+        }
+        let enumSeconds = Date().timeIntervalSince(enumStart)
+        if enumSeconds > AudioHealth.slowEnumeration {
+            AudioHealth.record(String(format: "⚠️ pomalá enumerácia zariadení: %.1f s, %d vstupov", enumSeconds, devices.count))
+        }
+        if devices.isEmpty {
+            AudioHealth.record("⚠️ HAL nevrátil ŽIADNE vstupné zariadenie — ani zabudovaný mikrofón")
+        }
+
+        if let uid = resolvedInputDeviceUID(devices: devices) {
             // Explicit device selected — ONLY use DeviceCapture, never AVAudioEngine fallback.
             // Falling back to AVAudioEngine when BT device is in a bad state can block
             // audioEngine.start() for 30+ seconds, freezing the UI.
-            guard let device = AudioDeviceManager.inputDevices().first(where: { $0.uid == uid }) else {
+            guard let device = devices.first(where: { $0.uid == uid }) else {
                 AppLogger.log("[DictationEngine] ⚠️ Selected device UID '\(uid)' not found in inputDevices()")
                 connectionError = "Vybrané zariadenie nie je dostupné. Zmeň mikrofón v nastaveniach."
                 throw DictationError.audioSetupFailed

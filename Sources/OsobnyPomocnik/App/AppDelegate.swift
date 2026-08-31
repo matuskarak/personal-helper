@@ -31,6 +31,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // launch overlaps with it, so starting it later only delays the window in which an
         // early dictation still waits.
         AudioDeviceManager.warmUp()
+        AudioHealth.startWatchingDevices()
         PermissionsChecker.shared.requestAllIfNeeded()
         _ = UpdaterController.shared // starts Sparkle's background update checks
         _ = RemoteConfig.shared      // starts feature-flag fetch
