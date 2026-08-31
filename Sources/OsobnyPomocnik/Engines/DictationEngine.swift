@@ -971,6 +971,7 @@ final class DictationEngine {
         // Generated up front: the shadow transcription needs something to attach itself to,
         // and it can finish before the history entry that will carry it even exists.
         currentEntryID = UUID()
+        let myEntryID = currentEntryID
         // A slow/hung network call (e.g. Smart rewrite) can still be in flight when the user
         // starts a brand-new session before this one finishes — startRecording() bumps
         // sessionID. Checked again below, right before this call would otherwise mutate
@@ -1050,7 +1051,8 @@ final class DictationEngine {
         // text — a newer session already owns that state if one started while this call was
         // stuck (e.g. a slow Smart-rewrite network request). Bail before touching any of it.
         guard sessionID == mySessionID else {
-            AppLogger.log("[DictationEngine] ⚠️ stopAndTranscribe — session #\(mySessionID) superseded by #\(sessionID) mid-flight, discarding stale result instead of inserting/resetting")
+            AppLogger.log("[DictationEngine] ⚠️ stopAndTranscribe — session #\(mySessionID) superseded by #\(sessionID) mid-flight, nevkladám do cudzej session")
+            parkSupersededTranscript(result, entryID: myEntryID, elapsed: elapsed)
             isTranscribing = false
             return nil
         }
@@ -1121,7 +1123,8 @@ final class DictationEngine {
         // Re-check: the Smart rewrite network call above is the slow part (up to the 20s
         // timeout) — a new session can easily have started while it was in flight.
         guard sessionID == mySessionID else {
-            AppLogger.log("[DictationEngine] ⚠️ stopAndTranscribe — session #\(mySessionID) superseded by #\(sessionID) during Smart rewrite, discarding stale result instead of inserting/resetting")
+            AppLogger.log("[DictationEngine] ⚠️ stopAndTranscribe — session #\(mySessionID) superseded by #\(sessionID) during Smart rewrite, nevkladám do cudzej session")
+            parkSupersededTranscript(result, entryID: myEntryID, elapsed: elapsed)
             isTranscribing = false
             return nil
         }
@@ -1197,8 +1200,16 @@ final class DictationEngine {
 
         do {
             let text = try await Self.upload(wav: wav, model: batchModel, keywords: keywords, apiKey: batchAPIKey)
-            if let pending { PendingDictationStore.shared.remove(pending) }
             watchdog.cancel()
+            // An empty transcript over audible speech is the model failing to hear it, not the
+            // user's silence — keep the recording so it can be retried (possibly on the other
+            // provider) instead of deleting the only copy of what was said.
+            if text.isEmpty, lastRecordingCapturedAudio {
+                AppLogger.log("[DictationEngine] ⚠️ prázdny prepis napriek zaznamenanému zvuku — nahrávku nechávam uloženú")
+                showNotice("⚠️ Model nevrátil žiadny text, hoci v nahrávke je zvuk. Nahrávka je uložená — skús ju znova cez menu → Čakajúce nahrávky.")
+                return ""
+            }
+            if let pending { PendingDictationStore.shared.remove(pending) }
             clearNotice()
             AppLogger.log("[DictationEngine] Batch transcription completed (\(text.count) chars)")
             // Started only after the primary is done: the inserted text must never wait on a
@@ -1214,6 +1225,23 @@ final class DictationEngine {
             }
             return ""
         }
+    }
+
+    /// A transcript that came back after the user had already started the next dictation.
+    ///
+    /// Inserting it is not an option — the field it was dictated into is gone and the text
+    /// would land in whatever is frontmost now. Throwing it away was the old behaviour, and it
+    /// silently binned real dictated words (measured: a 257-character transcript). So it goes
+    /// to history and to the insert-from-memory slot, where ⌃⌥V can still reach it.
+    private func parkSupersededTranscript(_ text: String?, entryID: UUID, elapsed: Int) {
+        guard let text, !text.isEmpty else { return }
+        DictationMemoryStore.shared.store(text)
+        DictationHistoryStore.shared.log(text, id: entryID, seconds: elapsed,
+                                         mode: transcriptionMode.rawValue, smart: false,
+                                         model: transcriptionMode == .realtime ? realtimeModel.rawValue : batchModel)
+        // Non-sticky: a new dictation is already recording and its pill must come back.
+        showNotice("⚠️ Predchádzajúci prepis dorazil neskoro (\(text.count) znakov) — vlož ho cez ⌃⌥V.", sticky: false)
+        AppLogger.log("[DictationEngine] oneskorený prepis odložený do pamäte (\(text.count) znakov)")
     }
 
     /// Second opinion on the same audio from the other provider, for the A/B in Nastavenia.

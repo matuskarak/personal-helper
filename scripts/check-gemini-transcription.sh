@@ -51,9 +51,15 @@ struct Check {
 
         assert(parse(#"{"steps":[{"content":[{"text":"a "},{"text":"b"}]}]}"#) == "a b",
                "viac častí sa nespája")
-        assert(parse(#"{"steps":[]}"#) == nil, "prázdna odpoveď musí byť nil, nie \"\"")
-        assert(parse(#"{"output_text":""}"#) == nil, "prázdny output_text musí byť nil")
+        // Gemini answers silence with a completed interaction and zero output tokens. That is
+        // an answer, not a failure: "" means "no speech", nil means "unreadable, retry". Getting
+        // this backwards cost three retries and 12 seconds before wrongly reporting a failure.
+        assert(parse(#"{"id":"v1_x","status":"completed","usage":{"total_output_tokens":0}}"#) == "",
+               "dokončená odpoveď bez textu musí byť \"\", nie chyba")
+        assert(parse(#"{"output_text":""}"#) == "", "prázdny output_text musí byť \"\"")
+        assert(parse(#"{"steps":[]}"#) == "", "prázdne steps musia byť \"\"")
         assert(parse("nie json") == nil, "nevalidný JSON musí byť nil")
+        assert(parse(#"{"nieco":"ine"}"#) == nil, "neznámy tvar musí byť nil (hodný opakovania)")
 
         print("OK — telo requestu aj parsovanie odpovede sedia")
     }
