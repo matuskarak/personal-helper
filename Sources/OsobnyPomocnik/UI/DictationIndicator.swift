@@ -319,10 +319,13 @@ struct DictationIndicatorView: View {
 
     /// Shown under any message that waits for acknowledgement — without it a pill that
     /// no longer disappears on its own just reads as stuck.
+    @ViewBuilder
     private var dismissHint: some View {
-        Text("Klikni na zatvorenie")
-            .font(.system(size: 9))
-            .foregroundStyle(.tertiary)
+        if engine.pillHintsEnabled {
+            Text("Klikni na zatvorenie")
+                .font(.system(size: 9))
+                .foregroundStyle(.tertiary)
+        }
     }
 
     /// Elapsed recording time — SwiftUI's built-in timer-style Text ticks on its own,
@@ -336,8 +339,30 @@ struct DictationIndicatorView: View {
         }
     }
 
-    @ViewBuilder
     private var pillContent: some View {
+        VStack(spacing: 0) {
+            // An advisory raised mid-session (mic-quality hint) rides above the live view
+            // instead of covering it — the recording is still running and the equalizer/timer
+            // is what the user is actually watching.
+            if let notice = engine.notice, !engine.noticeIsSticky, engine.isRecording {
+                HStack(spacing: 6) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                    Text(notice)
+                        .lineLimit(2)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .font(.system(size: 10))
+                .padding(.horizontal, 16)
+                .padding(.top, 8)
+                .frame(maxWidth: 300)
+            }
+            coreContent
+        }
+    }
+
+    @ViewBuilder
+    private var coreContent: some View {
         if isCompact {
             // Live-insert mode: just the equalizer bubble — transcript is in the field
             VStack(spacing: 3) {
@@ -371,7 +396,7 @@ struct DictationIndicatorView: View {
                         dismissHint
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
-                } else if let notice = engine.notice {
+                } else if let notice = engine.notice, engine.noticeIsSticky || !engine.isRecording {
                     Image(systemName: "tray.and.arrow.down.fill")
                         .foregroundStyle(.orange)
                         .frame(width: 18)
@@ -380,16 +405,7 @@ struct DictationIndicatorView: View {
                             .font(.caption)
                             .foregroundStyle(.primary)
                             .lineLimit(3)
-                        if engine.noticeIsSticky {
-                            dismissHint
-                        } else if engine.isRecording {
-                            // A passive heads-up, not an interruption — say so, otherwise the
-                            // pill quietly reverting to the equalizer a few seconds later reads
-                            // as "something broke" rather than "recording never stopped".
-                            Text("Len upozornenie — nahrávanie pokračuje")
-                                .font(.system(size: 9))
-                                .foregroundStyle(.tertiary)
-                        }
+                        if engine.noticeIsSticky { dismissHint }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                 } else if !engine.isMicReady {
@@ -418,7 +434,7 @@ struct DictationIndicatorView: View {
                             // Batch/local modes only get a transcript after recording stops —
                             // no interim words to show, unlike realtime's live deltas. Naming
                             // that explicitly avoids reading as a stuck/laggy live view.
-                            Text("Nahrávam… (prepis až po zastavení)")
+                            Text(engine.pillHintsEnabled ? "Nahrávam… (prepis až po zastavení)" : "Nahrávam…")
                                 .foregroundStyle(.secondary)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                         } else {

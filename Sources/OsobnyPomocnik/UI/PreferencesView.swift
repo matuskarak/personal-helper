@@ -582,6 +582,13 @@ struct PreferencesView: View {
                     set: { pillFollowsField = $0; PillPosition.followFocusedField = $0 }
                 ))
                 rowDivider
+                toggleRow(title: "Vysvetlivky v pilulke",
+                          subtitle: "Doplňujúce popisky (napr. prepis až po zastavení, Klikni na zatvorenie). Vypni, keď už skratky poznáš — pilulka bude menšia.",
+                          isOn: Binding(
+                    get: { dictation.pillHintsEnabled },
+                    set: { dictation.pillHintsEnabled = $0 }
+                ))
+                rowDivider
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Pozícia pilulky").font(.body)
