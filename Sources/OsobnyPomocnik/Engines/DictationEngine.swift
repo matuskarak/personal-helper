@@ -309,6 +309,12 @@ final class DictationEngine {
         didSet { UserDefaults.standard.set(shadowCompareEnabled, forKey: "dictation.shadowCompare") }
     }
 
+    /// Explanatory sub-labels in the pill ("prepis až po zastavení", "Klikni na zatvorenie").
+    /// Useful until the shortcuts are muscle memory, then just makes the pill bigger.
+    var pillHintsEnabled: Bool {
+        didSet { UserDefaults.standard.set(pillHintsEnabled, forKey: "indicator.hints") }
+    }
+
     /// The other provider's comparable model. One model each side — comparing Gemini against
     /// four OpenAI variants would need four uploads and answers a question nobody asked.
     static func shadowModel(for model: String) -> String {
@@ -468,6 +474,7 @@ final class DictationEngine {
         self.liveInsertEnabled      = UserDefaults.standard.object(forKey: "dictation.liveInsert") as? Bool ?? true
         self.enterAutoStop          = UserDefaults.standard.bool(forKey: "dictation.enterAutoStop")
         self.shadowCompareEnabled   = UserDefaults.standard.bool(forKey: "dictation.shadowCompare")
+        self.pillHintsEnabled       = UserDefaults.standard.object(forKey: "indicator.hints") as? Bool ?? true
     }
 
     func resetUsageCounter() { totalSecondsRecorded = 0 }
