@@ -15,11 +15,11 @@ enum AppCurrency: String, CaseIterable, Sendable {
     }
 
     /// Both APIs bill in USD, so EUR is a conversion.
-    var perUSD: Double { self == .eur ? Pricing.eurPerUSD : 1 }
+    @MainActor var perUSD: Double { self == .eur ? Pricing.eurPerUSD : 1 }
 
     /// Formats a USD amount in this currency. Sub-10-cent totals get a third decimal —
     /// otherwise a real but tiny cost renders as "0,00 €" and reads as broken, not cheap.
-    func format(usd: Double) -> String {
+    @MainActor func format(usd: Double) -> String {
         let v = usd * perUSD
         return String(format: v < 0.1 ? "%.3f %@" : "%.2f %@", v, symbol)
     }
@@ -33,22 +33,23 @@ enum AppCurrency: String, CaseIterable, Sendable {
 /// quietly wrong. If keeping them current becomes a chore, the natural next step is to serve
 /// them from the same GitHub JSON that already feeds RemoteConfig, so prices can be updated
 /// without shipping a new build.
+@MainActor
 enum Pricing {
     /// Shown next to the rates so the figure is never mistaken for a live quote.
-    static let ratesCheckedOn = "júl 2026"
+    static var ratesCheckedOn: String { RemoteConfig.shared.catalog.ratesCheckedOn }
 
-    /// Fixed conversion, not an FX lookup — these are "~" estimates next to a tilde, and a
-    /// network round-trip per menu open to move them by a cent isn't worth it.
-    static let eurPerUSD = 0.92
+    /// Fixed conversion, not an FX lookup — these are "~" estimates next to a tilde. Served
+    /// from models.json so a drifted rate can be nudged without a build.
+    static var eurPerUSD: Double { RemoteConfig.shared.catalog.eurPerUSD }
 
-    /// USD per minute of audio, per transcription model.
+    /// USD per minute of audio, per transcription model — remote catalog first, old
+    /// hardcoded switch as fallback for ids the catalog doesn't carry.
     static func usdPerMinute(realtime: Bool, batchModel: String) -> Double {
         guard !realtime else { return 0.017 }
+        if let info = RemoteConfig.shared.catalog.info(for: batchModel) { return info.usdPerMinute }
         switch batchModel {
         case "gpt-4o-mini-transcribe": return 0.003
         case "gpt-transcribe":         return 0.0045
-        // Google bills audio-in + text-out separately ($2/1M + $12/1M tokens); this is their
-        // own published blended per-minute figure. Preview pricing — recheck before trusting.
         case "gemini-3.5-transcribe":  return 0.005
         default:                       return 0.006 // gpt-4o-transcribe, whisper-1
         }
