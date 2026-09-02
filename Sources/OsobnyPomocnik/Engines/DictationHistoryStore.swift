@@ -121,6 +121,11 @@ final class DictationHistoryStore {
             shadowText: parkedShadows[id]?.text, shadowModel: parkedShadows[id]?.model
         ))
         parkedShadows[id] = nil
+        if let entry = entries.last {
+            Telemetry.shared.dictation(seconds: seconds, metrics: entry.metrics, model: model, mode: mode,
+                                       outcome: "ok", latencyMs: DictationEngine.shared.lastTranscriptionLatencyMs,
+                                       category: category)
+        }
         if entries.count > safetyCeiling {
             let overflow = entries.prefix(entries.count - safetyCeiling)
             overflow.forEach { if $0.hasScreenshot { try? FileManager.default.removeItem(at: screenshotURL(for: $0.id)) } }

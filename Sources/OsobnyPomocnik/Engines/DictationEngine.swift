@@ -192,6 +192,9 @@ final class DictationEngine {
     // instead of silently treating it the same as "nothing was said".
     private(set) var lastRecordingCapturedAudio = true
 
+    /// Upload→response time of the last batch transcription, for the anonymous stats.
+    private(set) var lastTranscriptionLatencyMs = 0
+
     private var levelPollTask: Task<Void, Never>?
 
     // Guards against a duplicate startRecording() call while one is already in
@@ -945,6 +948,8 @@ final class DictationEngine {
         guard isRecording else { return false }
         let elapsed = recordingStartDate.map { Int(Date().timeIntervalSince($0)) } ?? 0
         AppLogger.log("[DictationEngine] ✋ cancelDictation — session #\(sessionID) zahodená po \(elapsed)s (mode: \(transcriptionMode.rawValue))")
+        Telemetry.shared.dictation(seconds: Int(elapsed), metrics: nil, model: nil, mode: transcriptionMode.rawValue,
+                                   outcome: "cancelled", latencyMs: 0, category: .generic)
 
         // Bump first: any in-flight work from this session (reconnects, a slow context capture,
         // a socket event still arriving) checks sessionID and now discards itself instead of
@@ -1225,12 +1230,16 @@ final class DictationEngine {
         defer { watchdog.cancel() }
 
         do {
+            let uploadStart = Date()
             let text = try await Self.upload(wav: wav, model: batchModel, keywords: keywords, apiKey: batchAPIKey)
+            lastTranscriptionLatencyMs = Int(Date().timeIntervalSince(uploadStart) * 1000)
             watchdog.cancel()
             // An empty transcript over audible speech is the model failing to hear it, not the
             // user's silence — keep the recording so it can be retried (possibly on the other
             // provider) instead of deleting the only copy of what was said.
             if text.isEmpty, lastRecordingCapturedAudio {
+                Telemetry.shared.dictation(seconds: seconds, metrics: nil, model: batchModel, mode: "batch",
+                                           outcome: "empty", latencyMs: lastTranscriptionLatencyMs, category: .generic)
                 AppLogger.log("[DictationEngine] ⚠️ prázdny prepis napriek zaznamenanému zvuku — nahrávku nechávam uloženú")
                 showNotice("⚠️ Model nevrátil žiadny text, hoci v nahrávke je zvuk. Nahrávka je uložená — skús ju znova cez menu → Čakajúce nahrávky.")
                 return ""
@@ -1244,6 +1253,8 @@ final class DictationEngine {
             return text
         } catch {
             AppLogger.log("[DictationEngine] ⚠️ Batch transcription failed: \(error)")
+            Telemetry.shared.dictation(seconds: seconds, metrics: nil, model: batchModel, mode: "batch",
+                                       outcome: "failed", latencyMs: 0, category: .generic)
             connectionError = "Sieťová chyba: \(error.localizedDescription)"
             watchdog.cancel()
             if pending != nil {

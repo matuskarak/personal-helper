@@ -49,6 +49,12 @@ Appka nemá vlastný kľúč — diktovanie ide cez tvoj OpenAI účet.
 Kľúč sa ukladá do Kľúčenky macOS, nie do bežného súboru.
 
 Ostatné polia v okne (Gemini, Google čítanie, prístupový kód) **preskoč** — sú voliteľné.
+
+Prepínač **Zdieľať anonymné štatistiky používania** nechaj prosím zapnutý — posiela mi tempo
+reči, počet slov, výplňové slová, dĺžku a výsledok diktovania a typ appky (správy / e-mail /
+dokument). **Nikdy nie samotný text**, mená, kľúčové slová ani kľúče. Presne z toho viem
+prepis zlepšovať. Vypnúť sa dá kedykoľvek v Nastaveniach → Všeobecné.
+
 Klikni **Zavrieť**.
 
 ## 4. Prvé diktovanie
@@ -106,6 +112,11 @@ Skôr než mi napíšeš:
 Appka si raz denne skontroluje novú verziu a ponúkne ju. Kedykoľvek aj ručne:
 ikonka v lište → **Skontrolovať aktualizácie…**. Pri aktualizácii sa už žiadne
 „Otvoriť napriek tomu" neopakuje.
+
+Po aktualizácii sa môže objaviť dialóg **„OsobnyPomocnik chce použiť dôverné informácie
+uložené v Kľúčenke"** — appka si číta tvoj API kľúč. Klikni **Vždy povoliť** (nie len
+„Povoliť"), inak sa to spýta znova po každej aktualizácii. Kým dialóg neodklikneš, appka
+čaká a nereaguje.
 
 ---
 

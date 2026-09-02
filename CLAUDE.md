@@ -52,6 +52,12 @@ históriu, Kvalitu, Prehľad, 2 modely (gpt-transcribe, gemini-3.5-transcribe). 
 Smart ⌘⇧A, realtime ⌘⇧S + live vkladanie, OCR ⌘⇧O, tieňový prepis, ostatné modely katalógu.
 Repo je **verejné** — kódy v users.json sú viditeľné, je to alfa-úroveň ochrany.
 
+**Telemetria** (`Engines/Telemetry.swift`): anonymné udalosti (metriky z DictationQualityEngine,
+trvanie, model, výsledok, latencia, kategória appky, feature tapy) → n8n webhook
+`n8n.pixeled.sk/webhook/osobny-pomocnik-telemetry` → Data Table `osobny-pomocnik-telemetry`
+(workflow `Ub6Tttj5GbNi4QiX`). Predvolene zapnuté, vypínateľné vo Všeobecné a v onboardingu.
+Nikdy neposielať prepis, kľúčové slová, názvy appiek/okien, kľúče.
+
 **Nesmie do logu:** prepisy, kľúčové slová, API kľúče, prístupový kód. Batch cesta loguje len
 počty znakov; realtime WS loguje len typ eventu. Diagnostika (app.log + audio-health.log) má
 jeden prepínač v O aplikácii, predvolene zapnutý.
