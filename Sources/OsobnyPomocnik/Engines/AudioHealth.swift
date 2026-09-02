@@ -28,6 +28,8 @@ enum AudioHealth {
     private static let maxBytes = 200_000
 
     static func record(_ event: String) {
+        // One diagnostics switch for the whole app (Nastavenia → O aplikácii).
+        guard AppLogger.isEnabled else { return }
         let stamp = Self.formatter.string(from: Date())
         AppLogger.log("[AudioHealth] \(event)")
         queue.async {

@@ -12,9 +12,11 @@ extension PreferencesView {
             Text("Klávesové skratky").font(.title2.bold())
 
             card {
-                ShortcutMappingRow(label: "Diktovanie — realtime", action: .dictateRealtime)
-                rowDivider
-                ShortcutMappingRow(label: "Diktovanie — po nahraní", action: .dictateBatch)
+                ShortcutMappingRow(label: "Diktovanie", action: .dictateBatch)
+                if remoteConfig.realtimeAllowed {
+                    rowDivider
+                    ShortcutMappingRow(label: "Diktovanie — realtime", action: .dictateRealtime)
+                }
                 if remoteConfig.smartDictationAllowed {
                     rowDivider
                     ShortcutMappingRow(label: "Smart ukončenie diktovania", action: .smartStop)
@@ -23,8 +25,10 @@ extension PreferencesView {
                 ShortcutMappingRow(label: "Zrušiť diktovanie", action: .cancelDictation)
                 rowDivider
                 ShortcutMappingRow(label: "Čítať text", action: .readText)
-                rowDivider
-                ShortcutMappingRow(label: "OCR oblasť", action: .ocr)
+                if remoteConfig.ocrAllowed {
+                    rowDivider
+                    ShortcutMappingRow(label: "OCR oblasť", action: .ocr)
+                }
                 rowDivider
                 ShortcutMappingRow(label: "Vložiť z pamäte", action: .insertFromMemory)
             }

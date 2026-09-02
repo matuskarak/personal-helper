@@ -41,14 +41,15 @@ extension PreferencesView {
                     }
                     .padding(.horizontal, 16).padding(.top, 13).padding(.bottom, 2)
 
-                    toggleRow(title: "Zapisovať diagnostický záznam",
+                    toggleRow(title: "Diagnostika",
                               subtitle: loggingEnabled
-                                ? "Zapnuté — veľkosť súboru: \(logSizeText)"
-                                : "Vypnuté — nové udalosti sa nezaznamenávajú",
+                                ? "Zapnuté — zaznamenáva priebeh appky a audio udalosti (bez prepisov a kľúčov). Veľkosť: \(logSizeText)"
+                                : "Vypnuté — nič sa nezaznamenáva, tlačidlá nižšie sú skryté",
                               isOn: Binding(
                         get: { loggingEnabled },
                         set: { loggingEnabled = $0; AppLogger.isEnabled = $0; refreshLogSize() }
                     ))
+                    if loggingEnabled {
                     rowDivider
 
                     HStack(spacing: 8) {
@@ -86,6 +87,7 @@ extension PreferencesView {
                         }
                         .padding(.horizontal, 16).padding(.vertical, 10)
                     }
+                    } // loggingEnabled
                 }
             }
 

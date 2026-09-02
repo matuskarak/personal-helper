@@ -22,8 +22,25 @@ final class RemoteConfig {
     private static let codeKey = "access.code"
     private static let refreshInterval: TimeInterval = 3600
 
+    /// Every flag defaults to false — what a tester without a code gets is the plain
+    /// batch-dictation + reading app. Decoded with defaults so an older users.json (fewer
+    /// keys) still parses.
     struct Entitlements: Codable {
-        var smartDictationEnabled: Bool = false
+        var smartDictationEnabled = false
+        var realtimeEnabled       = false   // ⌘⇧S realtime + live insert (4× the price)
+        var ocrEnabled            = false   // ⌘⇧O screen-region OCR
+        var shadowCompareEnabled  = false   // second-provider A/B transcription
+        var allModelsEnabled      = false   // show catalog models marked available:false
+
+        init() {}
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            smartDictationEnabled = try c.decodeIfPresent(Bool.self, forKey: .smartDictationEnabled) ?? false
+            realtimeEnabled       = try c.decodeIfPresent(Bool.self, forKey: .realtimeEnabled) ?? false
+            ocrEnabled            = try c.decodeIfPresent(Bool.self, forKey: .ocrEnabled) ?? false
+            shadowCompareEnabled  = try c.decodeIfPresent(Bool.self, forKey: .shadowCompareEnabled) ?? false
+            allModelsEnabled      = try c.decodeIfPresent(Bool.self, forKey: .allModelsEnabled) ?? false
+        }
     }
 
     /// The code this install has entered — persisted, editable in Preferences/Onboarding.
@@ -42,6 +59,10 @@ final class RemoteConfig {
     private(set) var catalog = ModelCatalog.builtin
 
     var smartDictationAllowed: Bool { entitlements.smartDictationEnabled || DeveloperMode.isEnabled }
+    var realtimeAllowed:       Bool { entitlements.realtimeEnabled       || DeveloperMode.isEnabled }
+    var ocrAllowed:            Bool { entitlements.ocrEnabled            || DeveloperMode.isEnabled }
+    var shadowCompareAllowed:  Bool { entitlements.shadowCompareEnabled  || DeveloperMode.isEnabled }
+    var allModelsAllowed:      Bool { entitlements.allModelsEnabled      || DeveloperMode.isEnabled }
 
     private init() {
         accessCode = UserDefaults.standard.string(forKey: Self.codeKey) ?? ""
@@ -99,7 +120,8 @@ final class RemoteConfig {
     private func resolve() {
         let key = accessCode.trimmingCharacters(in: .whitespacesAndNewlines)
         entitlements = users[key] ?? users["default"] ?? Entitlements()
-        AppLogger.log("[RemoteConfig] resolved code='\(key.isEmpty ? "(žiadny)" : key)' → smartDictationEnabled=\(entitlements.smartDictationEnabled)")
+        // Code itself stays out of the log — it's the one thing that unlocks features.
+        AppLogger.log("[RemoteConfig] resolved (kód \(key.isEmpty ? "žiadny" : "zadaný")) → smart=\(entitlements.smartDictationEnabled) realtime=\(entitlements.realtimeEnabled) ocr=\(entitlements.ocrEnabled) shadow=\(entitlements.shadowCompareEnabled) allModels=\(entitlements.allModelsEnabled)")
     }
 }
 
@@ -121,9 +143,9 @@ struct ModelCatalog: Codable {
         batchModels: [
             ModelInfo(id: "gpt-transcribe",         provider: "openai", displayName: "gpt-transcribe (rýchly, odporúčaný)", usdPerMinute: 0.0045, available: true),
             ModelInfo(id: "gemini-3.5-transcribe",  provider: "gemini", displayName: "gemini-3.5-transcribe (presný na odborné termíny)", usdPerMinute: 0.005, available: true),
-            ModelInfo(id: "gpt-4o-mini-transcribe", provider: "openai", displayName: "gpt-4o-mini-transcribe (najlacnejší)", usdPerMinute: 0.003, available: true),
-            ModelInfo(id: "gpt-4o-transcribe",      provider: "openai", displayName: "gpt-4o-transcribe", usdPerMinute: 0.006, available: true),
-            ModelInfo(id: "whisper-1",              provider: "openai", displayName: "whisper-1 (starší)", usdPerMinute: 0.006, available: true),
+            ModelInfo(id: "gpt-4o-mini-transcribe", provider: "openai", displayName: "gpt-4o-mini-transcribe (najlacnejší)", usdPerMinute: 0.003, available: false),
+            ModelInfo(id: "gpt-4o-transcribe",      provider: "openai", displayName: "gpt-4o-transcribe", usdPerMinute: 0.006, available: false),
+            ModelInfo(id: "whisper-1",              provider: "openai", displayName: "whisper-1 (starší)", usdPerMinute: 0.006, available: false),
         ],
         eurPerUSD: 0.92,
         ratesCheckedOn: "júl 2026"

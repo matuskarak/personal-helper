@@ -12,6 +12,8 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     private var pendingSubmenuItem  = NSMenuItem(title: "Čakajúce nahrávky", action: nil, keyEquivalent: "")
     private var restartItem         = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     private var diagnosticsItem     = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+    private var ocrItem             = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+    private var realtimeItem        = NSMenuItem(title: "", action: nil, keyEquivalent: "")
 
     override init() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
@@ -32,11 +34,14 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         menu.addItem(NSMenuItem(title: "Čítať označený text", action: #selector(readText), keyEquivalent: "r")
             .configured { $0.keyEquivalentModifierMask = [.command, .shift]; $0.target = self })
 
-        menu.addItem(NSMenuItem(title: "OCR oblasť", action: #selector(startOCR), keyEquivalent: "o")
-            .configured { $0.keyEquivalentModifierMask = [.command, .shift]; $0.target = self })
+        // Entitlement-gated (users.json) — shown/hidden in refreshDynamicItems.
+        ocrItem = NSMenuItem(title: "OCR oblasť", action: #selector(startOCR), keyEquivalent: "o")
+            .configured { $0.keyEquivalentModifierMask = [.command, .shift]; $0.target = self }
+        menu.addItem(ocrItem)
 
-        menu.addItem(NSMenuItem(title: "Diktovanie (realtime)", action: #selector(toggleDictationRealtime), keyEquivalent: "s")
-            .configured { $0.keyEquivalentModifierMask = [.command, .shift]; $0.target = self })
+        realtimeItem = NSMenuItem(title: "Diktovanie (realtime)", action: #selector(toggleDictationRealtime), keyEquivalent: "s")
+            .configured { $0.keyEquivalentModifierMask = [.command, .shift]; $0.target = self }
+        menu.addItem(realtimeItem)
 
         menu.addItem(NSMenuItem(title: "Diktovanie (po nahraní)", action: #selector(toggleDictationBatch), keyEquivalent: "d")
             .configured { $0.keyEquivalentModifierMask = [.command, .shift]; $0.target = self })
@@ -207,6 +212,8 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         let dev = DeveloperMode.isEnabled
         restartItem.isHidden     = !dev
         diagnosticsItem.isHidden = !dev
+        ocrItem.isHidden         = !RemoteConfig.shared.ocrAllowed
+        realtimeItem.isHidden    = !RemoteConfig.shared.realtimeAllowed
     }
 
     @objc private func openLogViewer() {

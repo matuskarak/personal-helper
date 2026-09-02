@@ -288,7 +288,8 @@ final class DictationEngine {
     /// Models on offer come from the remote catalog (models.json) so a new one can appear
     /// without shipping a build; compiled-in fallback mirrors today's list.
     static var batchModels: [String] {
-        RemoteConfig.shared.catalog.batchModels.filter(\.available).map(\.id)
+        let rc = RemoteConfig.shared
+        return rc.catalog.batchModels.filter { $0.available || rc.allModelsAllowed }.map(\.id)
     }
 
     /// Which provider a batch model belongs to — catalog first (data, not naming convention),
@@ -1273,7 +1274,7 @@ final class DictationEngine {
     /// Detached and at background priority so it can't slow the dictation that spawned it, and
     /// silent on failure — a missing comparison is a gap in a report, not a lost dictation.
     private func startShadowTranscription(wav: Data, keywords: [String], seconds: Int) {
-        guard shadowCompareEnabled else { return }
+        guard shadowCompareEnabled, RemoteConfig.shared.shadowCompareAllowed else { return }
         let model = shadowModelName
         let key = Self.isGemini(model) ? geminiKey : openAIKey
         guard !key.isEmpty else {
@@ -1504,7 +1505,8 @@ final class DictationEngine {
             : legacyRealtimeSessionPayload(delay: delay)
         guard let data = try? JSONSerialization.data(withJSONObject: payload),
               let str  = String(data: data, encoding: .utf8) else { return }
-        AppLogger.log("[DictationEngine] → session.update: \(str.prefix(400))")
+        // Payload carries the user's keywords (client names, people) — log shape, not content.
+        AppLogger.log("[DictationEngine] → session.update (model: \(realtimeModel.rawValue), delay: \(delay), \(str.count) B)")
         sendQueue.enqueue(str)
     }
 
@@ -1594,8 +1596,14 @@ final class DictationEngine {
                 }
                 // ponytail: skip delta events — they're many/second and useless after debugging.
                 // Log everything else (session.created, error, completed, speech_started, …).
-                if !text.contains("transcription.delta") && !text.contains("audio_transcript.delta") {
+                // Event type only: completed/done events carry the spoken sentence, and the
+                // log is what testers send us. Errors are the exception — no transcript there.
+                let type = text.range(of: #""type"\s*:\s*"([^"]+)""#, options: .regularExpression)
+                    .map { String(text[$0]).components(separatedBy: "\"").dropLast().last ?? "?" } ?? "?"
+                if type.contains("error") {
                     AppLogger.log("[DictationEngine] WS ← \(text.prefix(300))")
+                } else if !type.hasSuffix(".delta") {
+                    AppLogger.log("[DictationEngine] WS ← \(type)")
                 }
                 handleEvent(text, sessionID: mySessionID)
             }
