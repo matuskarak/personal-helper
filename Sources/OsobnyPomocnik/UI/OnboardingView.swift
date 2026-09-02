@@ -64,13 +64,15 @@ struct OnboardingView: View {
                 }
             }
 
-            PermissionRow(
-                icon: "camera.viewfinder",
-                title: "Nahrávanie obrazovky",
-                description: "Potrebné pre OCR a Smart diktovanie (kontext obrazovky).",
-                granted: screenGranted
-            ) {
-                PermissionsChecker.shared.openScreenRecordingSettings()
+            if remoteConfig.ocrAllowed || remoteConfig.smartDictationAllowed {
+                PermissionRow(
+                    icon: "camera.viewfinder",
+                    title: "Nahrávanie obrazovky",
+                    description: "Potrebné pre OCR a Smart diktovanie (kontext obrazovky).",
+                    granted: screenGranted
+                ) {
+                    PermissionsChecker.shared.openScreenRecordingSettings()
+                }
             }
 
             Divider()

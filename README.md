@@ -5,7 +5,7 @@ macOS menu bar appka pre slabozrakých — rýchle prečítanie textu (SK/EN, s 
 - **Bundle ID:** `sk.matuskarak.osobny-pomocnik`
 - **Platforma:** macOS 14+, Swift Package Manager, žiadny Xcode projekt
 - **Typ appky:** `LSUIElement` — bez Docku, len menu bar ikona
-- **Distribúcia:** self-signed (`OsobnyPomocnikDev`) + Sparkle auto-update cez GitHub Releases
+- **Distribúcia:** alfa (v0.2.0) — self-signed (`OsobnyPomocnikDev`), GitHub Release `builds` + Sparkle auto-update; `build-app.sh release` prepne na Developer ID + hardened runtime a `release.sh` notarizuje, keď existuje certifikát/notary profil. Návod pre testerov: `NAVOD.md`.
 
 ## Čo appka robí
 
@@ -15,6 +15,8 @@ macOS menu bar appka pre slabozrakých — rýchle prečítanie textu (SK/EN, s 
 4. **Smart diktovanie** — voliteľné AI doladenie: transcript + screenshot cieľového okna sa pošlú na OpenAI (vision), ktorý text opraví a naformátuje podľa profilu cieľovej appky (Slack = neformálny chat tón, Mail = zdvorilý tón + štruktúra pozdrav/telo/zoznamy, ChatGPT/Claude = jasný prompt).
 
 Appka funguje aj bez Smart diktovania — to je nadstavba, ktorá sa dá kedykoľvek vypnúť.
+
+**Čo dostane bežný tester (bez prístupového kódu):** diktovanie po nahraní (⌘⇧D / zrušiť ⌘⇧X), čítanie (⌘⇧R), vloženie z pamäte (⌃⌥V), história, Kvalita, Prehľad, výber z dvoch modelov. Realtime diktovanie, OCR, Smart, tieňový prepis a ďalšie modely sú za feature flagmi v `users.json`.
 
 ## Ako sa appka spúšťa (triggery)
 
@@ -39,8 +41,9 @@ Appka funguje aj bez Smart diktovania — to je nadstavba, ktorá sa dá kedyko�
 | Čítanie textu | `Engines/TextExtractor.swift`, `Engines/TTSEngine.swift`, `Engines/GoogleCloudTTSEngine.swift` | Získanie označeného textu (AX/clipboard), on-device alebo cloud TTS |
 | OCR | `Engines/OCREngine.swift`, `UI/OCROverlayWindow.swift` | Výber oblasti obrazovky → Vision framework OCR |
 | Pamäť diktovania | `Engines/DictationMemoryStore.swift`, `RecentTextStore.swift` | Fallback úložisko, keď sa diktovanie nedá vložiť priamo (žiadne fokusnuté pole) |
-| Nastavenia | `UI/PreferencesView.swift` | Sidebar + kartový layout: Diktovanie (Smart, VAD, profily, história, kvalita), Čítanie, Skratky, Účet |
-| Vzdialená konfigurácia | `Engines/RemoteConfig.swift` | `users.json` v GitHub repe — prístupové kódy + per-osoba feature flagy (napr. Smart diktovanie), hodinovo cachované |
+| Nastavenia | `UI/PreferencesView.swift` (shell) + `UI/Preferences/*Tab.swift` | Všeobecné (mena, všetky API kľúče, prístupový kód), Diktovanie, Čítanie, Mikrofón, Prehľad (+ História, Kvalita), Skratky, O aplikácii (Diagnostika) |
+| Vzdialená konfigurácia | `Engines/RemoteConfig.swift` | `users.json` (prístupové kódy → feature flagy: smart, realtime, ocr, shadowCompare, allModels) a `models.json` (katalóg modelov + ceny, `ModelCatalog`) — oba z GitHub raw, hodinovo cachované, fail-open |
+| Kľúče | `Engines/KeychainStore.swift` | OpenAI, Gemini a Google TTS kľúče v Keychaine; jednorazová migrácia z UserDefaults |
 | Update | `Engines/UpdaterController.swift` | Sparkle, podpísaný `appcast.xml` |
 
 ## Dáta a privacy
@@ -49,7 +52,8 @@ Všetko je **lokálne** (žiadny vlastný backend, žiadny cloud okrem priamych 
 
 - **História diktovania** — `~/Library/Application Support/OsobnyPomocnik/dictation-history.json`. Bez pevného časového/počtového limitu (zámerne, kvôli budúcemu AI enginu na analýzu — pozri nižšie), len bezpečnostný strop 20 000 záznamov.
 - **Screenshoty Smart diktovania** (voliteľné, defaultne vypnuté) — `~/Library/Application Support/OsobnyPomocnik/screenshots/<entry-id>.jpg`, životnosť viazaná na záznam histórie.
-- **API kľúče** — Keychain (`KeychainHelper.swift`).
+- **API kľúče** — Keychain (`KeychainStore.swift`), nikdy v UserDefaults ani v logu.
+- **Diagnostický log** (`~/Library/Logs/OsobnyPomocnik/app.log`, `audio-health.log`) — jeden prepínač v O aplikácii; neobsahuje prepisy, kľúčové slová ani kľúče, len priebeh (časy, chyby, názov cieľovej appky).
 - Appka sama nič neposiela na vlastný server — jediná externá komunikácia je: OpenAI (diktovanie, Smart rewrite), Google Cloud TTS (voliteľné), GitHub raw JSON (RemoteConfig, appcast).
 
 ## Stav projektu (čo je hotové)
@@ -61,11 +65,13 @@ Všetko je **lokálne** (žiadny vlastný backend, žiadny cloud okrem priamych 
 - Kvalita diktovania — lokálna analýza (filler slová, tempo, štruktúra) bez AI nákladov
 - Poradie/fallback mikrofónov, tester + pasívna kontrola kvality mikrofónu
 - Prehľad (Usage) — štatistiky, graf trendu, EUR/USD náklady
-- Onboarding, Developer Mode + log viewer, Sparkle auto-update
-- Prístupové kódy pre kamarátov cez `users.json` (bez vlastného backendu)
+- Onboarding, Diagnostika + log viewer (Developer Mode len v DEBUG buildoch), Sparkle auto-update
+- Prístupové kódy a feature flagy cez `users.json`, katalóg modelov cez `models.json` (bez vlastného backendu)
+- Gemini 3.5 Transcribe ako druhý prepisovací provider, tieňový A/B prepis, zrušenie diktovania ⌘⇧X
+- Alfa distribúcia (v0.2.0) + `NAVOD.md` pre testerov
 - Trigger cez Logi Options+ ("Run command" → custom URL scheme) s plnou focus-tracking logikou
 
-**Backlog / otvorené:** hover-to-read, karaoke zvýrazňovanie v zdrojovej appke (technicky blokované vo WebKit/Chromium), viacero skratkov pre jednu akciu, fáza 2 enginu na analýzu diktovania (AI sémantika, kompozitné skóre, návrhy úprav profilov), backend API proxy pre štátom preplácanú verziu.
+**Backlog / otvorené:** GDPR-ready opt-in zber dát od testerov, Developer ID + notarizácia (po zápise do Apple Developer Programu — pipeline je pripravená), licencovanie + platby, predplatiteľský backend (batch proxy + licencie možno na PHP hostingu, realtime WS proxy na Cloudflare Workers/VPS), hover-to-read, karaoke zvýrazňovanie (blokované vo WebKit/Chromium), fáza 2 enginu na analýzu diktovania.
 
 Detailný changelog, rozhodnutia a technické poznámky (prečo `turn_detection` musí byť `null` pri `gpt-live-transcribe`, prečo karaoke nejde vo WebKite, brainstorm filtrovania audia...) sú v Notion stránke **[🧑‍🦯 Osobný pomocník](https://www.notion.so/Osobn-pomocn-k-d9f755b133a84e4f8c73050ee60969c1)** — tento README je technický prehľad kódu, Notion je produktový/rozhodovací log.
 

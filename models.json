@@ -19,21 +19,21 @@
       "provider": "openai",
       "displayName": "gpt-4o-mini-transcribe (najlacnejší)",
       "usdPerMinute": 0.003,
-      "available": true
+      "available": false
     },
     {
       "id": "gpt-4o-transcribe",
       "provider": "openai",
       "displayName": "gpt-4o-transcribe",
       "usdPerMinute": 0.006,
-      "available": true
+      "available": false
     },
     {
       "id": "whisper-1",
       "provider": "openai",
       "displayName": "whisper-1 (starší)",
       "usdPerMinute": 0.006,
-      "available": true
+      "available": false
     }
   ],
   "eurPerUSD": 0.92,

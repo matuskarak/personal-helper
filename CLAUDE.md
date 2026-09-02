@@ -40,8 +40,25 @@ Na obnovenie treba aj skonvertovaný CoreML model v
 `~/Documents/whisperkit-models-sk/NaiveNeuron_whisper-large-v3-turbo-sk`
 (postup konverzie cez `whisperkittools` je v CLAUDE.md na tej značke).
 
+## Stav: alfa pre známych (od 2. 9. 2026, v0.2.0)
+
+Appka sa distribuuje ako **BYOK** (používateľ vloží vlastný OpenAI/Gemini kľúč) cez GitHub
+Release `builds` + Sparkle. Bez Developer ID (Gatekeeper → „Otvoriť napriek tomu", postup je
+v `NAVOD.md`). Licencie, platby a predplatiteľský backend sú odložené.
+
+**Feature flagy** žijú v `users.json` (per prístupový kód, `RemoteConfig.Entitlements`).
+Tester bez kódu dostane: batch diktovanie ⌘⇧D, zrušenie ⌘⇧X, čítanie ⌘⇧R, vloženie z pamäte,
+históriu, Kvalitu, Prehľad, 2 modely (gpt-transcribe, gemini-3.5-transcribe). Za kódom sú:
+Smart ⌘⇧A, realtime ⌘⇧S + live vkladanie, OCR ⌘⇧O, tieňový prepis, ostatné modely katalógu.
+Repo je **verejné** — kódy v users.json sú viditeľné, je to alfa-úroveň ochrany.
+
+**Nesmie do logu:** prepisy, kľúčové slová, API kľúče, prístupový kód. Batch cesta loguje len
+počty znakov; realtime WS loguje len typ eventu. Diagnostika (app.log + audio-health.log) má
+jeden prepínač v O aplikácii, predvolene zapnutý.
+
 ## Aktuálne priority
 
-1. **Rýchlosť diktovania a spracovania** — skrátiť čas od pustenia skratky po vložený text.
-2. **Výkon menu a Nastavení** — odstrániť zasekávanie/laggy pocit v menu bar dropdowne
-   a v okne Nastavenia.
+1. **Flow test alfy** na čistom účte podľa `NAVOD.md`, potom rozoslať známym.
+2. **Zber dát od testerov (GDPR)** — návrh opt-in exportu metrík/prepisov na zlepšenie enginu;
+   zatiaľ nerozhodnuté, čo presne sa zbiera.
+3. Rýchlosť diktovania; výkon menu a Nastavení.

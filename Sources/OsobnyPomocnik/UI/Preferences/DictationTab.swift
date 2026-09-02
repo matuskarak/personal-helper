@@ -13,9 +13,15 @@ extension PreferencesView {
 
             // How the shortcut scheme works — the mode/processing split lives in the
             // shortcuts now, so the settings only pick MODELS per mode, not the mode itself.
-            Text("Režim prepisu voliš skratkou, ktorou diktovanie SPUSTÍŠ (\(scLabel(.dictateRealtime)) = realtime, \(scLabel(.dictateBatch)) = po nahraní). Skratka, ktorou diktovanie UKONČÍŠ, rozhoduje o spracovaní: tá istá ako pri štarte = vloží sa čistý prepis; \(scLabel(.smartStop)) = text pred vložením upraví AI s kontextom obrazovky (Smart). Iné diktovacie skratky sa počas nahrávania ignorujú. Ak sa pri diktovaní pomýliš, \(scLabel(.cancelDictation)) ho zruší — nahrávka sa zahodí, nič sa neprepíše ani nevloží.")
-                .font(.caption).foregroundStyle(.secondary).padding(.horizontal, 4)
+            if remoteConfig.realtimeAllowed {
+                Text("Režim prepisu voliš skratkou, ktorou diktovanie SPUSTÍŠ (\(scLabel(.dictateRealtime)) = realtime, \(scLabel(.dictateBatch)) = po nahraní). Skratka, ktorou diktovanie UKONČÍŠ, rozhoduje o spracovaní: tá istá ako pri štarte = vloží sa čistý prepis; \(scLabel(.smartStop)) = text pred vložením upraví AI s kontextom obrazovky (Smart). Iné diktovacie skratky sa počas nahrávania ignorujú. Ak sa pri diktovaní pomýliš, \(scLabel(.cancelDictation)) ho zruší — nahrávka sa zahodí, nič sa neprepíše ani nevloží.")
+                    .font(.caption).foregroundStyle(.secondary).padding(.horizontal, 4)
+            } else {
+                Text("Diktovanie spustíš aj zastavíš skratkou \(scLabel(.dictateBatch)) — celé sa nahrá a po zastavení prepíše a vloží tam, kde máš kurzor. Ak sa pomýliš, \(scLabel(.cancelDictation)) diktovanie zruší a nahrávku zahodí.")
+                    .font(.caption).foregroundStyle(.secondary).padding(.horizontal, 4)
+            }
 
+            if remoteConfig.realtimeAllowed {
             card {
                 toggleRow(title: "Live vkladanie",
                           subtitle: "Píše text do poľa priebežne počas realtime diktovania. Kým je zapnuté, Smart ukončenie (\(scLabel(.smartStop))) sa pri realtime nedá použiť — text je už vložený.",
@@ -66,6 +72,7 @@ extension PreferencesView {
                 .padding(.horizontal, 16)
                 .padding(.vertical, 12)
             }
+            } // realtimeAllowed
 
             // Keywords apply to BOTH modes — the batch path forwards them as `prompt` too —
             // so this gets its own card instead of living under the realtime model.
@@ -81,7 +88,7 @@ extension PreferencesView {
             }
 
             // Batch mode — model only
-            Text("Diktovanie po nahraní — skratka \(scLabel(.dictateBatch))").font(.headline)
+            Text(remoteConfig.realtimeAllowed ? "Diktovanie po nahraní — skratka \(scLabel(.dictateBatch))" : "Model prepisu").font(.headline)
             card {
                 Text("Celé sa najprv nahrá a prepíše až po zastavení — presnejšie a lacnejšie, vhodné na dlhšie diktovania. Počas nahrávania sa nezobrazujú priebežné slová.")
                     .font(.caption).foregroundStyle(.secondary)
@@ -90,7 +97,7 @@ extension PreferencesView {
                 pickerRow(title: "Model", selection: $dictation.batchModel) {
                     // Remote catalog drives the offer; a selected-but-retired model stays in
                     // the list so the Picker binding never dangles.
-                    let infos = remoteConfig.catalog.batchModels.filter { $0.available || $0.id == dictation.batchModel }
+                    let infos = remoteConfig.catalog.batchModels.filter { $0.available || remoteConfig.allModelsAllowed || $0.id == dictation.batchModel }
                     ForEach(infos) { info in
                         Text("\(info.displayName) — \(Pricing.perMinuteLabel(realtime: false, batchModel: info.id))")
                             .tag(info.id)
@@ -106,6 +113,7 @@ extension PreferencesView {
                         .font(.caption).foregroundStyle(.orange)
                         .padding(.horizontal, 16).padding(.vertical, 8)
                 }
+                if remoteConfig.shadowCompareAllowed {
                 rowDivider
                 toggleRow(title: "Porovnávať s druhým modelom (tieňový prepis)",
                           subtitle: dictation.canShadowCompare
@@ -113,6 +121,7 @@ extension PreferencesView {
                             : "Vyžaduje nastavený OpenAI aj Gemini kľúč — porovnanie beží medzi dvoma poskytovateľmi.",
                           isOn: $dictation.shadowCompareEnabled)
                     .disabled(!dictation.canShadowCompare)
+                }
             }
 
             // Pozícia pilulky

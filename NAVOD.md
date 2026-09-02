@@ -25,13 +25,12 @@ Toto robíš **len raz**. Ďalšie aktualizácie si appka sťahuje a inštaluje 
 
 ## 2. Prvé spustenie — povolenia
 
-Pri prvom spustení sa otvorí okno *Vitaj v Osobnom pomocníkovi*. Prejde ťa tromi povoleniami:
+Pri prvom spustení sa otvorí okno *Vitaj v Osobnom pomocníkovi*. Prejde ťa dvomi povoleniami:
 
 | Povolenie | Načo | Ako |
 |---|---|---|
 | **Prístupnosť (Accessibility)** | globálne skratky a vkladanie textu | Klikni *Povoliť* → v Systémových nastaveniach zapni prepínač pri OsobnyPomocnik |
 | **Mikrofón** | diktovanie | Klikni *Povoliť* → potvrď v dialógu |
-| **Nahrávanie obrazovky** | čítanie textu z obrazovky (OCR) | Klikni *Povoliť* → zapni prepínač. Voliteľné, ak OCR nepoužiješ |
 
 Po každom zapnutí sa vráť do appky — riadok sa sám zmení na zelenú fajku. Ak nie, klikni
 *Skontrolovať znova*.
@@ -64,11 +63,9 @@ Ak sa pomýliš, **⌘⇧X** diktovanie zruší a nahrávku zahodí.
 
 | Skratka | Čo robí |
 |---|---|
-| **⌘⇧D** | Diktovanie — nahrá a prepíše po zastavení (presnejšie, odporúčané) |
-| **⌘⇧S** | Diktovanie realtime — text sa píše priebežne (drahšie, pre krátke vety) |
+| **⌘⇧D** | Diktovanie — spustí aj zastaví nahrávanie, prepis sa vloží po zastavení |
 | **⌘⇧X** | Zrušiť bežiace diktovanie |
 | **⌘⇧R** | Prečítať označený text nahlas |
-| **⌘⇧O** | OCR — vyber oblasť obrazovky, text sa prečíta |
 | **⌃⌥V** | Vložiť posledný prepis, ak sa nemal kam vložiť |
 
 Ak si stlačil skratku bez kurzora v texte, prepis sa nestratí — appka ho drží v pamäti
@@ -79,8 +76,9 @@ a **⌃⌥V** ho vloží neskôr.
 Ikonka v hornej lište → **Nastavenia…**
 
 - **Všeobecné** — všetky API kľúče a mena, v ktorej vidíš odhad ceny.
-- **Diktovanie** — výber modelu (predvolený je dobrý), kľúčové slová (mená, odborné výrazy,
-  ktoré model často komolí — sem ich napíš), pozícia pilulky.
+- **Diktovanie** — výber modelu (na výber sú dva: GPT je rýchlejší, Gemini presnejší na
+  odborné výrazy), kľúčové slová (mená, odborné výrazy, ktoré model často komolí — sem ich
+  napíš), pozícia pilulky.
 - **Mikrofón** — poradie mikrofónov a **Test mikrofónu**. Odporúčam spustiť raz na začiatku.
 - **Prehľad** — koľko si nadiktoval a koľko to stálo.
 
@@ -89,7 +87,8 @@ Ikonka v hornej lište → **Nastavenia…**
 Skôr než mi napíšeš:
 
 1. Otvor **Nastavenia → O aplikácii → Diagnostika**.
-2. Skontroluj, že *Zapisovať diagnostický záznam* je zapnuté.
+2. Skontroluj, že prepínač *Diagnostika* je zapnutý. Záznam neobsahuje tvoje prepisy ani kľúče —
+   len priebeh appky (časy, chyby, názov appky, do ktorej si diktoval).
 3. Zopakuj problém.
 4. Klikni **Pripraviť na poslanie** — na plochu sa uloží súbor. Pošli mi ho spolu s tým,
    čo si robil a čo si čakal, že sa stane.

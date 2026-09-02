@@ -198,6 +198,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func handleOCR() {
+        guard RemoteConfig.shared.ocrAllowed else {
+            AppLogger.log("[AppDelegate] handleOCR — ignorované (ocrAllowed=false)")
+            return
+        }
         AppLogger.log("[AppDelegate] handleOCR — skratka stlačená")
         OCROverlayWindowController.shared.onRectSelected = { rect in
             Task { @MainActor in
@@ -225,6 +229,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// shortcut is deliberately ignored so muscle memory stays unambiguous: what started
     /// the dictation is what stops it. Smart stop is the one exception (handleSmartStop).
     func handleDictate(mode: DictationEngine.TranscriptionMode) {
+        if mode == .realtime, !RemoteConfig.shared.realtimeAllowed {
+            AppLogger.log("[AppDelegate] handleDictate(realtime) — ignorované (realtimeAllowed=false)")
+            return
+        }
         let engine = DictationEngine.shared
         AppLogger.log("[AppDelegate] handleDictate(\(mode.rawValue)) — skratka stlačená (isRecording: \(engine.isRecording))")
         if engine.isRecording {

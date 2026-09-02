@@ -137,7 +137,7 @@ extension PreferencesView {
                 qualitySummaryCard(stats)
                 modeUsageCard(stats)
                 modelUsageCard(stats)
-                shadowCompareCard(stats)
+                if remoteConfig.shadowCompareAllowed { shadowCompareCard(stats) }
                 topFillersCard(stats)
                 perAppCard(stats)
                 recentDictationsCard(analyzed)
