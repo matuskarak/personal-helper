@@ -32,6 +32,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // early dictation still waits.
         AudioDeviceManager.warmUp()
         AudioHealth.startWatchingDevices()
+        // Touch the key-owning singletons now so the UserDefaults→Keychain migration runs
+        // at launch, not at the first dictation — both are lazy and nothing else forces them.
+        _ = DictationEngine.shared
+        _ = GoogleCloudTTSEngine.shared
         PermissionsChecker.shared.requestAllIfNeeded()
         _ = UpdaterController.shared // starts Sparkle's background update checks
         _ = RemoteConfig.shared      // starts feature-flag fetch

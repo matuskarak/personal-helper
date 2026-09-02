@@ -208,8 +208,7 @@ final class DictationEngine {
 
     var openAIKey: String {
         didSet {
-            if openAIKey.isEmpty { UserDefaults.standard.removeObject(forKey: "openai.dictation.key") }
-            else                 { UserDefaults.standard.set(openAIKey, forKey: "openai.dictation.key") }
+            KeychainStore.set(openAIKey, for: "openai.dictation.key")
         }
     }
     var hasOpenAIKey: Bool { !openAIKey.isEmpty }
@@ -219,8 +218,7 @@ final class DictationEngine {
     /// and one more String is cheaper than a protocol with two conformances.
     var geminiKey: String {
         didSet {
-            if geminiKey.isEmpty { UserDefaults.standard.removeObject(forKey: "gemini.dictation.key") }
-            else                 { UserDefaults.standard.set(geminiKey, forKey: "gemini.dictation.key") }
+            KeychainStore.set(geminiKey, for: "gemini.dictation.key")
         }
     }
     var hasGeminiKey: Bool { !geminiKey.isEmpty }
@@ -458,8 +456,8 @@ final class DictationEngine {
             self.micPriority = migrated
             if migrated != stored { UserDefaults.standard.set(migrated, forKey: "dictation.micPriority") }
         }
-        self.openAIKey              = UserDefaults.standard.string(forKey: "openai.dictation.key") ?? ""
-        self.geminiKey              = UserDefaults.standard.string(forKey: "gemini.dictation.key") ?? ""
+        self.openAIKey              = KeychainStore.stringMigratingFromDefaults(account: "openai.dictation.key")
+        self.geminiKey              = KeychainStore.stringMigratingFromDefaults(account: "gemini.dictation.key")
         self.transcriptionDelay     = UserDefaults.standard.string(forKey: "whisper.delay") ?? "low"
         // A stored "local" is from the removed on-device WhisperKit mode. Falling through to
         // the `?? .realtime` default would silently move those users to the pricier streaming
