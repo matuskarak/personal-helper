@@ -2,62 +2,48 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <key>CFBundleName</key>
-    <string>Osobný pomocník</string>
-    <key>CFBundleDisplayName</key>
-    <string>Osobný pomocník</string>
-    <key>CFBundleIdentifier</key>
-    <string>sk.matuskarak.osobny-pomocnik</string>
-    <key>CFBundleVersion</key>
-    <string>1</string>
-    <key>CFBundleShortVersionString</key>
-    <string>0.1.0</string>
-    <key>CFBundleExecutable</key>
-    <string>OsobnyPomocnik</string>
-    <key>CFBundlePackageType</key>
-    <string>APPL</string>
-
-    <!-- Hide from Dock; show only in menu bar -->
-    <key>LSUIElement</key>
-    <true/>
-
-    <!-- Minimum macOS version -->
-    <key>LSMinimumSystemVersion</key>
-    <string>14.0</string>
-
-    <!-- Privacy usage descriptions -->
-    <key>NSMicrophoneUsageDescription</key>
-    <string>Osobný pomocník potrebuje mikrofón pre diktovanie textu.</string>
-    <key>NSSpeechRecognitionUsageDescription</key>
-    <string>Osobný pomocník potrebuje rozpoznávanie reči pre diktovanie textu.</string>
-    <key>NSScreenCaptureUsageDescription</key>
-    <string>Osobný pomocník potrebuje zachytiť obrazovku pre funkciu OCR.</string>
-
-    <!-- Custom URL scheme — lets external tools (Logi Options+ Smart Actions, Shortcuts.app,
-         Raycast, ...) trigger actions directly (osobnypomocnik://dictate) instead of via a
-         synthesized keystroke, which CGEventTap-based global hotkeys can't reliably see when
-         the synthetic event is posted straight to the frontmost app (CGEventPostToPid bypasses
-         session-wide event taps by OS design). -->
-    <key>CFBundleURLTypes</key>
-    <array>
-        <dict>
-            <key>CFBundleURLName</key>
-            <string>sk.matuskarak.osobny-pomocnik</string>
-            <key>CFBundleURLSchemes</key>
-            <array>
-                <string>osobnypomocnik</string>
-            </array>
-        </dict>
-    </array>
-
-    <!-- Sparkle auto-update -->
-    <key>SUFeedURL</key>
-    <string>https://raw.githubusercontent.com/matuskarak/personal-helper/master/appcast.xml</string>
-    <key>SUPublicEDKey</key>
-    <string>R930xyv6GbHOg1AxfMEPRzRT0rKaONSBTkLek64x1b0=</string>
-    <key>SUEnableAutomaticChecks</key>
-    <true/>
-    <key>SUScheduledCheckInterval</key>
-    <integer>86400</integer>
+	<key>CFBundleDisplayName</key>
+	<string>Osobný pomocník</string>
+	<key>CFBundleExecutable</key>
+	<string>OsobnyPomocnik</string>
+	<key>CFBundleIdentifier</key>
+	<string>sk.matuskarak.osobny-pomocnik</string>
+	<key>CFBundleName</key>
+	<string>Osobný pomocník</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>0.2.0</string>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>sk.matuskarak.osobny-pomocnik</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>osobnypomocnik</string>
+			</array>
+		</dict>
+	</array>
+	<key>CFBundleVersion</key>
+	<string>2</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>14.0</string>
+	<key>LSUIElement</key>
+	<true/>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Osobný pomocník potrebuje mikrofón pre diktovanie textu.</string>
+	<key>NSScreenCaptureUsageDescription</key>
+	<string>Osobný pomocník potrebuje zachytiť obrazovku pre funkciu OCR.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Osobný pomocník potrebuje rozpoznávanie reči pre diktovanie textu.</string>
+	<key>SUEnableAutomaticChecks</key>
+	<true/>
+	<key>SUFeedURL</key>
+	<string>https://raw.githubusercontent.com/matuskarak/personal-helper/master/appcast.xml</string>
+	<key>SUPublicEDKey</key>
+	<string>R930xyv6GbHOg1AxfMEPRzRT0rKaONSBTkLek64x1b0=</string>
+	<key>SUScheduledCheckInterval</key>
+	<integer>86400</integer>
 </dict>
 </plist>

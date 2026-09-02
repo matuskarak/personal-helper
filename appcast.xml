@@ -1,0 +1,16 @@
+<?xml version="1.0" standalone="yes"?>
+<rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0">
+    <channel>
+        <title>OsobnyPomocnik</title>
+        <item>
+            <title>0.2.0</title>
+            <pubDate>Wed, 02 Sep 2026 12:23:20 +0200</pubDate>
+            <sparkle:version>2</sparkle:version>
+            <sparkle:shortVersionString>0.2.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <sparkle:releaseNotesLink>https://raw.githubusercontent.com/matuskarak/personal-helper/master/OsobnyPomocnik-0.2.0.txt</sparkle:releaseNotesLink>
+            <enclosure url="https://github.com/matuskarak/personal-helper/releases/download/builds/OsobnyPomocnik-0.2.0.zip" length="2558618" type="application/octet-stream" sparkle:edSignature="DaVh2IsnTp+JMipuvOnXnCG0tDLbM0mnIh2Pv1fIUPJHX8a8qEal9SURRZC6308uEXHJ0dghfMlt02QLti/wDw=="/>
+        </item>
+    </channel>
+</rss>
