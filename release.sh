@@ -46,6 +46,20 @@ rm -f "$RELEASES_DIR/$ZIP_NAME"
 ditto -c -k --sequesterRsrc --keepParent "$BUNDLE" "$RELEASES_DIR/$ZIP_NAME"
 echo "$NOTES" > "$RELEASES_DIR/$APP_NAME-$VERSION.txt"
 
+# Notarizácia — beží len keď existuje uložený notarytool profil (jednorazovo:
+# xcrun notarytool store-credentials "notary-profile" --apple-id … --team-id … --password …).
+# Bez profilu sa preskočí a build ostáva self-signed (dnešný stav).
+if xcrun notarytool history --keychain-profile notary-profile >/dev/null 2>&1; then
+    echo "🍎 Notarizácia…"
+    xcrun notarytool submit "$RELEASES_DIR/$ZIP_NAME" --keychain-profile notary-profile --wait
+    xcrun stapler staple "$BUNDLE"
+    # Zip so stapled ticketom — to, čo sa distribuuje, musí byť ten istý artefakt.
+    rm -f "$RELEASES_DIR/$ZIP_NAME"
+    ditto -c -k --sequesterRsrc --keepParent "$BUNDLE" "$RELEASES_DIR/$ZIP_NAME"
+else
+    echo "⚠️  notarytool profil 'notary-profile' nenájdený — vydávam bez notarizácie."
+fi
+
 echo "📰 Appcast…"
 ./.sparkle-tools/bin/generate_appcast "$RELEASES_DIR" \
     --download-url-prefix "https://github.com/$REPO/releases/download/$RELEASE_TAG/"
