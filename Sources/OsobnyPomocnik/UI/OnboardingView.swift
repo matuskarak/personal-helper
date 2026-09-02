@@ -1,5 +1,6 @@
 import SwiftUI
 import AVFoundation
+import CoreGraphics
 
 struct OnboardingView: View {
     /// Closes the standalone first-launch window. No-op when presented as a
@@ -8,6 +9,7 @@ struct OnboardingView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var axGranted = AXIsProcessTrusted()
     @State private var micGranted = AVCaptureDevice.authorizationStatus(for: .audio) == .authorized
+    @State private var screenGranted = CGPreflightScreenCaptureAccess()
 
     @State private var dictation = DictationEngine.shared
     @State private var google    = GoogleCloudTTSEngine.shared
@@ -17,6 +19,8 @@ struct OnboardingView: View {
     @State private var apiKeyTestResult: String?
     @State private var googleKeyInput = ""
     @State private var googleKeySaved = false
+    @State private var geminiKeyInput = ""
+    @State private var geminiKeySaved = false
     @State private var remoteConfig = RemoteConfig.shared
     @State private var accessCodeInput = ""
     @State private var accessCodeSaved = false
@@ -26,8 +30,16 @@ struct OnboardingView: View {
     var body: some View {
         ScrollView {
         VStack(alignment: .leading, spacing: 20) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Vitaj v Osobnom pomocníkovi").font(.title2.bold())
+                Text("Diktuješ hlasom do ľubovoľnej appky, text sa vloží tam, kde píšeš; k tomu čítanie označeného textu nahlas a OCR z obrazovky. Na rozbehnutie budeš potrebovať tri veci: povolenia nižšie, vlastný OpenAI API kľúč a pár minút.")
+                    .font(.callout).foregroundStyle(.secondary)
+            }
+
+            Divider()
+
             Text("Nastavenie povolení")
-                .font(.title2.bold())
+                .font(.title3.bold())
 
             Text("Osobný pomocník potrebuje nasledujúce povolenia:")
                 .foregroundStyle(.secondary)
@@ -55,8 +67,8 @@ struct OnboardingView: View {
             PermissionRow(
                 icon: "camera.viewfinder",
                 title: "Nahrávanie obrazovky",
-                description: "Potrebné pre OCR – zachytenie oblasti obrazovky.",
-                granted: false // runtime-checked by CGWindowList
+                description: "Potrebné pre OCR a Smart diktovanie (kontext obrazovky).",
+                granted: screenGranted
             ) {
                 PermissionsChecker.shared.openScreenRecordingSettings()
             }
@@ -103,6 +115,24 @@ struct OnboardingView: View {
             if let result = apiKeyTestResult {
                 Text(result).font(.caption)
                     .foregroundStyle(result.hasPrefix("✅") ? .green : (result.hasPrefix("⚠️") ? .orange : .red))
+            }
+
+            DisclosureGroup("Gemini kľúč (voliteľné — pre Gemini modely)") {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Prepisovať vie aj Google Gemini (presnejší na odborné termíny). Ak si v Nastaveniach vyberieš Gemini model, treba kľúč z Google AI Studio — inak toto pole ignoruj.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    numberedStep(1, "Vytvor si kľúč na", link: "aistudio.google.com/apikey", url: "https://aistudio.google.com/apikey")
+                    HStack {
+                        SecureField("AIza…", text: $geminiKeyInput).textFieldStyle(.roundedBorder)
+                        Button(geminiKeySaved ? "Uložené ✓" : "Uložiť") {
+                            dictation.geminiKey = geminiKeyInput
+                            geminiKeySaved = true
+                        }
+                        .disabled(geminiKeyInput.isEmpty)
+                        .buttonStyle(.borderedProminent)
+                    }
+                }
+                .padding(.top, 8)
             }
 
             Divider()
@@ -159,13 +189,17 @@ struct OnboardingView: View {
             refresh()
             openAIKeyInput = dictation.openAIKey
             openAIKeySaved = dictation.hasOpenAIKey
+            geminiKeyInput = dictation.geminiKey
+            geminiKeySaved = dictation.hasGeminiKey
             googleKeyInput = google.apiKey
             googleKeySaved = google.hasAPIKey
             accessCodeInput = remoteConfig.accessCode
             accessCodeSaved = true
         }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in refresh() }
         .onChange(of: openAIKeyInput) { _, _ in openAIKeySaved = false }
         .onChange(of: googleKeyInput) { _, _ in googleKeySaved = false }
+        .onChange(of: geminiKeyInput) { _, _ in geminiKeySaved = false }
         .onChange(of: accessCodeInput) { _, _ in accessCodeSaved = false }
         }
     }
@@ -186,6 +220,7 @@ struct OnboardingView: View {
     private func refresh() {
         axGranted = AXIsProcessTrusted()
         micGranted = AVCaptureDevice.authorizationStatus(for: .audio) == .authorized
+        screenGranted = CGPreflightScreenCaptureAccess()
     }
 }
 
