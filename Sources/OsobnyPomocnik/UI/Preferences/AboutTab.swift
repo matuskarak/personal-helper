@@ -106,6 +106,7 @@ extension PreferencesView {
                 .padding(.horizontal, 16).padding(.vertical, 12)
             }
 
+            #if DEBUG
             card {
                 toggleRow(title: "Developer mode",
                           subtitle: "Vývojárske nástroje: reštart aplikácie z menu bar ikonky (podržaním ⌥) a funkcie vo vývoji. Na poslanie záznamu ho zapínať netreba.",
@@ -114,24 +115,8 @@ extension PreferencesView {
                     set: { developerMode = $0; DeveloperMode.isEnabled = $0 }
                 ))
             }
+            #endif
 
-            card {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("Prístupový kód").font(.body.bold())
-                    Text("Ak ti niekto poslal prístupový kód, vlož ho sem — odomkne funkcie, ktoré ti povolil.")
-                        .font(.caption).foregroundStyle(.secondary)
-                    HStack {
-                        TextField("napr. jano-x7k2", text: $accessCodeInput)
-                            .textFieldStyle(.roundedBorder)
-                        Button(accessCodeSaved ? "Uložené ✓" : "Uložiť") {
-                            remoteConfig.accessCode = accessCodeInput
-                            accessCodeSaved = true
-                        }
-                        .buttonStyle(.borderedProminent)
-                    }
-                }
-                .padding(16)
-            }
         }
     }
 

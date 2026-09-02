@@ -19,25 +19,12 @@ extension PreferencesView {
                 }
 
                 if tts.mode == .googleCloud {
-                    rowDivider
-                    VStack(alignment: .leading, spacing: 10) {
-                        Text("API kľúč").font(.body)
-                        HStack {
-                            SecureField("AIza...", text: $apiKeyInput).textFieldStyle(.roundedBorder)
-                            Button(apiKeySaved ? "Uložené ✓" : "Uložiť") {
-                                google.apiKey = apiKeyInput
-                                apiKeySaved = true
-                                Task { await loadGoogleVoices() }
-                            }
-                            .disabled(apiKeyInput.isEmpty)
-                            .buttonStyle(.borderedProminent).tint(accent)
-                        }
-                        if let err = voiceError {
-                            Text(err).foregroundStyle(.red).font(.caption)
-                        }
+                    if !google.hasAPIKey {
+                        rowDivider
+                        Text("⚠️ Chýba Google Cloud API kľúč — nastavíš ho v záložke Všeobecné.")
+                            .font(.caption).foregroundStyle(.orange)
+                            .padding(.horizontal, 16).padding(.vertical, 8)
                     }
-                    .padding(.horizontal, 16).padding(.vertical, 12)
-
                     rowDivider
                     if !availableGoogleVoices.isEmpty {
                         pickerRow(title: "Hlas", selection: $google.selectedVoiceName) {
@@ -162,7 +149,7 @@ extension PreferencesView {
                                  : (voice.contains("WaveNet") || voice.contains("Neural2"))  ? 0.000016
                                  : 0.000004
                 HStack {
-                    Text(String(format: "Znaky tento mesiac: %d (~%@)",
+                    Text(String(format: "Znaky od posledného resetu: %d (~%@)",
                                 google.totalCharactersUsed, currency.format(usd: chars * rate)))
                         .font(.caption).foregroundStyle(.secondary)
                     Spacer()

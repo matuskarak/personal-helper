@@ -93,46 +93,12 @@ extension PreferencesView {
                             .tag(model)
                     }
                 }
-                // Only when it's actually selected — a second API key is noise for everyone
-                // who stays on OpenAI, and this way the field appears right where the choice
-                // that requires it was made.
-                if DictationEngine.isGemini(dictation.batchModel) {
+                // Kľúče žijú vo Všeobecné — tu len upozorni, keď pre zvolený model chýba.
+                if DictationEngine.isGemini(dictation.batchModel) ? !dictation.hasGeminiKey : !dictation.hasOpenAIKey {
                     rowDivider
-                    VStack(alignment: .leading, spacing: 10) {
-                        Text("Gemini API kľúč").font(.body)
-                        Text("Gemini beží na Google účte, nie na OpenAI kľúči vyššie. Realtime diktovanie a Smart spracovanie používajú naďalej OpenAI.")
-                            .font(.caption).foregroundStyle(.secondary)
-                        HStack {
-                            SecureField("AIza…", text: $geminiKeyInput).textFieldStyle(.roundedBorder)
-                            Button(geminiKeySaved ? "Uložené ✓" : "Uložiť") {
-                                dictation.geminiKey = geminiKeyInput
-                                geminiKeySaved = true
-                            }
-                            .disabled(geminiKeyInput.isEmpty)
-                            .buttonStyle(.borderedProminent).tint(accent)
-                        }
-                        if let result = geminiKeyTestResult {
-                            Text(result).font(.caption)
-                                .foregroundStyle(result.hasPrefix("✅") ? .green : .red)
-                        }
-                        HStack {
-                            Button("Testovať kľúč") {
-                                Task {
-                                    geminiKeyTestRunning = true
-                                    geminiKeyTestResult = await dictation.testGeminiKey()
-                                    geminiKeyTestRunning = false
-                                }
-                            }
-                            .buttonStyle(.bordered)
-                            .disabled(geminiKeyTestRunning || !dictation.hasGeminiKey)
-                            if geminiKeyTestRunning { ProgressView().controlSize(.small) }
-                            Spacer()
-                            Link("Získať kľúč →",
-                                 destination: URL(string: "https://aistudio.google.com/apikey")!)
-                                .font(.caption)
-                        }
-                    }
-                    .padding(.horizontal, 16).padding(.vertical, 12)
+                    Text("⚠️ Chýba \(DictationEngine.isGemini(dictation.batchModel) ? "Gemini" : "OpenAI") API kľúč — nastavíš ho v záložke Všeobecné.")
+                        .font(.caption).foregroundStyle(.orange)
+                        .padding(.horizontal, 16).padding(.vertical, 8)
                 }
                 rowDivider
                 toggleRow(title: "Porovnávať s druhým modelom (tieňový prepis)",
@@ -170,44 +136,6 @@ extension PreferencesView {
                         .buttonStyle(.bordered)
                 }
                 .padding(.horizontal, 16).padding(.vertical, 12)
-            }
-
-            // OpenAI API key
-            card {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("OpenAI API kľúč").font(.body)
-                    HStack {
-                        SecureField("sk-…", text: $openAIKeyInput).textFieldStyle(.roundedBorder)
-                        Button(openAIKeySaved ? "Uložené ✓" : "Uložiť") {
-                            dictation.openAIKey = openAIKeyInput
-                            openAIKeySaved = true
-                        }
-                        .disabled(openAIKeyInput.isEmpty)
-                        .buttonStyle(.borderedProminent).tint(accent)
-                    }
-                    if let result = apiKeyTestResult {
-                        Text(result).font(.caption)
-                            .foregroundStyle(result.hasPrefix("✅") ? .green :
-                                            (result.hasPrefix("⚠️") ? .orange : .red))
-                    }
-                    HStack {
-                        Button("Testovať kľúč") {
-                            Task {
-                                apiKeyTestRunning = true
-                                apiKeyTestResult = await dictation.testAPIKey()
-                                apiKeyTestRunning = false
-                            }
-                        }
-                        .buttonStyle(.bordered)
-                        .disabled(apiKeyTestRunning || !dictation.hasOpenAIKey)
-                        if apiKeyTestRunning { ProgressView().controlSize(.small) }
-                        Spacer()
-                        Link("Získať kľúč →",
-                             destination: URL(string: "https://platform.openai.com/api-keys")!)
-                            .font(.caption)
-                    }
-                }
-                .padding(16)
             }
 
             if remoteConfig.smartDictationAllowed {
@@ -323,17 +251,14 @@ extension PreferencesView {
                 }
             }
 
-            // Usage
-            let dictMins = Double(dictation.totalSecondsRecorded) / 60
+            // Usage — a real calendar month from the daily buckets, not the old lifetime
+            // counter that only pretended to be monthly until someone hit Reset.
+            let monthStart = Calendar.current.dateInterval(of: .month, for: Date())?.start ?? Date()
+            let dictMins = Double(usageStore.summary(from: monthStart, to: Date()).dictationSeconds) / 60
             let dictCost = dictMins * dictation.costPerMinute
-            HStack {
-                Text(String(format: "Využité tento mesiac: %.1f min (~%@)", dictMins, currency.format(usd: dictCost)))
-                    .font(.caption).foregroundStyle(.secondary)
-                Spacer()
-                Button("Resetovať") { dictation.resetUsageCounter() }
-                    .font(.caption).foregroundStyle(.red).buttonStyle(.plain).pointingHandCursor()
-            }
-            .padding(.horizontal, 4)
+            Text(String(format: "Využité tento mesiac: %.1f min (~%@)", dictMins, currency.format(usd: dictCost)))
+                .font(.caption).foregroundStyle(.secondary)
+                .padding(.horizontal, 4)
         }
     }
 

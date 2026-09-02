@@ -33,6 +33,126 @@ extension PreferencesView {
                 }
                 .padding(.horizontal, 16).padding(.vertical, 12)
             }
+
+            // All three provider keys live here, always visible — a conditionally appearing
+            // card is exactly what a visually impaired user cannot hunt for.
+            Text("API kľúče").font(.headline)
+
+            // OpenAI API key
+            card {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("OpenAI API kľúč").font(.body)
+                    HStack {
+                        SecureField("sk-…", text: $openAIKeyInput).textFieldStyle(.roundedBorder)
+                        Button(openAIKeySaved ? "Uložené ✓" : "Uložiť") {
+                            dictation.openAIKey = openAIKeyInput
+                            openAIKeySaved = true
+                        }
+                        .disabled(openAIKeyInput.isEmpty)
+                        .buttonStyle(.borderedProminent).tint(accent)
+                    }
+                    if let result = apiKeyTestResult {
+                        Text(result).font(.caption)
+                            .foregroundStyle(result.hasPrefix("✅") ? .green :
+                                            (result.hasPrefix("⚠️") ? .orange : .red))
+                    }
+                    HStack {
+                        Button("Testovať kľúč") {
+                            Task {
+                                apiKeyTestRunning = true
+                                apiKeyTestResult = await dictation.testAPIKey()
+                                apiKeyTestRunning = false
+                            }
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(apiKeyTestRunning || !dictation.hasOpenAIKey)
+                        if apiKeyTestRunning { ProgressView().controlSize(.small) }
+                        Spacer()
+                        Link("Získať kľúč →",
+                             destination: URL(string: "https://platform.openai.com/api-keys")!)
+                            .font(.caption)
+                    }
+                }
+                .padding(16)
+            }
+
+            card {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Gemini API kľúč").font(.body)
+                    Text("Gemini beží na Google účte, nie na OpenAI kľúči vyššie. Realtime diktovanie a Smart spracovanie používajú naďalej OpenAI.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    HStack {
+                        SecureField("AIza…", text: $geminiKeyInput).textFieldStyle(.roundedBorder)
+                        Button(geminiKeySaved ? "Uložené ✓" : "Uložiť") {
+                            dictation.geminiKey = geminiKeyInput
+                            geminiKeySaved = true
+                        }
+                        .disabled(geminiKeyInput.isEmpty)
+                        .buttonStyle(.borderedProminent).tint(accent)
+                    }
+                    if let result = geminiKeyTestResult {
+                        Text(result).font(.caption)
+                            .foregroundStyle(result.hasPrefix("✅") ? .green : .red)
+                    }
+                    HStack {
+                        Button("Testovať kľúč") {
+                            Task {
+                                geminiKeyTestRunning = true
+                                geminiKeyTestResult = await dictation.testGeminiKey()
+                                geminiKeyTestRunning = false
+                            }
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(geminiKeyTestRunning || !dictation.hasGeminiKey)
+                        if geminiKeyTestRunning { ProgressView().controlSize(.small) }
+                        Spacer()
+                        Link("Získať kľúč →",
+                             destination: URL(string: "https://aistudio.google.com/apikey")!)
+                            .font(.caption)
+                    }
+                }
+                .padding(.horizontal, 16).padding(.vertical, 12)
+            }
+
+            card {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Google Cloud API kľúč").font(.body)
+                    Text("Potrebný len pre čítanie kvalitnejším Google hlasom (záložka Čítanie).")
+                        .font(.caption).foregroundStyle(.secondary)
+                    HStack {
+                        SecureField("AIza...", text: $apiKeyInput).textFieldStyle(.roundedBorder)
+                        Button(apiKeySaved ? "Uložené ✓" : "Uložiť") {
+                            google.apiKey = apiKeyInput
+                            apiKeySaved = true
+                            Task { await loadGoogleVoices() }
+                        }
+                        .disabled(apiKeyInput.isEmpty)
+                        .buttonStyle(.borderedProminent).tint(accent)
+                    }
+                    if let err = voiceError {
+                        Text(err).foregroundStyle(.red).font(.caption)
+                    }
+                }
+                .padding(.horizontal, 16).padding(.vertical, 12)
+            }
+
+            card {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Prístupový kód").font(.body.bold())
+                    Text("Ak ti niekto poslal prístupový kód, vlož ho sem — odomkne funkcie, ktoré ti povolil.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    HStack {
+                        TextField("napr. jano-x7k2", text: $accessCodeInput)
+                            .textFieldStyle(.roundedBorder)
+                        Button(accessCodeSaved ? "Uložené ✓" : "Uložiť") {
+                            remoteConfig.accessCode = accessCodeInput
+                            accessCodeSaved = true
+                        }
+                        .buttonStyle(.borderedProminent)
+                    }
+                }
+                .padding(16)
+            }
         }
     }
 }

@@ -471,8 +471,16 @@ enum LaunchAtLogin {
 
 enum DeveloperMode {
     static let key = "app.developerMode"
+    /// Debug builds only — in a release build this is hard-false, so no toggle can
+    /// bypass RemoteConfig entitlements or expose dev-only UI to a paying user.
     static var isEnabled: Bool {
-        get { UserDefaults.standard.bool(forKey: key) }
+        get {
+            #if DEBUG
+            UserDefaults.standard.bool(forKey: key)
+            #else
+            false
+            #endif
+        }
         set { UserDefaults.standard.set(newValue, forKey: key) }
     }
 }
