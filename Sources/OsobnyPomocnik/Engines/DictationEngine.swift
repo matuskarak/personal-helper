@@ -285,15 +285,19 @@ final class DictationEngine {
     var batchModel: String {
         didSet { UserDefaults.standard.set(batchModel, forKey: "dictation.batchModel") }
     }
-    // gpt-transcribe listed first: OpenAI's newer, more accurate replacement for the
-    // gpt-4o-*/whisper-1 family (WER 15.21% -> 8.98% on OpenAI's own benchmark) — see
-    // Pricing.swift for the rate and the "not truly live" caveat on all these numbers.
-    static let batchModels = ["gpt-transcribe", "gemini-3.5-transcribe",
-                              "gpt-4o-mini-transcribe", "gpt-4o-transcribe", "whisper-1"]
+    /// Models on offer come from the remote catalog (models.json) so a new one can appear
+    /// without shipping a build; compiled-in fallback mirrors today's list.
+    static var batchModels: [String] {
+        RemoteConfig.shared.catalog.batchModels.filter(\.available).map(\.id)
+    }
 
-    /// Which provider a batch model belongs to. Prefix match rather than a stored enum: the
-    /// model is already persisted as a String and a second stored field could disagree with it.
-    static func isGemini(_ model: String) -> Bool { model.hasPrefix("gemini") }
+    /// Which provider a batch model belongs to — catalog first (data, not naming convention),
+    /// prefix heuristic as last resort for an id the catalog doesn't know (e.g. a model that
+    /// was selected and then remotely retired).
+    static func isGemini(_ model: String) -> Bool {
+        if let info = RemoteConfig.shared.catalog.info(for: model) { return info.provider == "gemini" }
+        return model.hasPrefix("gemini")
+    }
 
     /// The key for whichever provider the current batch model needs.
     var batchAPIKey: String { Self.isGemini(batchModel) ? geminiKey : openAIKey }

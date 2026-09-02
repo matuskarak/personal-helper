@@ -88,9 +88,15 @@ extension PreferencesView {
                     .padding(.horizontal, 16).padding(.top, 10)
                 rowDivider
                 pickerRow(title: "Model", selection: $dictation.batchModel) {
-                    ForEach(DictationEngine.batchModels, id: \.self) { model in
-                        Text("\(model)\(Self.modelNote(model)) — \(Pricing.perMinuteLabel(realtime: false, batchModel: model))")
-                            .tag(model)
+                    // Remote catalog drives the offer; a selected-but-retired model stays in
+                    // the list so the Picker binding never dangles.
+                    let infos = remoteConfig.catalog.batchModels.filter { $0.available || $0.id == dictation.batchModel }
+                    ForEach(infos) { info in
+                        Text("\(info.displayName) — \(Pricing.perMinuteLabel(realtime: false, batchModel: info.id))")
+                            .tag(info.id)
+                    }
+                    if !infos.contains(where: { $0.id == dictation.batchModel }) {
+                        Text(dictation.batchModel).tag(dictation.batchModel)
                     }
                 }
                 // Kľúče žijú vo Všeobecné — tu len upozorni, keď pre zvolený model chýba.

@@ -1,0 +1,41 @@
+{
+  "batchModels": [
+    {
+      "id": "gpt-transcribe",
+      "provider": "openai",
+      "displayName": "gpt-transcribe (rýchly, odporúčaný)",
+      "usdPerMinute": 0.0045,
+      "available": true
+    },
+    {
+      "id": "gemini-3.5-transcribe",
+      "provider": "gemini",
+      "displayName": "gemini-3.5-transcribe (presný na odborné termíny)",
+      "usdPerMinute": 0.005,
+      "available": true
+    },
+    {
+      "id": "gpt-4o-mini-transcribe",
+      "provider": "openai",
+      "displayName": "gpt-4o-mini-transcribe (najlacnejší)",
+      "usdPerMinute": 0.003,
+      "available": true
+    },
+    {
+      "id": "gpt-4o-transcribe",
+      "provider": "openai",
+      "displayName": "gpt-4o-transcribe",
+      "usdPerMinute": 0.006,
+      "available": true
+    },
+    {
+      "id": "whisper-1",
+      "provider": "openai",
+      "displayName": "whisper-1 (starší)",
+      "usdPerMinute": 0.006,
+      "available": true
+    }
+  ],
+  "eurPerUSD": 0.92,
+  "ratesCheckedOn": "júl 2026"
+}
