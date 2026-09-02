@@ -50,18 +50,12 @@ final class GoogleCloudTTSEngine: NSObject {
     }
 
     private let baseURL = "https://texttospeech.googleapis.com/v1"
-    private let keychainKey = "google-tts-api-key"
 
     private var player: AVAudioPlayer?
     private var playbackContinuation: CheckedContinuation<Void, Error>?
 
-    // UserDefaults in development (no codesigning = Keychain returns nil).
-    // Switch to the Keychain for production/notarized build.
     var apiKey: String {
-        didSet {
-            if apiKey.isEmpty { UserDefaults.standard.removeObject(forKey: "google.api.key") }
-            else              { UserDefaults.standard.set(apiKey, forKey: "google.api.key") }
-        }
+        didSet { KeychainStore.set(apiKey, for: "google.api.key") }
     }
 
     var hasAPIKey: Bool { !apiKey.isEmpty }
@@ -81,7 +75,7 @@ final class GoogleCloudTTSEngine: NSObject {
 
     private override init() {
         self.totalCharactersUsed  = UserDefaults.standard.integer(forKey: "google.tts.charCount")
-        self.apiKey               = UserDefaults.standard.string(forKey: "google.api.key") ?? ""
+        self.apiKey               = KeychainStore.stringMigratingFromDefaults(account: "google.api.key")
         self.selectedVoiceName    = UserDefaults.standard.string(forKey: "google.tts.voice") ?? "sk-SK-Chirp3-HD-Zephyr"
         self.selectedEnVoiceName  = UserDefaults.standard.string(forKey: "google.tts.voice.en") ?? "en-US-Chirp3-HD-Aoede"
         super.init()
