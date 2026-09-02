@@ -49,11 +49,45 @@ if [ -n "$SPARKLE_FRAMEWORK" ]; then
     install_name_tool -add_rpath "@executable_path/../Frameworks" "$BUNDLE/Contents/MacOS/$APP_NAME" 2>/dev/null || true
 fi
 
-echo "✍️  Podpisujem (OsobnyPomocnikDev) s entitlements…"
+# Podpis: debug = lokálny self-signed cert (rýchla iterácia, TCC povolenia prežijú
+# rebuild), release = Developer ID + hardened runtime (Gatekeeper/notarizácia).
+# SIGN_IDENTITY sa dá prebiť env premennou; Developer ID zisti automaticky z keychain.
+if [ -z "${SIGN_IDENTITY:-}" ]; then
+    if [ "$CONFIG" = "release" ]; then
+        SIGN_IDENTITY=$(security find-identity -v -p codesigning | grep -o '"Developer ID Application: [^"]*"' | head -1 | tr -d '"')
+        if [ -z "$SIGN_IDENTITY" ]; then
+            echo "⚠️  Developer ID certifikát nenájdený — release podpisujem self-signed (OsobnyPomocnikDev)."
+            echo "    Po zápise do Apple Developer Programu si nainštaluj 'Developer ID Application' cert."
+            SIGN_IDENTITY="OsobnyPomocnikDev"
+        fi
+    else
+        SIGN_IDENTITY="OsobnyPomocnikDev"
+    fi
+fi
+
+HARDENED=()
+if [ "$SIGN_IDENTITY" != "OsobnyPomocnikDev" ]; then
+    HARDENED=(--options runtime --timestamp)
+fi
+
+echo "✍️  Podpisujem ($SIGN_IDENTITY)…"
+# Inside-out, bez --deep: najprv vnútornosti Sparkle (XPC služby + Autoupdate),
+# potom framework, nakoniec app s entitlements. --deep je s hardened runtime nespoľahlivý.
+if [ -d "$BUNDLE/Contents/Frameworks/Sparkle.framework" ]; then
+    SPARKLE="$BUNDLE/Contents/Frameworks/Sparkle.framework"
+    for inner in \
+        "$SPARKLE/Versions/B/XPCServices/Installer.xpc" \
+        "$SPARKLE/Versions/B/XPCServices/Downloader.xpc" \
+        "$SPARKLE/Versions/B/Autoupdate" \
+        "$SPARKLE/Versions/B/Updater.app"; do
+        [ -e "$inner" ] && codesign --sign "$SIGN_IDENTITY" --force "${HARDENED[@]}" "$inner"
+    done
+    codesign --sign "$SIGN_IDENTITY" --force "${HARDENED[@]}" "$SPARKLE"
+fi
 codesign \
-    --sign "OsobnyPomocnikDev" \
+    --sign "$SIGN_IDENTITY" \
     --force \
-    --deep \
+    "${HARDENED[@]}" \
     --entitlements "$ENTITLEMENTS" \
     "$BUNDLE"
 
