@@ -39,6 +39,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         PermissionsChecker.shared.requestAllIfNeeded()
         _ = UpdaterController.shared // starts Sparkle's background update checks
         _ = RemoteConfig.shared      // starts feature-flag fetch
+        Telemetry.shared.feature("launch")
+        Task { await Telemetry.shared.flush() } // anything queued from last run
         menuBarController = MenuBarController()
         setupHotkeys()
         ShortcutStore.shared.sync() // load persisted (incl. extra-mapped) shortcuts before the tap starts
@@ -187,6 +189,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func handleReadText() async {
         AppLogger.log("[AppDelegate] handleReadText — skratka stlačená")
+        Telemetry.shared.feature("read")
         guard let text = await TextExtractor.shared.extractSelected(), !text.isEmpty else {
             AppLogger.log("[AppDelegate] handleReadText — žiadny text na pasteboarde")
             menuBarController?.showError("⚠️ Nie je označený žiadny text.")
@@ -355,6 +358,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Inserts the last dictated text that couldn't be auto-inserted (⌃⌥V by default).
     func handleInsertFromMemory() {
         AppLogger.log("[AppDelegate] handleInsertFromMemory — skratka stlačená")
+        Telemetry.shared.feature("insertFromMemory")
         // The "saved to memory" notice told the user about this exact shortcut — using it
         // is the notice doing its job, so dismiss the pill instead of leaving it sitting
         // there (same dismissal path as clicking the pill away).

@@ -86,6 +86,7 @@ struct PreferencesView: View {
     @State var rewriteEngine = SmartRewriteEngine.shared
     @State var visionPromptExpanded = false
     @State var remoteConfig  = RemoteConfig.shared
+    @State var telemetry     = Telemetry.shared
     @State var micTest       = MicTestEngine.shared
     @State var usageStore    = UsageStore.shared
     @State var historyStore  = DictationHistoryStore.shared

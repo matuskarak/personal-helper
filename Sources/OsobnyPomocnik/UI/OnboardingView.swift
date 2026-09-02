@@ -22,6 +22,7 @@ struct OnboardingView: View {
     @State private var geminiKeyInput = ""
     @State private var geminiKeySaved = false
     @State private var remoteConfig = RemoteConfig.shared
+    @State private var telemetry = Telemetry.shared
     @State private var accessCodeInput = ""
     @State private var accessCodeSaved = false
 
@@ -156,6 +157,19 @@ struct OnboardingView: View {
                     }
                 }
                 .padding(.top, 8)
+            }
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: 8) {
+                Toggle(isOn: Binding(
+                    get: { telemetry.isEnabled },
+                    set: { telemetry.isEnabled = $0; if !$0 { telemetry.clearQueue() } }
+                )) {
+                    Text("Zdieľať anonymné štatistiky používania").font(.body.bold())
+                }
+                Text("Tempo reči, počet slov, výplňové slová, dĺžka diktovania a typ appky — bez samotného textu, mien, kľúčových slov či kľúčov. Ide to do mojej tabuľky a pomáha zlepšovať prepis. Kedykoľvek vypneš v Nastaveniach → Všeobecné.")
+                    .font(.caption).foregroundStyle(.secondary)
             }
 
             Divider()

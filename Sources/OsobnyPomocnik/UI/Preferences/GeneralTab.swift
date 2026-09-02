@@ -34,6 +34,15 @@ extension PreferencesView {
                 .padding(.horizontal, 16).padding(.vertical, 12)
             }
 
+            card {
+                toggleRow(title: "Zdieľať anonymné štatistiky používania",
+                          subtitle: "Posiela sa tempo reči, počet slov, výplňové slová, dĺžka a výsledok diktovania, použitý model a typ appky (správy / e-mail / dokument). Nikdy nie samotný text, kľúčové slová, názvy appiek ani kľúče. Pomáha mi zlepšovať prepis.",
+                          isOn: Binding(
+                    get: { telemetry.isEnabled },
+                    set: { telemetry.isEnabled = $0; if !$0 { telemetry.clearQueue() } }
+                ))
+            }
+
             // All three provider keys live here, always visible — a conditionally appearing
             // card is exactly what a visually impaired user cannot hunt for.
             Text("API kľúče").font(.headline)
