@@ -30,9 +30,8 @@ extension PreferencesView {
                     url: URL(string: "https://github.com")!)
             }
 
-            // Only with Developer mode on — normal use doesn't need it, and it's the switch
-            // to tell someone to flip when their problem needs looking into.
-            if developerMode {
+            // Always visible: a tester's "it broke" report is worthless without the log,
+            // and release builds have no developer mode to unlock it with.
             card {
                 VStack(alignment: .leading, spacing: 0) {
                     VStack(alignment: .leading, spacing: 4) {
@@ -88,7 +87,6 @@ extension PreferencesView {
                         .padding(.horizontal, 16).padding(.vertical, 10)
                     }
                 }
-            }
             }
 
             card {
