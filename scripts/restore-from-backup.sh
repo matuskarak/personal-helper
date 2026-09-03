@@ -50,7 +50,8 @@ simple = ["dictation.defaultKeywords", "whisper.prompt", "whisper.delay",
           "dictation.batchModel", "dictation.realtimeModel", "dictation.liveInsert",
           "dictation.enterAutoStop", "smart.model", "google.tts.voice",
           "indicator.followFocusedField", "indicator.customX", "indicator.customY",
-          "sc.dictate.kc", "sc.dictate.mf", "sc.ocr", "sc.readText.kc", "sc.readText.mf",
+          # sc.* deliberately NOT restored: the Aug 4 snapshot predates the shortcut rework
+          # and carried ⌃⇧R / ⌥⇧D — importing them silently replaced today's ⌘⇧ defaults.
           "dictation.micPriority", "smart.appProfiles", "smart.appProfiles.categoryMigrated"]
 for key in simple:
     if key not in d:
