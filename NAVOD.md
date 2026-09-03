@@ -134,8 +134,10 @@ Prepínanie macOS používateľov je pomalé a krehké. Rýchlejšia cesta na vy
 ./scripts/reset-fresh-install.sh
 ```
 
-Zmaže povolenia (Accessibility, Mikrofón, Nahrávanie obrazovky), Kľúčenku, históriu aj
-nastavenia — appka sa pri ďalšom spustení správa presne ako u nového testera. Neresetuje
+**Najprv vždy `./scripts/backup-settings.sh`** — uloží nastavenia, históriu aj API kľúče do
+`~/Library/Application Support/OsobnyPomocnik-zalohy/` (mimo repa). Reset potom zmaže
+povolenia, Kľúčenku, históriu aj nastavenia — appka sa správa ako u nového testera — a
+`./scripts/reset-fresh-install.sh --restore` všetko vráti, kľúče vrátane. Neresetuje
 Gatekeeper dôveru pre tento konkrétny .app súbor (macOS si pamätá, že si ho už raz schválil
 cez "Otvoriť napriek tomu") — na to treba stiahnuť nový zip zo Safari, alebo použiť čistý
 macOS vo VM (napr. [UTM](https://mac.getutm.app), zadarmo).

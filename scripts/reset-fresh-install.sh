@@ -33,8 +33,21 @@ if [ "${1:-}" = "--restore" ]; then
         defaults import "$BUNDLE_ID" "$LATEST/defaults.plist"
         echo "   ✓ nastavenia"
     fi
+    if [ -f "$LATEST/keys.plist" ]; then
+        python3 - "$BUNDLE_ID" "$LATEST/keys.plist" <<'PY'
+import plistlib, subprocess, sys
+bundle, path = sys.argv[1], sys.argv[2]
+for acct, val in plistlib.load(open(path, "rb")).items():
+    if subprocess.run(["security","find-generic-password","-s",bundle,"-a",acct],capture_output=True).returncode == 0:
+        print(f"   ⏭  {acct} — v Kľúčenke už je, nechávam"); continue
+    subprocess.run(["security","add-generic-password","-s",bundle,"-a",acct,"-w",val,"-U"],capture_output=True)
+    print(f"   ✓ {acct} obnovený")
+PY
+    else
+        echo "   ⚠️  záloha nemá keys.plist — kľúče treba vložiť ručne (zálohy z backup-settings.sh ich majú)"
+    fi
     echo ""
-    echo "✅ Obnovené. API kľúče v Kľúčenke sa zálohovať nedajú — tie treba vložiť znova."
+    echo "✅ Obnovené."
     exit 0
 fi
 
@@ -46,7 +59,8 @@ cat <<WARN
       • históriu diktovaní, čakajúce nahrávky, screenshoty
       • povolenia (Accessibility, Mikrofón, Nahrávanie obrazovky)
 
-    Všetko okrem kľúčov sa zálohuje a dá vrátiť cez:  $0 --restore
+    Všetko sa zálohuje a dá vrátiť cez:  $0 --restore
+    (kľúče len ak si predtým spustil ./scripts/backup-settings.sh — tento reset ich nečíta)
 
 WARN
 read -r -p "Naozaj pokračovať? Napíš ANO: " CONFIRM
