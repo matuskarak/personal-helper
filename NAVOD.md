@@ -124,3 +124,18 @@ uložené v Kľúčenke"** — appka si číta tvoj API kľúč. Klikni **Vždy 
 ---
 
 Ozvi sa s čímkoľvek — aj s tým, čo ti len prišlo divné alebo nepohodlné. Práve to potrebujem.
+
+## Poznámka pre teba (Matúš) — testovanie bez prepínania účtov
+
+Prepínanie macOS používateľov je pomalé a krehké. Rýchlejšia cesta na vyskúšanie
+"čerstvej appky" na tvojom vlastnom účte:
+
+```bash
+./scripts/reset-fresh-install.sh
+```
+
+Zmaže povolenia (Accessibility, Mikrofón, Nahrávanie obrazovky), Kľúčenku, históriu aj
+nastavenia — appka sa pri ďalšom spustení správa presne ako u nového testera. Neresetuje
+Gatekeeper dôveru pre tento konkrétny .app súbor (macOS si pamätá, že si ho už raz schválil
+cez "Otvoriť napriek tomu") — na to treba stiahnuť nový zip zo Safari, alebo použiť čistý
+macOS vo VM (napr. [UTM](https://mac.getutm.app), zadarmo).
