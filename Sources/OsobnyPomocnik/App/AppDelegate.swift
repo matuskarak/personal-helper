@@ -58,8 +58,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.lastExternalAppPID = app.processIdentifier
         }
 
+        // The flag is set when the user CLOSES onboarding (OnboardingWindowController), not
+        // here: a first launch that dies mid-way (freeze, force quit, reboot) used to burn
+        // the one and only chance to see it, and the next launch looked like a broken app
+        // with no permissions and no setup.
         if !UserDefaults.standard.bool(forKey: "onboarding.firstLaunchShown") {
-            UserDefaults.standard.set(true, forKey: "onboarding.firstLaunchShown")
             OnboardingWindowController.shared.show()
         }
     }
