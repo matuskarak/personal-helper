@@ -62,6 +62,29 @@ Nikdy neposielať prepis, kľúčové slová, názvy appiek/okien, kľúče.
 počty znakov; realtime WS loguje len typ eventu. Diagnostika (app.log + audio-health.log) má
 jeden prepínač v O aplikácii, predvolene zapnutý.
 
+## Záloha — kontrola na začiatku KAŽDEJ session (povinné)
+
+Používateľské dáta appky (API kľúče v Kľúčenke, nastavenia, kľúčové slová, história) sa
+3. 9. 2026 raz stratili spustením reset skriptu na ostrom účte. Aby sa to už nezopakovalo:
+
+1. **Hneď na začiatku session** over, či je z dnešného dňa záloha:
+   ```bash
+   ls -1 ~/Library/Application\ Support/OsobnyPomocnik-zalohy/ | tail -1
+   ```
+   Názov zálohy je `YYYYMMDD-HHMMSS`. Ak najnovšia **nie je z dnešného dátumu**, spusti:
+   ```bash
+   ./scripts/backup-settings.sh
+   ```
+   (môže vyžiadať prístup ku Kľúčenke — používateľ klikne „Vždy povoliť"). Používateľovi
+   jednou vetou napíš, že záloha prebehla / už existovala.
+2. **Pred každou zmenou nastavení, kľúčov alebo skratiek** a **pred každým resetom** spusti
+   zálohu znova — aj keď dnešná už existuje.
+3. `reset-fresh-install.sh` **nikdy nespúšťaj sám** na účte používateľa — daj mu príkaz a nechaj
+   rozhodnutie na ňom. Obnova: `./scripts/reset-fresh-install.sh --restore`.
+
+Zálohy sú mimo repa (`~/Library/Application Support/OsobnyPomocnik-zalohy/`), `keys.plist`
+má práva 600. Nikdy ich nekopíruj do repa — je verejné.
+
 ## Aktuálne priority
 
 1. **Flow test alfy** na čistom účte podľa `NAVOD.md`, potom rozoslať známym.
