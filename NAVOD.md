@@ -11,8 +11,11 @@ Budeš potrebovať: Mac s macOS 14 alebo novším, platobnú kartu na OpenAI (pl
 
 ## 1. Inštalácia
 
-1. Stiahni zip zo odkazu, ktorý som ti poslal, a rozbaľ ho (dvojklik).
-2. Presuň **OsobnyPomocnik.app** do priečinka **Aplikácie**.
+1. Stiahni zip z odkazu, ktorý som ti poslal. Safari ho väčšinou rozbalí sama; ak nie,
+   dvojklik na `OsobnyPomocnik-0.3.0.zip` v priečinku **Stiahnuté**.
+2. V **Stiahnutých** (Finder → ⌥⌘L) nájdi položku **„OsobnyPomocnik"** s ikonou appky —
+   Finder príponu `.app` nezobrazuje, takže sa volá len takto. Potiahni ju do **Aplikácie**
+   (v bočnom paneli Findera).
 3. Spusti ju dvojklikom. **macOS ju odmietne otvoriť** — to je v poriadku, appka zatiaľ nie je
    registrovaná u Apple (to príde s ostrou verziou). Klikni *Hotovo* / *Zrušiť*.
 4. Otvor **Systémové nastavenia → Súkromie a bezpečnosť**, zroluj úplne dole do sekcie
