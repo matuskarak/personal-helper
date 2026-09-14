@@ -120,8 +120,8 @@ struct PreferencesView: View {
     @State var currency = AppCurrency.selected
     @State var logSizeBytes = 0
     @State var exportedLogName: String?
-    @State var accessCodeInput = ""
-    @State var accessCodeSaved = false
+    @State var licenseKeyInput = ""
+    @State var licenseKeySaved = false
     @State var pillFollowsField = PillPosition.followFocusedField
     @State var showResetShortcutsConfirm = false
     @State var shortcutsResetToken = 0
@@ -209,8 +209,8 @@ struct PreferencesView: View {
             geminiKeySaved   = dictation.hasGeminiKey
             smartModelInput  = rewriteEngine.model
             inputDevices     = AudioDeviceManager.inputDevices()
-            accessCodeInput  = remoteConfig.accessCode
-            accessCodeSaved  = true
+            licenseKeyInput  = remoteConfig.licenseKey
+            licenseKeySaved  = true
             loggingEnabled   = AppLogger.isEnabled
             refreshLogSize()
             // Normalise legacy "minimal" → "low" (removed from new segmented control)
@@ -223,7 +223,7 @@ struct PreferencesView: View {
         .onChange(of: apiKeyInput)    { _, _ in apiKeySaved    = false }
         .onChange(of: openAIKeyInput) { _, _ in openAIKeySaved = false }
         .onChange(of: geminiKeyInput) { _, _ in geminiKeySaved = false }
-        .onChange(of: accessCodeInput) { _, _ in accessCodeSaved = false }
+        .onChange(of: licenseKeyInput) { _, _ in licenseKeySaved = false }
     }
 
     // MARK: - Sidebar

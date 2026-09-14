@@ -1,30 +1,30 @@
 import Foundation
 import Observation
 
-/// Per-friend remote entitlements — no backend, no passwords. Each friend gets an
-/// access code from the developer; entitlements are keyed by that code in users.json
-/// (repo root). Anyone without a code (or an unrecognized one) falls back to "default".
+/// Licenčný kľúč — appka bez platného kľúča nefunguje. Kľúč sa overuje proti vlastnému hosted
+/// backendu (`Ozvena-licencie/`, PHP + SQLite na Hostingeri — nie tento repo, kľúče sa nikdy
+/// nedostanú na verejný GitHub). Endpoint dostane presne jeden kľúč a vráti, či je platný a aké
+/// má entitlements — nikdy nevracia zoznam platných kľúčov, appka nemá ako "vylistovať" ostatné.
 ///
-/// Fetches users.json at launch + hourly; falls back to the last successfully fetched
-/// data on failure, so a network hiccup never flips a feature off for someone it was
-/// meant to stay on for. Developer mode always bypasses these flags — see
-/// `smartDictationAllowed` etc. Edit users.json + push to change anyone's access,
-/// no new app build required.
+/// `hasValidLicense` je `true` len po aspoň jednom skutočnom úspešnom overení — offline potom
+/// appka ďalej funguje (posledné entitlements zostanú v cache), ale kým sa nikdy neoverila,
+/// fail-open neplatí: žiadna sieť pri prvom spustení = appka zostáva zamknutá, nie otvorená.
+/// Model catalog (`models.json`, ceny) je nezávislý od licencií — zostáva verejný GitHub fetch.
 @Observable
 @MainActor
 final class RemoteConfig {
     static let shared = RemoteConfig()
 
-    private static let url = URL(string: "https://raw.githubusercontent.com/matuskarak/personal-helper/master/users.json")!
+    // Dočasná Hostinger doména (bez vlastnej domény zatiaľ) — pozri "~/Cluade Projects/Ozvena-licencie/README.md".
+    private static let licenseValidationURL = URL(string: "https://paleturquoise-hedgehog-719343.hostingersite.com/api/validate.php")!
     private static let modelsURL = URL(string: "https://raw.githubusercontent.com/matuskarak/personal-helper/master/models.json")!
-    private static let cacheKey = "remoteConfig.usersCache.v1"
+    private static let entitlementsCacheKey = "license.entitlementsCache.v1"
     private static let modelsCacheKey = "remoteConfig.modelsCache.v1"
-    private static let codeKey = "access.code"
+    private static let keyKey = "license.key"
+    private static let validatedKey = "license.hasValidated"
     private static let refreshInterval: TimeInterval = 3600
 
-    /// Every flag defaults to false — what a tester without a code gets is the plain
-    /// batch-dictation + reading app. Decoded with defaults so an older users.json (fewer
-    /// keys) still parses.
+    /// Every flag defaults to false — čo dostane nová licencia, kým ju vlastník ručne neupraví.
     struct Entitlements: Codable {
         var smartDictationEnabled = false
         var realtimeEnabled       = false   // ⌘⇧S realtime + live insert (4× the price)
@@ -43,16 +43,29 @@ final class RemoteConfig {
         }
     }
 
-    /// The code this install has entered — persisted, editable in Preferences/Onboarding.
-    var accessCode: String {
+    private struct ValidateResponse: Decodable {
+        let valid: Bool
+        let entitlements: Entitlements?
+    }
+
+    /// Kľúč, čo appka aktuálne skúša — editovateľný v Onboardingu aj v Nastavenia → Všeobecné.
+    var licenseKey: String {
         didSet {
-            UserDefaults.standard.set(accessCode, forKey: Self.codeKey)
-            resolve()
-            Task { await refresh() }
+            guard licenseKey != oldValue else { return }
+            UserDefaults.standard.set(licenseKey, forKey: Self.keyKey)
+            // Zmena kľúča si musí znova "zaslúžiť" hasValidLicense — žiadny carry-over zo
+            // starého kľúča, ani na chvíľu.
+            hasValidLicense = false
+            UserDefaults.standard.set(false, forKey: Self.validatedKey)
+            entitlements = Entitlements()
+            Task { await validate() }
         }
     }
 
-    private var users: [String: Entitlements] = [:]
+    private(set) var hasValidLicense: Bool
+    /// Drives a spinner in the UI while a `validate()` call is in flight — otherwise clicking
+    /// "Uložiť a overiť" gives no feedback until the network round-trip finishes.
+    private(set) var isValidating = false
     private(set) var entitlements = Entitlements()
     /// Transcription models on offer — served remotely so a new model (same API shape as
     /// OpenAI transcriptions or Gemini interactions) reaches users without a new build.
@@ -65,34 +78,68 @@ final class RemoteConfig {
     var allModelsAllowed:      Bool { entitlements.allModelsEnabled      || DeveloperMode.isEnabled }
 
     private init() {
-        accessCode = UserDefaults.standard.string(forKey: Self.codeKey) ?? ""
-        loadCached()
+        licenseKey = UserDefaults.standard.string(forKey: Self.keyKey) ?? ""
+        hasValidLicense = UserDefaults.standard.bool(forKey: Self.validatedKey)
+        if let data = UserDefaults.standard.data(forKey: Self.entitlementsCacheKey),
+           let decoded = try? JSONDecoder().decode(Entitlements.self, from: data) {
+            entitlements = decoded
+        }
         if let data = UserDefaults.standard.data(forKey: Self.modelsCacheKey) { applyModels(data) }
-        resolve()
-        Task { await refresh() }
+        Task { await validate() }
         Timer.scheduledTimer(withTimeInterval: Self.refreshInterval, repeats: true) { [weak self] _ in
-            Task { @MainActor in await self?.refresh() }
+            Task { @MainActor in await self?.validate() }
         }
     }
 
-    func refresh() async {
+    /// Overí `licenseKey` proti hosted backendu. Sieťová chyba/timeout ponecháva presne to, čo
+    /// appka mala predtým (fail-open, ale len pre inštaláciu, ktorá sa už niekedy overila) —
+    /// vyslovene neplatný kľúč naopak hneď zamkne, aj offline dáta z cache sa zahodia.
+    func validate() async {
+        let key = licenseKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !key.isEmpty else {
+            AppLogger.log("[RemoteConfig] licencia: žiadny kľúč zadaný")
+            return
+        }
+        isValidating = true
+        defer { isValidating = false }
+        var req = URLRequest(url: Self.licenseValidationURL)
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = try? JSONEncoder().encode(["key": key])
+        req.timeoutInterval = 10
+
         let data: Data
         let response: URLResponse
         do {
-            (data, response) = try await URLSession.shared.data(from: Self.url)
+            (data, response) = try await URLSession.shared.data(for: req)
         } catch {
-            AppLogger.log("[RemoteConfig] refresh failed: \(error) — keeping cached entitlements")
+            AppLogger.log("[RemoteConfig] overenie licencie zlyhalo (sieť): \(error) — ponechávam predchádzajúci stav")
             return
         }
-        guard (response as? HTTPURLResponse)?.statusCode == 200 else {
-            AppLogger.log("[RemoteConfig] refresh failed: status \((response as? HTTPURLResponse)?.statusCode ?? -1) — keeping cached entitlements")
+        guard (response as? HTTPURLResponse)?.statusCode == 200,
+              let decoded = try? JSONDecoder().decode(ValidateResponse.self, from: data)
+        else {
+            AppLogger.log("[RemoteConfig] overenie licencie zlyhalo (neplatná odpoveď) — ponechávam predchádzajúci stav")
             return
         }
-        apply(data)
-        UserDefaults.standard.set(data, forKey: Self.cacheKey)
 
-        // Separate file, separate decoder — a bad price edit must not break entitlements
-        // and vice versa. Same fail-open behavior: keep cache/builtin on any failure.
+        guard decoded.valid else {
+            hasValidLicense = false
+            UserDefaults.standard.set(false, forKey: Self.validatedKey)
+            entitlements = Entitlements()
+            AppLogger.log("[RemoteConfig] licencia: kľúč neplatný")
+            return
+        }
+
+        hasValidLicense = true
+        entitlements = decoded.entitlements ?? Entitlements()
+        UserDefaults.standard.set(true, forKey: Self.validatedKey)
+        if let encoded = try? JSONEncoder().encode(entitlements) {
+            UserDefaults.standard.set(encoded, forKey: Self.entitlementsCacheKey)
+        }
+        AppLogger.log("[RemoteConfig] licencia platná → smart=\(entitlements.smartDictationEnabled) realtime=\(entitlements.realtimeEnabled) ocr=\(entitlements.ocrEnabled) shadow=\(entitlements.shadowCompareEnabled) allModels=\(entitlements.allModelsEnabled)")
+
+        // Modely (ceny) idú nezávisle, rovnakým behom — bez ohľadu na výsledok vyššie.
         if let (mData, mResp) = try? await URLSession.shared.data(from: Self.modelsURL),
            (mResp as? HTTPURLResponse)?.statusCode == 200 {
             applyModels(mData)
@@ -104,24 +151,6 @@ final class RemoteConfig {
         guard let decoded = try? JSONDecoder().decode(ModelCatalog.self, from: data),
               !decoded.batchModels.isEmpty else { return }
         catalog = decoded
-    }
-
-    private func loadCached() {
-        guard let data = UserDefaults.standard.data(forKey: Self.cacheKey) else { return }
-        apply(data)
-    }
-
-    private func apply(_ data: Data) {
-        guard let decoded = try? JSONDecoder().decode([String: Entitlements].self, from: data) else { return }
-        users = decoded
-        resolve()
-    }
-
-    private func resolve() {
-        let key = accessCode.trimmingCharacters(in: .whitespacesAndNewlines)
-        entitlements = users[key] ?? users["default"] ?? Entitlements()
-        // Code itself stays out of the log — it's the one thing that unlocks features.
-        AppLogger.log("[RemoteConfig] resolved (kód \(key.isEmpty ? "žiadny" : "zadaný")) → smart=\(entitlements.smartDictationEnabled) realtime=\(entitlements.realtimeEnabled) ocr=\(entitlements.ocrEnabled) shadow=\(entitlements.shadowCompareEnabled) allModels=\(entitlements.allModelsEnabled)")
     }
 }
 

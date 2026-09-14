@@ -68,7 +68,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // here: a first launch that dies mid-way (freeze, force quit, reboot) used to burn
         // the one and only chance to see it, and the next launch looked like a broken app
         // with no permissions and no setup.
-        if !UserDefaults.standard.bool(forKey: "onboarding.firstLaunchShown") {
+        //
+        // Also shows on every launch without a validated license key — not just first launch —
+        // since the app requires one. The onboarding window's own close button stays disabled
+        // until RemoteConfig.hasValidLicense is true, whatever the reason it's showing.
+        if !UserDefaults.standard.bool(forKey: "onboarding.firstLaunchShown")
+            || (!RemoteConfig.shared.hasValidLicense && !DeveloperMode.isEnabled) {
             OnboardingWindowController.shared.show()
         }
     }
@@ -196,7 +201,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// Appka bez platného licenčného kľúča nefunguje — jedno miesto, ktoré to vynucuje pre
+    /// každú akciu spustenú skratkou. Onboarding zostáva otvorený (AppDelegate ho zobrazí na
+    /// každom štarte bez platnej licencie), toto je poistka pre prípad, že niekto skratku
+    /// stlačí skôr, než sa onboarding stihne overiť/zavrieť.
+    private func requireLicense() -> Bool {
+        guard RemoteConfig.shared.hasValidLicense || DeveloperMode.isEnabled else {
+            DictationSounds.playRefused()
+            menuBarController?.showError("Appka vyžaduje platný licenčný kľúč — over ho v Nastavenia → Všeobecné.")
+            return false
+        }
+        return true
+    }
+
     func handleReadText() async {
+        guard requireLicense() else { return }
         AppLogger.log("[AppDelegate] handleReadText — skratka stlačená")
         Telemetry.shared.feature("read")
         guard let text = await TextExtractor.shared.extractSelected(), !text.isEmpty else {
@@ -210,6 +229,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func handleOCR() {
+        guard requireLicense() else { return }
         guard RemoteConfig.shared.ocrAllowed else {
             AppLogger.log("[AppDelegate] handleOCR — ignorované (ocrAllowed=false)")
             return
@@ -241,6 +261,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// shortcut is deliberately ignored so muscle memory stays unambiguous: what started
     /// the dictation is what stops it. Smart stop is the one exception (handleSmartStop).
     func handleDictate(mode: DictationEngine.TranscriptionMode) {
+        guard requireLicense() else { return }
         if mode == .realtime, !RemoteConfig.shared.realtimeAllowed {
             AppLogger.log("[AppDelegate] handleDictate(realtime) — ignorované (realtimeAllowed=false)")
             return
@@ -366,6 +387,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// Inserts the last dictated text that couldn't be auto-inserted (⌃⌥V by default).
     func handleInsertFromMemory() {
+        guard requireLicense() else { return }
         AppLogger.log("[AppDelegate] handleInsertFromMemory — skratka stlačená")
         Telemetry.shared.feature("insertFromMemory")
         // The "saved to memory" notice told the user about this exact shortcut — using it

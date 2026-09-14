@@ -75,20 +75,27 @@ extension PreferencesView {
             }
 
             card {
-                HStack(alignment: .top, spacing: 16) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Prístupový kód").font(Theme.body(13))
-                        Text("Odomkne funkcie, ktoré ti niekto povolil.")
-                            .font(Theme.body(11)).foregroundStyle(Theme.textSecondary)
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(alignment: .top, spacing: 16) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Licenčný kľúč").font(Theme.body(13))
+                            Text("Appka bez neho nefunguje — kľúč ti pridelí vlastník appky.")
+                                .font(Theme.body(11)).foregroundStyle(Theme.textSecondary)
+                        }
+                        Spacer()
+                        statusChip(remoteConfig.hasValidLicense ? "platný" : "neplatný",
+                                   color: remoteConfig.hasValidLicense ? Theme.success : Theme.error)
                     }
-                    Spacer()
-                    TextField("napr. jano-x7k2", text: $accessCodeInput)
-                        .textFieldStyle(.roundedBorder).frame(width: 160)
-                    Button(accessCodeSaved ? "Uložené" : "Uložiť") {
-                        remoteConfig.accessCode = accessCodeInput
-                        accessCodeSaved = true
+                    HStack {
+                        SecureField("licenčný kľúč", text: $licenseKeyInput).textFieldStyle(.roundedBorder)
+                        Button(remoteConfig.isValidating ? "Overujem…" : "Uložiť a overiť") {
+                            remoteConfig.licenseKey = licenseKeyInput
+                            licenseKeySaved = true
+                        }
+                        .buttonStyle(.borderedProminent).tint(accent)
+                        .disabled(licenseKeyInput.isEmpty || remoteConfig.isValidating)
+                        if remoteConfig.isValidating { ProgressView().controlSize(.small) }
                     }
-                    .buttonStyle(.bordered)
                 }
                 .padding(.horizontal, 16).padding(.vertical, 12)
             }
