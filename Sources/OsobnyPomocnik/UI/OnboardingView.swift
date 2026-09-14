@@ -42,7 +42,7 @@ struct OnboardingView: View {
             Text("Nastavenie povolení")
                 .font(Theme.title(17))
 
-            Text("Osobný pomocník potrebuje nasledujúce povolenia:")
+            Text("Ozvena potrebuje nasledujúce povolenia:")
                 .foregroundStyle(Theme.textSecondary)
 
             PermissionRow(

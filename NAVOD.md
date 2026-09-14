@@ -1,4 +1,4 @@
-# Osobný pomocník — návod na inštaláciu (alfa verzia)
+# Ozvena — návod na inštaláciu (alfa verzia)
 
 Ďakujem, že to so mnou testuješ. Appka je v skorej testovacej verzii — funguje, ale
 očakávaj drobné chyby a pošli mi všetko, čo ťa zaskočí. Celé nastavenie trvá asi 10 minút,
@@ -44,7 +44,7 @@ Appka nemá vlastný kľúč — diktovanie ide cez tvoj OpenAI účet.
 
 1. Vytvor si účet na **platform.openai.com/signup** (stačí Google prihlásenie).
 2. V **Billing** pridaj kartu a nabi kredit — **5 $ stačí na mesiace** testovania.
-3. V **API keys** klikni *Create new secret key*, pomenuj ho napr. „Osobný pomocník"
+3. V **API keys** klikni *Create new secret key*, pomenuj ho napr. „Ozvena"
    a **hned ho skopíruj** — OpenAI ho ukáže len raz.
 4. V okne appky ho vlož do poľa *sk-…* (tlačidlo *Prilepiť*), klikni **Uložiť** a potom
    **Testovať kľúč**. Musí sa objaviť zelené ✅.

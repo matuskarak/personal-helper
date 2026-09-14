@@ -13,7 +13,7 @@ final class LogViewerWindowController: NSWindowController {
             backing: .buffered,
             defer: false
         )
-        window.title = "Log — Osobný pomocník"
+        window.title = "Log — Ozvena"
         window.center()
         window.contentView = FirstMouseHostingView(rootView: LogViewerView())
         window.isReleasedWhenClosed = false

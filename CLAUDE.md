@@ -1,4 +1,4 @@
-# Osobný pomocník — pokyny pre Claude
+# Ozvena — pokyny pre Claude
 
 Aktívna vetva je **`master`**. Bežná práca (bugfixy, nové funkcie, UI) ide sem, žiadne
 prepínanie nie je potrebné.
@@ -60,7 +60,7 @@ Na obnovenie treba aj skonvertovaný CoreML model v
 `~/Documents/whisperkit-models-sk/NaiveNeuron_whisper-large-v3-turbo-sk`
 (postup konverzie cez `whisperkittools` je v CLAUDE.md na tej značke).
 
-## Stav: alfa pre známych (od 2. 9. 2026, v0.2.0)
+## Stav: alfa pre známych (od 2. 9. 2026, aktuálne v0.4.0)
 
 Appka sa distribuuje ako **BYOK** (používateľ vloží vlastný OpenAI/Gemini kľúč) cez GitHub
 Release `builds` + Sparkle. Bez Developer ID (Gatekeeper → „Otvoriť napriek tomu", postup je
