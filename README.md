@@ -5,7 +5,7 @@ macOS menu bar appka pre slabozrakých — rýchle prečítanie textu (SK/EN, s 
 - **Bundle ID:** `sk.matuskarak.osobny-pomocnik`
 - **Platforma:** macOS 14+, Swift Package Manager, žiadny Xcode projekt
 - **Typ appky:** `LSUIElement` — bez Docku, len menu bar ikona
-- **Distribúcia:** alfa (v0.2.0) — self-signed (`OsobnyPomocnikDev`), GitHub Release `builds` + Sparkle auto-update; `build-app.sh release` prepne na Developer ID + hardened runtime a `release.sh` notarizuje, keď existuje certifikát/notary profil. Návod pre testerov: `NAVOD.md`.
+- **Distribúcia:** alfa (v0.4.0) — self-signed (`OsobnyPomocnikDev`), GitHub Release `builds` + Sparkle auto-update; `build-app.sh release` prepne na Developer ID + hardened runtime a `release.sh` notarizuje, keď existuje certifikát/notary profil. Návod pre testerov: `NAVOD.md`.
 
 ## Čo appka robí
 
@@ -16,7 +16,7 @@ macOS menu bar appka pre slabozrakých — rýchle prečítanie textu (SK/EN, s 
 
 Appka funguje aj bez Smart diktovania — to je nadstavba, ktorá sa dá kedykoľvek vypnúť.
 
-**Čo dostane bežný tester (bez prístupového kódu):** diktovanie po nahraní (⌘⇧D / zrušiť ⌘⇧X), čítanie (⌘⇧R), vloženie z pamäte (⌃⌥V), história, Kvalita, Prehľad, výber z dvoch modelov. Realtime diktovanie, OCR, Smart, tieňový prepis a ďalšie modely sú za feature flagmi v `users.json`.
+Appka vyžaduje platný licenčný kľúč (pozri "Licencie" nižšie) — bez neho vôbec nespustí diktovanie/čítanie/OCR. Základná úroveň (diktovanie po nahraní ⌘⇧D / zrušiť ⌘⇧X, čítanie ⌘⇧R, vloženie z pamäte ⌃⌥V, história, Kvalita, Prehľad, výber z dvoch modelov) je to, čo dostane licencia bez ďalších entitlements. Realtime diktovanie, OCR, Smart, tieňový prepis a ďalšie modely sú za entitlements, ktoré sa nastavujú per-licencia.
 
 ## Ako sa appka spúšťa (triggery)
 
@@ -41,20 +41,20 @@ Appka funguje aj bez Smart diktovania — to je nadstavba, ktorá sa dá kedyko�
 | Čítanie textu | `Engines/TextExtractor.swift`, `Engines/TTSEngine.swift`, `Engines/GoogleCloudTTSEngine.swift` | Získanie označeného textu (AX/clipboard), on-device alebo cloud TTS |
 | OCR | `Engines/OCREngine.swift`, `UI/OCROverlayWindow.swift` | Výber oblasti obrazovky → Vision framework OCR |
 | Pamäť diktovania | `Engines/DictationMemoryStore.swift`, `RecentTextStore.swift` | Fallback úložisko, keď sa diktovanie nedá vložiť priamo (žiadne fokusnuté pole) |
-| Nastavenia | `UI/PreferencesView.swift` (shell) + `UI/Preferences/*Tab.swift` | Všeobecné (mena, všetky API kľúče, prístupový kód), Diktovanie, Čítanie, Mikrofón, Prehľad (+ História, Kvalita), Skratky, O aplikácii (Diagnostika) |
-| Vzdialená konfigurácia | `Engines/RemoteConfig.swift` | `users.json` (prístupové kódy → feature flagy: smart, realtime, ocr, shadowCompare, allModels) a `models.json` (katalóg modelov + ceny, `ModelCatalog`) — oba z GitHub raw, hodinovo cachované, fail-open |
+| Nastavenia | `UI/PreferencesView.swift` (shell) + `UI/Preferences/*Tab.swift` | Všeobecné (mena, všetky API kľúče, licenčný kľúč), Diktovanie, Čítanie, Mikrofón, Prehľad (+ História, Kvalita), Skratky, O aplikácii (Diagnostika) |
+| Licencie a vzdialená konfigurácia | `Engines/RemoteConfig.swift` | Licenčný kľúč sa overuje proti vlastnému hosted backendu (samostatný priečinok mimo tohto repa — kľúče sa nesmú dať zistiť z verejného GitHubu); appka bez platného kľúča nefunguje. Entitlements (smart, realtime, ocr, shadowCompare, allModels) prídu s výsledkom overenia. `models.json` (katalóg modelov + ceny, `ModelCatalog`) je oddelený, naďalej z GitHub raw, hodinovo cachovaný, fail-open |
 | Kľúče | `Engines/KeychainStore.swift` | OpenAI, Gemini a Google TTS kľúče v Keychaine; jednorazová migrácia z UserDefaults |
 | Update | `Engines/UpdaterController.swift` | Sparkle, podpísaný `appcast.xml` |
 
 ## Dáta a privacy
 
-Všetko je **lokálne** (žiadny vlastný backend, žiadny cloud okrem priamych OpenAI/Google API volaní iniciovaných používateľom):
+Väčšina je **lokálna** (žiadny cloud okrem priamych OpenAI/Google API volaní iniciovaných používateľom, a licenčného overenia popísaného nižšie):
 
 - **História diktovania** — `~/Library/Application Support/OsobnyPomocnik/dictation-history.json`. Bez pevného časového/počtového limitu (zámerne, kvôli budúcemu AI enginu na analýzu — pozri nižšie), len bezpečnostný strop 20 000 záznamov.
 - **Screenshoty Smart diktovania** (voliteľné, defaultne vypnuté) — `~/Library/Application Support/OsobnyPomocnik/screenshots/<entry-id>.jpg`, životnosť viazaná na záznam histórie.
 - **API kľúče** — Keychain (`KeychainStore.swift`), nikdy v UserDefaults ani v logu.
 - **Diagnostický log** (`~/Library/Logs/OsobnyPomocnik/app.log`, `audio-health.log`) — jeden prepínač v O aplikácii; neobsahuje prepisy, kľúčové slová ani kľúče, len priebeh (časy, chyby, názov cieľovej appky).
-- Appka sama nič neposiela na vlastný server — jediná externá komunikácia je: OpenAI (diktovanie, Smart rewrite), Google Cloud TTS (voliteľné), GitHub raw JSON (RemoteConfig, appcast).
+- Externá komunikácia: OpenAI (diktovanie, Smart rewrite), Google Cloud TTS (voliteľné), GitHub raw JSON (`models.json`, appcast), a vlastný hosted backend (licenčný kľúč → overenie/entitlements, žiadny obsah diktovania sa tam neposiela).
 
 ## Stav projektu (čo je hotové)
 
@@ -66,9 +66,9 @@ Všetko je **lokálne** (žiadny vlastný backend, žiadny cloud okrem priamych 
 - Poradie/fallback mikrofónov, tester + pasívna kontrola kvality mikrofónu
 - Prehľad (Usage) — štatistiky, graf trendu, EUR/USD náklady
 - Onboarding, Diagnostika + log viewer (Developer Mode len v DEBUG buildoch), Sparkle auto-update
-- Prístupové kódy a feature flagy cez `users.json`, katalóg modelov cez `models.json` (bez vlastného backendu)
+- Licenčné kľúče + feature flagy cez vlastný hosted backend (mimo repa), katalóg modelov cez `models.json`
 - Gemini 3.5 Transcribe ako druhý prepisovací provider, tieňový A/B prepis, zrušenie diktovania ⌘⇧X
-- Alfa distribúcia (v0.2.0) + `NAVOD.md` pre testerov
+- Alfa distribúcia (v0.4.0) + `NAVOD.md` pre testerov
 - Trigger cez Logi Options+ ("Run command" → custom URL scheme) s plnou focus-tracking logikou
 
 **Backlog / otvorené:** GDPR-ready opt-in zber dát od testerov, Developer ID + notarizácia (po zápise do Apple Developer Programu — pipeline je pripravená), licencovanie + platby, predplatiteľský backend (batch proxy + licencie možno na PHP hostingu, realtime WS proxy na Cloudflare Workers/VPS), hover-to-read, karaoke zvýrazňovanie (blokované vo WebKit/Chromium), fáza 2 enginu na analýzu diktovania.

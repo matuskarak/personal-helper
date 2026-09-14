@@ -68,7 +68,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         menu.addItem(NSMenuItem(title: "Čítať označený text", action: #selector(readText), keyEquivalent: "r")
             .configured { $0.keyEquivalentModifierMask = [.command, .shift]; $0.target = self })
 
-        // Entitlement-gated (users.json) — shown/hidden in refreshDynamicItems.
+        // Entitlement-gated (licenčný backend, RemoteConfig) — shown/hidden in refreshDynamicItems.
         ocrItem = NSMenuItem(title: "OCR oblasť", action: #selector(startOCR), keyEquivalent: "o")
             .configured { $0.keyEquivalentModifierMask = [.command, .shift]; $0.target = self }
         menu.addItem(ocrItem)

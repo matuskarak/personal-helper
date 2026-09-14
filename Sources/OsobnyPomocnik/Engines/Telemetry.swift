@@ -21,6 +21,10 @@ final class Telemetry {
     // not read them. Rotate here + in the n8n webhook filter if it gets abused.
     private static let endpoint = URL(string: "https://n8n.pixeled.sk/webhook/osobny-pomocnik-telemetry")!
     private static let token = "op-alfa-9f3kq2"
+    // Duplicitný príjemca — rovnaký anonymný envelope, aj do vlastného licenčného backendu
+    // (Ozvena-licencie), nech sa dáta zbierajú aj tam pre admin dashboard. Fire-and-forget:
+    // n8n zostáva zdroj pravdy pre retry frontu, tento druhý POST sa neopakuje pri zlyhaní.
+    private static let backendEndpoint = URL(string: "https://paleturquoise-hedgehog-719343.hostingersite.com/api/telemetry.php")!
     private static let maxQueued = 500
 
     struct Event: Codable {
@@ -123,6 +127,15 @@ final class Telemetry {
             }
         ]
         guard let body = try? JSONSerialization.data(withJSONObject: envelope) else { return }
+
+        Task.detached(priority: .background) {
+            var backendReq = URLRequest(url: Self.backendEndpoint, timeoutInterval: 15)
+            backendReq.httpMethod = "POST"
+            backendReq.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            backendReq.httpBody = body
+            _ = try? await URLSession.shared.data(for: backendReq)
+        }
+
         var req = URLRequest(url: Self.endpoint, timeoutInterval: 15)
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")

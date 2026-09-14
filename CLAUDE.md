@@ -64,13 +64,28 @@ Na obnovenie treba aj skonvertovaný CoreML model v
 
 Appka sa distribuuje ako **BYOK** (používateľ vloží vlastný OpenAI/Gemini kľúč) cez GitHub
 Release `builds` + Sparkle. Bez Developer ID (Gatekeeper → „Otvoriť napriek tomu", postup je
-v `NAVOD.md`). Licencie, platby a predplatiteľský backend sú odložené.
+v `NAVOD.md`). Platby a predplatiteľský backend sú odložené — licenčné kľúče (nižšie) už nie.
 
-**Feature flagy** žijú v `users.json` (per prístupový kód, `RemoteConfig.Entitlements`).
-Tester bez kódu dostane: batch diktovanie ⌘⇧D, zrušenie ⌘⇧X, čítanie ⌘⇧R, vloženie z pamäte,
-históriu, Kvalitu, Prehľad, 2 modely (gpt-transcribe, gemini-3.5-transcribe). Za kódom sú:
-Smart ⌘⇧A, realtime ⌘⇧S + live vkladanie, OCR ⌘⇧O, tieňový prepis, ostatné modely katalógu.
-Repo je **verejné** — kódy v users.json sú viditeľné, je to alfa-úroveň ochrany.
+**Licenčný kľúč (od 2026-09-14) — appka bez neho vôbec nefunguje.** Nahradil starší
+"prístupový kód" systém (`users.json` v tomto repe) — ten sa **prestal používať práve preto, že
+`users.json` bol verejný súbor s kódmi v plaintexte**, čo pre tvrdý gate nestačí. Kľúč sa teraz
+overuje proti vlastnému hosted backendu (`RemoteConfig.swift`, `POST /api/validate.php`) — PHP +
+SQLite, beží na Hostinger Business hostingu, **kód backendu je v samostatnom priečinku
+`~/Cluade Projects/Ozvena-licencie/`, zámerne mimo tohto (verejného) repa appky**, nikdy sem
+nepatrí. Endpoint dostane jeden kľúč naraz a vráti `{valid, entitlements}` — appka nemá spôsob,
+ako vypýtať zoznam platných kľúčov.
+
+Bez platného kľúča appka odmietne diktovanie/čítanie/OCR/vloženie z pamäte (`AppDelegate.requireLicense()`)
+a onboarding (`OnboardingWindowController`) sa nedá zavrieť — zobrazuje sa na každom štarte, kým
+`RemoteConfig.shared.hasValidLicense` nie je `true`. Developer Mode obchádza gate (rovnako ako
+ostatné entitlements). Platný kľúč sa cachuje lokálne (`UserDefaults`), takže appka funguje aj
+offline **po** prvom úspešnom overení — nikdy predtým (žiadny fail-open na prvé spustenie).
+
+**Entitlements** (`RemoteConfig.Entitlements`) — čo konkrétna licencia navyše odomkne: Smart ⌘⇧A,
+realtime ⌘⇧S + live vkladanie, OCR ⌘⇧O, tieňový prepis, ostatné modely katalógu. Predvolene všetko
+vypnuté (základná úroveň appky = batch diktovanie ⌘⇧D, zrušenie ⌘⇧X, čítanie ⌘⇧R, vloženie
+z pamäte, história, Kvalita, Prehľad, 2 modely). Pridanie/úprava licencie: `.../Ozvena-licencie/admin/`
+(prihlásenie heslom, presné URL a heslo nepatria do tohto súboru ani nikam do gitu appky).
 
 **Telemetria** (`Engines/Telemetry.swift`): anonymné udalosti (metriky z DictationQualityEngine,
 trvanie, model, výsledok, latencia, kategória appky, feature tapy) → n8n webhook
@@ -78,7 +93,7 @@ trvanie, model, výsledok, latencia, kategória appky, feature tapy) → n8n web
 (workflow `Ub6Tttj5GbNi4QiX`). Predvolene zapnuté, vypínateľné vo Všeobecné a v onboardingu.
 Nikdy neposielať prepis, kľúčové slová, názvy appiek/okien, kľúče.
 
-**Nesmie do logu:** prepisy, kľúčové slová, API kľúče, prístupový kód. Batch cesta loguje len
+**Nesmie do logu:** prepisy, kľúčové slová, API kľúče, licenčný kľúč. Batch cesta loguje len
 počty znakov; realtime WS loguje len typ eventu. Diagnostika (app.log + audio-health.log) má
 jeden prepínač v O aplikácii, predvolene zapnutý.
 

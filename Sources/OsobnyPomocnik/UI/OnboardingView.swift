@@ -23,18 +23,42 @@ struct OnboardingView: View {
     @State private var geminiKeySaved = false
     @State private var remoteConfig = RemoteConfig.shared
     @State private var telemetry = Telemetry.shared
-    @State private var accessCodeInput = ""
-    @State private var accessCodeSaved = false
+    @State private var licenseKeyInput = ""
+    @State private var licenseKeySaved = false
 
     var allGranted: Bool { axGranted && micGranted }
+    var readyToClose: Bool { allGranted && (remoteConfig.hasValidLicense || DeveloperMode.isEnabled) }
 
     var body: some View {
         ScrollView {
         VStack(alignment: .leading, spacing: 20) {
             VStack(alignment: .leading, spacing: 8) {
-                Text("Vitaj v Osobnom pomocníkovi").font(Theme.title(22))
-                Text("Diktuješ hlasom do ľubovoľnej appky, text sa vloží tam, kde píšeš; k tomu čítanie označeného textu nahlas a OCR z obrazovky. Na rozbehnutie budeš potrebovať tri veci: povolenia nižšie, vlastný OpenAI API kľúč a pár minút.")
+                Text("Vitaj v appke Ozvena").font(Theme.title(22))
+                Text("Diktuješ hlasom do ľubovoľnej appky, text sa vloží tam, kde píšeš; k tomu čítanie označeného textu nahlas a OCR z obrazovky. Na rozbehnutie budeš potrebovať štyri veci: licenčný kľúč, povolenia nižšie, vlastný OpenAI API kľúč a pár minút.")
                     .font(Theme.body(12)).foregroundStyle(Theme.textSecondary)
+            }
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Text("Licenčný kľúč").font(Theme.title(17))
+                    Spacer()
+                    statusChip(remoteConfig.hasValidLicense ? "platný" : "chýba",
+                               color: remoteConfig.hasValidLicense ? Theme.success : Theme.error)
+                }
+                Text("Appka bez platného licenčného kľúča nefunguje — kľúč ti pridelí vlastník appky, vlož ho sem.")
+                    .font(Theme.body(11)).foregroundStyle(Theme.textSecondary)
+                HStack {
+                    SecureField("licenčný kľúč", text: $licenseKeyInput).textFieldStyle(.roundedBorder)
+                    Button(remoteConfig.isValidating ? "Overujem…" : "Uložiť a overiť") {
+                        remoteConfig.licenseKey = licenseKeyInput
+                        licenseKeySaved = true
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(licenseKeyInput.isEmpty || remoteConfig.isValidating)
+                    if remoteConfig.isValidating { ProgressView().controlSize(.small) }
+                }
             }
 
             Divider()
@@ -173,29 +197,19 @@ struct OnboardingView: View {
 
             Divider()
 
-            VStack(alignment: .leading, spacing: 10) {
-                Text("Prístupový kód (voliteľné)").font(Theme.bodyBold(13))
-                Text("Ak ti niekto poslal prístupový kód, vlož ho sem — odomkne funkcie, ktoré ti povolil.")
-                    .font(Theme.body(11)).foregroundStyle(Theme.textSecondary)
-                HStack {
-                    TextField("napr. jano-x7k2", text: $accessCodeInput).textFieldStyle(.roundedBorder)
-                    Button(accessCodeSaved ? "Uložené" : "Uložiť") {
-                        remoteConfig.accessCode = accessCodeInput
-                        accessCodeSaved = true
-                    }
-                    .buttonStyle(.borderedProminent)
-                }
-            }
-
-            Divider()
-
             HStack {
                 Button("Skontrolovať znova") { refresh() }
                     .buttonStyle(.bordered)
                 Spacer()
-                Button("Zavrieť") { dismiss(); onClose() }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(!allGranted)
+                VStack(alignment: .trailing, spacing: 4) {
+                    Button("Zavrieť") { dismiss(); onClose() }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(!readyToClose)
+                    if !remoteConfig.hasValidLicense {
+                        Text("Potrebuješ platný licenčný kľúč vyššie.")
+                            .font(Theme.body(10)).foregroundStyle(Theme.error)
+                    }
+                }
             }
         }
         .padding(24)
@@ -211,14 +225,14 @@ struct OnboardingView: View {
             geminiKeySaved = dictation.hasGeminiKey
             googleKeyInput = google.apiKey
             googleKeySaved = google.hasAPIKey
-            accessCodeInput = remoteConfig.accessCode
-            accessCodeSaved = true
+            licenseKeyInput = remoteConfig.licenseKey
+            licenseKeySaved = true
         }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in refresh() }
         .onChange(of: openAIKeyInput) { _, _ in openAIKeySaved = false }
         .onChange(of: googleKeyInput) { _, _ in googleKeySaved = false }
         .onChange(of: geminiKeyInput) { _, _ in geminiKeySaved = false }
-        .onChange(of: accessCodeInput) { _, _ in accessCodeSaved = false }
+        .onChange(of: licenseKeyInput) { _, _ in licenseKeySaved = false }
         }
     }
 
@@ -233,6 +247,14 @@ struct OnboardingView: View {
                 }
             }
         }
+    }
+
+    /// Small state pill — same look as `PreferencesView.statusChip`, duplicated here since
+    /// this view isn't a `PreferencesView` extension.
+    private func statusChip(_ text: String, color: Color) -> some View {
+        Text(text).font(Theme.body(11)).foregroundStyle(color)
+            .padding(.horizontal, 8).padding(.vertical, 2)
+            .background(Capsule().fill(color.opacity(0.14)))
     }
 
     private func refresh() {
@@ -287,7 +309,7 @@ final class OnboardingWindowController: NSWindowController {
             backing: .buffered,
             defer: false
         )
-        window.title = "Vitaj v Osobnom pomocníkovi"
+        window.title = "Vitaj v appke Ozvena"
         window.center()
         window.isReleasedWhenClosed = false
         super.init(window: window)

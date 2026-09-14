@@ -12,7 +12,7 @@ Budeš potrebovať: Mac s macOS 14 alebo novším, platobnú kartu na OpenAI (pl
 ## 1. Inštalácia
 
 1. Stiahni zip z odkazu, ktorý som ti poslal. Safari ho väčšinou rozbalí sama; ak nie,
-   dvojklik na `OsobnyPomocnik-0.3.0.zip` v priečinku **Stiahnuté**.
+   dvojklik na `OsobnyPomocnik-0.4.0.zip` v priečinku **Stiahnuté**.
 2. V **Stiahnutých** (Finder → ⌥⌘L) nájdi položku **„OsobnyPomocnik"** s ikonou appky —
    Finder príponu `.app` nezobrazuje, takže sa volá len takto. Potiahni ju do **Aplikácie**
    (v bočnom paneli Findera).
@@ -28,7 +28,11 @@ Toto robíš **len raz**. Ďalšie aktualizácie si appka sťahuje a inštaluje 
 
 ## 2. Prvé spustenie — povolenia
 
-Pri prvom spustení sa otvorí okno *Vitaj v Osobnom pomocníkovi*. Prejde ťa dvomi povoleniami:
+Pri prvom spustení sa otvorí okno *Vitaj v appke Ozvena*. Prejde ťa licenčným kľúčom a dvomi povoleniami:
+
+**Licenčný kľúč** — vlož kľúč, ktorý som ti poslal, do poľa hore v okne a klikni *Uložiť a overiť*.
+Bez platného kľúča appka nefunguje (tlačidlo *Zavrieť* dole zostane vypnuté) — ak ti kľúč nesedí,
+napíš mi.
 
 | Povolenie | Načo | Ako |
 |---|---|---|
