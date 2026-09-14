@@ -64,6 +64,10 @@ echo "📰 Appcast…"
 ./.sparkle-tools/bin/generate_appcast "$RELEASES_DIR" \
     --download-url-prefix "https://github.com/$REPO/releases/download/$RELEASE_TAG/"
 cp "$RELEASES_DIR/appcast.xml" appcast.xml
+# sparkle:releaseNotesLink points at this file at the repo ROOT (raw.githubusercontent.com/.../master/…) —
+# it has to be committed there, not just left in the gitignored releases/ dir, or every release's
+# notes link 404s in the Sparkle update dialog (true of every past release before this fix).
+cp "$RELEASES_DIR/$APP_NAME-$VERSION.txt" "$APP_NAME-$VERSION.txt"
 
 echo "🚀 GitHub Release…"
 gh release view "$RELEASE_TAG" --repo "$REPO" >/dev/null 2>&1 \
@@ -72,7 +76,7 @@ gh release view "$RELEASE_TAG" --repo "$REPO" >/dev/null 2>&1 \
 gh release upload "$RELEASE_TAG" "$RELEASES_DIR/$ZIP_NAME" --repo "$REPO" --clobber
 
 echo "📤 Commit + push appcast…"
-git add "$INFO_PLIST" appcast.xml
+git add "$INFO_PLIST" appcast.xml "$APP_NAME-$VERSION.txt"
 git commit -m "Release v$VERSION"
 git push
 

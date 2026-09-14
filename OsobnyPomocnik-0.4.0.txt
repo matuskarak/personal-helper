@@ -1,0 +1,1 @@
+Redizajn UI (Ozvena) — nové Nastavenia, HUD pilulky; voliteľné stíšenie zvuku počas diktovania; opravy pri live vkladaní v realtime režime.
