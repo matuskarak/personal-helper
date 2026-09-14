@@ -3,6 +3,16 @@
 Aktívna vetva je **`master`**. Bežná práca (bugfixy, nové funkcie, UI) ide sem, žiadne
 prepínanie nie je potrebné.
 
+## Overovanie zmien v UI — nepoužívať computer use, opýtať sa usera (od 2026-09-14)
+
+Appka je `LSUIElement` (menu bar, floating panely bez Docku) — automatizované UI testovanie cez
+AppleScript/System Events/`cliclick` je v tomto prostredí nespoľahlivé (flaky AX čítania, skryté
+okná, cliclick drag simulácia neverne reprodukuje reálne gestá) a stojí veľa času/rebuildov.
+**Namiesto vlastného automatizovaného klikania/draggovania cez computer use radšej over `swift
+build` a popíš userovi presne, čo má sám vyskúšať a čo očakávať** — user si to otestuje naživo
+sám a povie výsledok. Výnimka: `swift build`/`./build-app.sh` a čítanie `app.log` sú v poriadku
+(to nie je "computer use", len build a log).
+
 ## Dizajn UI — vždy cez skill `design-taste-frontend`
 
 Pri akomkoľvek návrhu/úprave vzhľadu (rozloženie, veľkosti okien/popupov, spacing, stavy

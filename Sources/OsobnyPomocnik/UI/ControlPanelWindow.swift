@@ -29,6 +29,10 @@ enum PanelSnapPosition: String, CaseIterable {
 @MainActor
 final class ControlPanelState {
     var expanded = false
+    /// Set by the controller's resize() whenever it decides a direction — mirrored here so the
+    /// view can keep the trigger circle visually fixed and unfurl the buttons the other way
+    /// instead of letting the whole stack (trigger included) slide to a new screen position.
+    var growsUpward = false
 }
 
 // MARK: - Window controller
@@ -43,6 +47,9 @@ final class ControlPanelWindowController: NSWindowController, NSWindowDelegate {
     private static let topLeftKey = "controlPanel.topLeft"
     private static let margin: CGFloat = 20
 
+    /// Window origin captured at the start of a trigger-circle drag — see `dragPanel()`.
+    private var dragStartOrigin: NSPoint?
+
     /// Geometry from Vyvoj/Komponenty/citanie-pilulka.md: 52 pt circle, expanded = circle +
     /// divider + 5 × 40 pt buttons. The shadow is drawn in SwiftUI, so the window keeps a
     /// transparent `shadowPad` margin on every side.
@@ -50,6 +57,10 @@ final class ControlPanelWindowController: NSWindowController, NSWindowDelegate {
     static let collapsedHeight: CGFloat = 52
     static let expandedHeight: CGFloat = 52 + 9 + 5 * 40 + 5 * 2 + 6   // 277
     static let shadowPad: CGFloat = 12
+    /// Slowed from the citanie-pilulka.md spec's 0.28s (client felt it too snappy/jumpy,
+    /// 2026-09-14) — kept as one constant so the window (`resize`) and content
+    /// (`ControlPanelView.expandAnim`) never drift apart again.
+    static let expandDuration: TimeInterval = 0.4
 
     private init() {
         // NSPanel + .nonactivatingPanel, not a plain NSWindow — this is the actual fix, not
@@ -112,6 +123,52 @@ final class ControlPanelWindowController: NSWindowController, NSWindowDelegate {
         resize(animated: true)
     }
 
+    // MARK: Trigger drag (click-vs-drag disambiguation)
+
+    /// `isMovableByWindowBackground` alone can't be used on the trigger circle itself: AppKit
+    /// moves the window under the cursor as the user drags, so SwiftUI's own tap recognizer —
+    /// which only sees the pointer's position relative to the (also moving) view — measures
+    /// almost no local movement and still fires a tap at mouse-up, expanding the panel right
+    /// after every drag. Doing the drag ourselves from a `DragGesture` lets `endDragPanel` gate
+    /// the tap on real on-screen movement instead — but SwiftUI's own `translation` turned out
+    /// unusable for that: it's computed relative to the view we're simultaneously dragging out
+    /// from under the cursor, so moving the window mid-gesture feeds back into it (measured:
+    /// oscillating between two values instead of tracking the real drag distance). `NSEvent
+    /// .mouseLocation` is screen-absolute and immune to that — read fresh every callback instead.
+    private var dragStartMouseLocation: NSPoint?
+
+    func dragPanel() {
+        guard let w = window else { return }
+        if dragStartOrigin == nil {
+            dragStartOrigin = w.frame.origin
+            dragStartMouseLocation = NSEvent.mouseLocation
+        }
+        guard let startOrigin = dragStartOrigin, let startMouse = dragStartMouseLocation else { return }
+        let current = NSEvent.mouseLocation
+        let dx = current.x - startMouse.x
+        let dy = current.y - startMouse.y
+        // A plain click still has a point or two of natural pointer jitter between mouse-down
+        // and mouse-up — moving the window on every one of those made a tap visibly "shake"
+        // right before it expanded. Below the same 3pt threshold endDragPanel() uses to call
+        // it a tap, don't move the window at all.
+        guard max(abs(dx), abs(dy)) >= 3 else { return }
+        w.setFrameOrigin(NSPoint(x: startOrigin.x + dx, y: startOrigin.y + dy))
+    }
+
+    /// Returns true when the gesture was a tap (negligible movement) rather than a real drag.
+    @discardableResult
+    func endDragPanel() -> Bool {
+        defer { dragStartOrigin = nil; dragStartMouseLocation = nil }
+        guard let startMouse = dragStartMouseLocation else { return true }
+        let current = NSEvent.mouseLocation
+        let moved = max(abs(current.x - startMouse.x), abs(current.y - startMouse.y))
+        guard moved < 3 else {
+            saveTopLeft()
+            return false
+        }
+        return true
+    }
+
     /// Screen rect of the pill's speed button — where the "Rýchlosť …" toast anchors.
     var speedButtonFrame: NSRect {
         guard let f = window?.frame else { return .zero }
@@ -120,19 +177,56 @@ final class ControlPanelWindowController: NSWindowController, NSWindowDelegate {
         return NSRect(x: f.minX + Self.shadowPad, y: f.maxY - fromTop - 40, width: Self.pillWidth, height: 40)
     }
 
-    /// Grows downward from the current top edge; flips to growing upward when the bottom of
-    /// the screen is in the way (pill snapped to a bottom corner).
+    /// Grows downward from the current top edge by default; flips to growing upward when the
+    /// bottom of the screen is in the way (pill snapped to a bottom corner). `state.growsUpward`
+    /// is decided only on expand (from real available space) and then reused as-is on the
+    /// matching collapse — collapsing always reads the CURRENT live frame's fixed edge (top or
+    /// bottom, whichever wasn't moving), never a value computed from scratch, so it returns to
+    /// exactly where it started even after a drag mid-expanded. It's mirrored onto `state` (not
+    /// just kept here) so the SwiftUI content can keep the trigger circle visually fixed and
+    /// unfurl the buttons the other way, instead of the whole stack — trigger included —
+    /// sliding to a new spot (see `ControlPanelView.body`).
     private func resize(animated: Bool) {
         guard let w = window else { return }
+        let currentTop = w.frame.maxY
+        let currentBottom = w.frame.minY
         let h = (state.expanded ? Self.expandedHeight : Self.collapsedHeight) + 2 * Self.shadowPad
-        var f = w.frame
-        f.origin.y = f.maxY - h
-        f.size.height = h
-        if let screen = w.screen ?? NSScreen.main, f.minY < screen.visibleFrame.minY {
-            f.origin.y = w.frame.minY
+
+        if state.expanded {
+            if let screen = w.screen ?? NSScreen.main {
+                let spaceBelow = currentBottom - screen.visibleFrame.minY
+                let needed = h - w.frame.height
+                state.growsUpward = spaceBelow < needed
+            } else {
+                state.growsUpward = false
+            }
         }
+
+        var f = w.frame
+        f.size.height = h
+        f.origin.y = state.growsUpward ? currentBottom : (currentTop - h)
+
+        // Clamp fully on-screen for the pathological case (panel taller than the screen).
+        if let screen = w.screen ?? NSScreen.main {
+            let vf = screen.visibleFrame
+            if f.maxY > vf.maxY { f.origin.y = vf.maxY - f.height }
+            if f.minY < vf.minY { f.origin.y = vf.minY }
+        }
+
         let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
-        w.setFrame(f, display: true, animate: animated && !reduceMotion)
+        guard animated, !reduceMotion else {
+            w.setFrame(f, display: true, animate: false)
+            return
+        }
+        // Explicit animation group matching ControlPanelView.expandAnim's curve/duration
+        // exactly — before, the window resize used AppKit's default animation while the SwiftUI
+        // content inside animated on its own unrelated curve, so window bounds and content
+        // height drifted apart mid-transition (the reported jerkiness).
+        NSAnimationContext.runAnimationGroup { ctx in
+            ctx.duration = Self.expandDuration
+            ctx.timingFunction = CAMediaTimingFunction(controlPoints: 0.2, 0.8, 0.2, 1)
+            w.animator().setFrame(f, display: true)
+        }
     }
 
     // MARK: Snap
@@ -238,10 +332,11 @@ private struct VoiceWaveView: View {
 // MARK: - Main view
 
 struct ControlPanelView: View {
-    /// citanie-pilulka.md: "0.28s cubic-bezier(.2,.8,.2,1)". `nil` under Reduce Motion —
-    /// the window resize (`resize(animated:)`) checks the same flag so both stay in sync.
+    /// Curve from citanie-pilulka.md, duration from `ControlPanelWindowController.expandDuration`
+    /// (shared constant — this and the window resize must never drift apart). `nil` under
+    /// Reduce Motion — `resize(animated:)` checks the same flag so both stay in sync.
     static let expandAnim: Animation? = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
-        ? nil : .timingCurve(0.2, 0.8, 0.2, 1, duration: 0.28)
+        ? nil : .timingCurve(0.2, 0.8, 0.2, 1, duration: ControlPanelWindowController.expandDuration)
     let state: ControlPanelState
     @State private var tts   = TTSEngine.shared
     @State private var store = RecentTextStore.shared
@@ -260,13 +355,22 @@ struct ControlPanelView: View {
     private let radius = ControlPanelWindowController.pillWidth / 2   // circle when collapsed
 
     var body: some View {
+        // The trigger circle must stay visually fixed wherever it already is — the buttons
+        // unfurl the other way instead, mirroring resize()'s choice of which window edge is
+        // anchored (see ControlPanelState.growsUpward). Alignment pins the trigger to the same
+        // edge the window itself keeps fixed, so the circle never appears to move.
         VStack(spacing: 0) {
-            trigger
-            controls
+            if state.growsUpward {
+                controls
+                trigger
+            } else {
+                trigger
+                controls
+            }
         }
         .frame(width: C.pillWidth,
                height: state.expanded ? C.expandedHeight : C.collapsedHeight,
-               alignment: .top)
+               alignment: state.growsUpward ? .bottom : .top)
         .background {
             ZStack {
                 Rectangle().fill(.regularMaterial)
@@ -277,7 +381,7 @@ struct ControlPanelView: View {
         .overlay(RoundedRectangle(cornerRadius: radius).strokeBorder(Theme.HUD.border, lineWidth: 1))
         .shadow(color: Theme.HUD.shadow, radius: 15, y: 7)
         .padding(C.shadowPad)
-        .animation(.easeOut(duration: 0.22), value: state.expanded)
+        .animation(Self.expandAnim, value: state.expanded)
         .contextMenu {
             Text("Pozícia pilulky")
             Divider()
@@ -296,53 +400,90 @@ struct ControlPanelView: View {
     }
 
     /// The whole circle is the click target — no chevron (designed and rejected by the client).
+    /// A plain `Button` + `isMovableByWindowBackground` doesn't work here: dragging the panel
+    /// moves the window under the cursor, so the button's own (local) tap recognizer sees almost
+    /// no movement and still fires — expanding the panel right after every drag. This drives the
+    /// window move itself from a `DragGesture` instead, so `endDragPanel` can gate the tap on
+    /// real on-screen movement (see ControlPanelWindowController.dragPanel/endDragPanel).
     private var trigger: some View {
-        Button {
-            ControlPanelWindowController.shared.toggleExpanded()
-            resetAutoHide()
-        } label: {
-            VoiceWaveView(isActive: tts.isSpeaking && !tts.isPaused)
-                .frame(width: C.pillWidth, height: C.collapsedHeight)
-                .background(triggerHovered ? Color.white.opacity(0.05) : .clear)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain).pointingHandCursor()
-        .onHover { triggerHovered = $0 }
-        .accessibilityLabel(state.expanded ? "Ovládanie čítania, rozbalené" : "Ovládanie čítania, zbalené")
-        .accessibilityHint(state.expanded ? "Kliknutím zbalíš tlačidlá" : "Kliknutím rozbalíš tlačidlá")
-    }
-
-    /// Always in the hierarchy (clipped away when collapsed) so Space/Esc keep working.
-    private var controls: some View {
-        VStack(spacing: 2) {
-            Rectangle().fill(Theme.HUD.divider).frame(width: 28, height: 1).padding(.vertical, 4)
-
-            HUDButton(icon: tts.isPaused ? "play.fill" : "pause.fill",
-                      label: tts.isPaused ? "Pokračovať (Space)" : "Pozastaviť (Space)",
-                      disabled: !tts.isSpeaking,
-                      shortcut: KeyboardShortcut(.space, modifiers: [])) {
-                tts.isPaused ? tts.resume() : tts.pause(); resetAutoHide()
-            }
-            HUDButton(icon: "stop.fill", label: "Zastaviť (Esc)", disabled: !tts.isSpeaking,
-                      shortcut: KeyboardShortcut(.escape, modifiers: [])) {
-                tts.stop(); resetAutoHide()
-            }
-            HUDButton(icon: "arrow.counterclockwise", label: "Čítať od začiatku",
-                      disabled: store.lastText == nil) {
-                tts.replayLast(); resetAutoHide()
-            }
-            HUDButton(text: TTSEngine.format(tts.speed),
-                      label: "Rýchlosť čítania \(TTSEngine.format(tts.speed)), kliknutím prepneš na ďalšiu") {
-                let next = tts.cycleSpeed()
-                HUDToast.show("Rýchlosť \(TTSEngine.format(next))",
-                              leftOf: ControlPanelWindowController.shared.speedButtonFrame)
+        VoiceWaveView(isActive: tts.isSpeaking && !tts.isPaused)
+            .frame(width: C.pillWidth, height: C.collapsedHeight)
+            .background(triggerHovered ? Color.white.opacity(0.05) : .clear)
+            .contentShape(Rectangle())
+            .pointingHandCursor()
+            .onHover { triggerHovered = $0 }
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { _ in
+                        ControlPanelWindowController.shared.dragPanel()
+                    }
+                    .onEnded { _ in
+                        if ControlPanelWindowController.shared.endDragPanel() {
+                            ControlPanelWindowController.shared.toggleExpanded()
+                            resetAutoHide()
+                        }
+                    }
+            )
+            .accessibilityElement()
+            .accessibilityAddTraits(.isButton)
+            .accessibilityLabel(state.expanded ? "Ovládanie čítania, rozbalené" : "Ovládanie čítania, zbalené")
+            .accessibilityHint(state.expanded ? "Kliknutím zbalíš tlačidlá" : "Kliknutím rozbalíš tlačidlá")
+            .accessibilityAction {
+                ControlPanelWindowController.shared.toggleExpanded()
                 resetAutoHide()
             }
-            HUDButton(icon: "xmark", label: "Zavrieť", muted: true) {
-                autoHideTask?.cancel(); tts.stop(); ControlPanelWindowController.shared.hide()
+    }
+
+    private var divider: some View {
+        Rectangle().fill(Theme.HUD.divider).frame(width: 28, height: 1).padding(.vertical, 4)
+    }
+    private var pauseButton: some View {
+        HUDButton(icon: tts.isPaused ? "play.fill" : "pause.fill",
+                  label: tts.isPaused ? "Pokračovať (Space)" : "Pozastaviť (Space)",
+                  disabled: !tts.isSpeaking,
+                  shortcut: KeyboardShortcut(.space, modifiers: [])) {
+            tts.isPaused ? tts.resume() : tts.pause(); resetAutoHide()
+        }
+    }
+    private var stopButton: some View {
+        HUDButton(icon: "stop.fill", label: "Zastaviť (Esc)", disabled: !tts.isSpeaking,
+                  shortcut: KeyboardShortcut(.escape, modifiers: [])) {
+            tts.stop(); resetAutoHide()
+        }
+    }
+    private var restartButton: some View {
+        HUDButton(icon: "arrow.counterclockwise", label: "Čítať od začiatku",
+                  disabled: store.lastText == nil) {
+            tts.replayLast(); resetAutoHide()
+        }
+    }
+    private var speedButton: some View {
+        HUDButton(text: TTSEngine.format(tts.speed),
+                  label: "Rýchlosť čítania \(TTSEngine.format(tts.speed)), kliknutím prepneš na ďalšiu") {
+            let next = tts.cycleSpeed()
+            HUDToast.show("Rýchlosť \(TTSEngine.format(next))",
+                          leftOf: ControlPanelWindowController.shared.speedButtonFrame)
+            resetAutoHide()
+        }
+    }
+    private var closeButton: some View {
+        HUDButton(icon: "xmark", label: "Zavrieť", muted: true) {
+            autoHideTask?.cancel(); tts.stop(); ControlPanelWindowController.shared.hide()
+        }
+    }
+
+    /// Always in the hierarchy (clipped away when collapsed) so Space/Esc keep working. Order
+    /// mirrors around the divider (always the element touching the trigger) when growing
+    /// upward, so "zavrieť" stays the button farthest from the trigger in both directions.
+    private var controls: some View {
+        VStack(spacing: 2) {
+            if state.growsUpward {
+                closeButton; speedButton; restartButton; stopButton; pauseButton; divider
+            } else {
+                divider; pauseButton; stopButton; restartButton; speedButton; closeButton
             }
         }
-        .padding(.bottom, 6)
+        .padding(state.growsUpward ? .top : .bottom, 6)
         .accessibilityHidden(!state.expanded)
     }
 
