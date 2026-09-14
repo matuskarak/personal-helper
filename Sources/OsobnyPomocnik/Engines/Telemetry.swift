@@ -38,6 +38,11 @@ final class Telemetry {
         var outcome = ""             // ok | empty | failed | cancelled
         var latencyMs = 0
         var category = ""            // AppCategory rawValue, never the app name
+        // Measurement pass for a possible silence-trimming feature — see CLAUDE.md priorities.
+        // How much of the recording sat below a rough amplitude floor, and the longest single
+        // quiet stretch. 0/0 on realtime and non-batch outcomes that don't track it.
+        var silentSeconds = 0
+        var longestSilenceSec = 0
     }
 
     var isEnabled: Bool {
@@ -63,7 +68,8 @@ final class Telemetry {
 
     /// One row per finished dictation; `outcome` says how it ended.
     func dictation(seconds: Int, metrics: DictationMetrics?, model: String?, mode: String?,
-                   outcome: String, latencyMs: Int, category: AppCategory) {
+                   outcome: String, latencyMs: Int, category: AppCategory,
+                   silentSeconds: Int = 0, longestSilenceSeconds: Int = 0) {
         var e = Event(event: "dictation", ts: Self.hourStamp())
         e.seconds = seconds
         if let m = metrics {
@@ -73,6 +79,7 @@ final class Telemetry {
         }
         e.model = model ?? ""; e.mode = mode ?? ""; e.outcome = outcome
         e.latencyMs = latencyMs; e.category = category.rawValue
+        e.silentSeconds = silentSeconds; e.longestSilenceSec = longestSilenceSeconds
         record(e)
     }
 

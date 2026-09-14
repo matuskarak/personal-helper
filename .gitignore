@@ -8,3 +8,7 @@ backup_*.zip
 .sparkle-tools/
 releases/
 backup-pred-*/
+# Design/branding handoff (fonts, icons, design-system docs) — lives locally, not shipped to
+# whoever clones the repo to build/run the tool. Code comments referencing Vyvoj/*.md assume
+# it's present on this machine; see CLAUDE.md.
+Vyvoj/

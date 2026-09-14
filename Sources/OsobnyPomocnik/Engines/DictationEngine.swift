@@ -315,6 +315,15 @@ final class DictationEngine {
         didSet { UserDefaults.standard.set(shadowCompareEnabled, forKey: "dictation.shadowCompare") }
     }
 
+    /// Temporary validation aid for SilenceTrimmer (see CLAUDE.md) — batch mode only, and only
+    /// when something was actually cut: also transcribes the UNTRIMMED audio with the SAME
+    /// model, so the two texts differ (if they do) only because of trimming, not because of a
+    /// different provider. Meant for a day of deliberate testing, then off — doubles the bill
+    /// for every dictation with a real pause, same reasoning as shadowCompareEnabled above.
+    var silenceTrimABTestEnabled: Bool {
+        didSet { UserDefaults.standard.set(silenceTrimABTestEnabled, forKey: "dictation.silenceTrimABTest") }
+    }
+
     /// Explanatory sub-labels in the pill ("prepis až po zastavení", "Klikni na zatvorenie").
     /// Useful until the shortcuts are muscle memory, then just makes the pill bigger.
     var pillHintsEnabled: Bool {
@@ -366,13 +375,13 @@ final class DictationEngine {
     /// real problem, not congratulate a working mic mid-dictation).
     private static func qualityWarning(from s: (peakDBFS: Double, clippingPercent: Double, snrDB: Double?)) -> String? {
         if s.clippingPercent > 0.5 {
-            return "⚠️ Zvuk je skreslený — zníž vstupnú hlasitosť mikrofónu v Nastaveniach zvuku."
+            return "Zvuk je skreslený — zníž vstupnú hlasitosť mikrofónu v Nastaveniach zvuku."
         }
         if s.peakDBFS < -35 {
-            return "⚠️ Mikrofón je veľmi potichu — priblíž sa k nemu alebo zvýš vstupnú hlasitosť."
+            return "Mikrofón je veľmi potichu — priblíž sa k nemu alebo zvýš vstupnú hlasitosť."
         }
         if let snr = s.snrDB, snr < 15 {
-            return "⚠️ V pozadí je výrazný šum — skús tichšie prostredie."
+            return "V pozadí je výrazný šum — skús tichšie prostredie."
         }
         return nil
     }
@@ -480,6 +489,7 @@ final class DictationEngine {
         self.liveInsertEnabled      = UserDefaults.standard.object(forKey: "dictation.liveInsert") as? Bool ?? true
         self.enterAutoStop          = UserDefaults.standard.bool(forKey: "dictation.enterAutoStop")
         self.shadowCompareEnabled   = UserDefaults.standard.bool(forKey: "dictation.shadowCompare")
+        self.silenceTrimABTestEnabled = UserDefaults.standard.bool(forKey: "dictation.silenceTrimABTest")
         self.pillHintsEnabled       = UserDefaults.standard.object(forKey: "indicator.hints") as? Bool ?? true
     }
 
@@ -489,44 +499,44 @@ final class DictationEngine {
     /// specific realtime/transcription models this app depends on.
     /// Same shape as testAPIKey, against Google. Lists models rather than sending audio —
     /// a bad key must fail here, before it can cost a real dictation.
-    func testGeminiKey() async -> String {
-        guard hasGeminiKey else { return "❌ Žiadny Gemini kľúč nie je nastavený." }
+    func testGeminiKey() async -> Theme.KeyCheck {
+        guard hasGeminiKey else { return .failure("Žiadny Gemini kľúč nie je nastavený.") }
         var req = URLRequest(url: URL(string: "https://generativelanguage.googleapis.com/v1beta/models")!)
         req.setValue(geminiKey, forHTTPHeaderField: "x-goog-api-key")
         do {
             let (data, response) = try await URLSession.shared.data(for: req)
-            guard let http = response as? HTTPURLResponse else { return "❌ Neplatná odpoveď servera." }
+            guard let http = response as? HTTPURLResponse else { return .failure("Neplatná odpoveď servera.") }
             guard http.statusCode == 200 else {
                 let msg = String(data: data, encoding: .utf8) ?? "?"
                 AppLogger.log("[DictationEngine] Gemini key test FAILED [\(http.statusCode)]: \(msg.prefix(300))")
-                return "❌ Chyba \(http.statusCode): \(msg.prefix(200))"
+                return .failure("Chyba \(http.statusCode): \(msg.prefix(200))")
             }
-            return "✅ Gemini kľúč je platný."
+            return .ok("Gemini kľúč je platný.")
         } catch {
-            return "❌ Sieťová chyba: \(error.localizedDescription)"
+            return .failure("Sieťová chyba: \(error.localizedDescription)")
         }
     }
 
-    func testAPIKey() async -> String {
-        guard hasOpenAIKey else { return "❌ Žiadny API kľúč nie je nastavený." }
+    func testAPIKey() async -> Theme.KeyCheck {
+        guard hasOpenAIKey else { return .failure("Žiadny API kľúč nie je nastavený.") }
 
         var req = URLRequest(url: URL(string: "https://api.openai.com/v1/models")!)
         req.setValue("Bearer \(openAIKey)", forHTTPHeaderField: "Authorization")
 
         do {
             let (data, response) = try await URLSession.shared.data(for: req)
-            guard let http = response as? HTTPURLResponse else { return "❌ Neplatná odpoveď servera." }
+            guard let http = response as? HTTPURLResponse else { return .failure("Neplatná odpoveď servera.") }
 
             guard http.statusCode == 200 else {
                 let msg = String(data: data, encoding: .utf8) ?? "?"
                 AppLogger.log("[DictationEngine] API key test FAILED [\(http.statusCode)]: \(msg.prefix(300))")
-                return "❌ Chyba \(http.statusCode): \(msg.prefix(200))"
+                return .failure("Chyba \(http.statusCode): \(msg.prefix(200))")
             }
 
             guard
                 let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                 let models = json["data"] as? [[String: Any]]
-            else { return "✅ Kľúč je platný (zoznam modelov sa nepodarilo prečítať)." }
+            else { return .ok("Kľúč je platný (zoznam modelov sa nepodarilo prečítať).") }
 
             let ids = Set(models.compactMap { $0["id"] as? String })
             // Only the models the current settings actually use — reporting a missing
@@ -540,11 +550,11 @@ final class DictationEngine {
             AppLogger.log("[DictationEngine] API key OK. Required: \(needed.joined(separator: ", ")) — missing: \(missing.isEmpty ? "none" : missing.joined(separator: ", "))")
 
             guard missing.isEmpty else {
-                return "⚠️ Kľúč je platný, ale účet nemá prístup k: \(missing.joined(separator: ", "))"
+                return .warning("Kľúč je platný, ale účet nemá prístup k: \(missing.joined(separator: ", "))")
             }
-            return "✅ API kľúč funguje a má prístup k potrebným modelom."
+            return .ok("API kľúč funguje a má prístup k potrebným modelom.")
         } catch {
-            return "❌ Sieťová chyba: \(error.localizedDescription)"
+            return .failure("Sieťová chyba: \(error.localizedDescription)")
         }
     }
 
@@ -569,6 +579,8 @@ final class DictationEngine {
 
         AppLogger.markSection("nové diktovanie")
         chunkCounter.reset()
+        silenceTracker.reset()
+        silenceTrimmer.reset()
         qualityMonitor.reset()
         tapRestartCount = 0
         tapNeedsReinstall = false
@@ -655,6 +667,7 @@ final class DictationEngine {
         // From here on we're committing — any throw below must roll back via stopSession().
         sessionID += 1
         let mySessionID = sessionID
+        AudioDucking.shared.startDucking()
 
         isSmartMode        = false  // decided by the STOP shortcut — see stopAndTranscribe(smart:)
         capturedScreenshotJPEG = nil
@@ -716,14 +729,22 @@ final class DictationEngine {
         // Doubles as a TLS warm-up for the upload that follows.
         apiProbeTask?.cancel()
         apiProbeTask = Task { [weak self] in
-            let usesGemini = mode == .batch && Self.isGemini(self?.batchModel ?? "")
-            guard let self,
-                  await Self.apiUnreachable(apiKey: usesGemini ? self.geminiKey : self.openAIKey,
-                                            gemini: usesGemini)
-            else { return }
+            guard let self else { return }
+            let usesGemini = mode == .batch && Self.isGemini(self.batchModel)
+            let key = usesGemini ? self.geminiKey : self.openAIKey
+            guard await Self.apiUnreachable(apiKey: key, gemini: usesGemini) else { return }
             guard !Task.isCancelled, self.isRecording, self.sessionID == mySessionID else { return }
-            AppLogger.log("[DictationEngine] ⚠️ probe — API nedostupné počas štartu diktovania")
-            self.showNotice("⚠️ API je nedostupné — hovor ďalej, nahrávka sa uloží a prepíšeš ju neskôr.", sticky: false)
+            // First miss alone isn't enough to warn about — it can be nothing more than this
+            // probe racing the realtime socket's own handshake for the same network path right
+            // at session start (measured 2026-09-12: probe failed, then the same session's
+            // socket connected and completed a 401-char live-insert seconds later). Only warn
+            // once a retry a few seconds later confirms it's still down.
+            try? await Task.sleep(for: .seconds(3))
+            guard !Task.isCancelled, self.isRecording, self.sessionID == mySessionID else { return }
+            guard await Self.apiUnreachable(apiKey: key, gemini: usesGemini) else { return }
+            guard !Task.isCancelled, self.isRecording, self.sessionID == mySessionID else { return }
+            AppLogger.log("[DictationEngine] ⚠️ probe — API nedostupné počas štartu diktovania (potvrdené opakovaným pokusom)")
+            self.showNotice("API je nedostupné — hovor ďalej, nahrávka sa uloží a prepíšeš ju neskôr.", sticky: false)
         }
 
         do {
@@ -731,6 +752,7 @@ final class DictationEngine {
             let tapConverter  = converter
             let tapPCM16      = pcm16Format
             let tapSampleRate = inputFormat.sampleRate
+            let abTestEnabled = silenceTrimABTestEnabled
 
             if let capture = deviceCapture {
                 // ── CoreAudio IO proc path (explicit device) ──────────────────────────────
@@ -753,10 +775,11 @@ final class DictationEngine {
                 case .batch:
                     AppLogger.log("[DictationEngine] DeviceCapture Batch mode (\(batchModel))")
                     _ = batchAudioBuffer.drain()
+                    _ = rawAudioBuffer.drain()
                     capture.onBuffer = { buf in
                         accumulateChunkForBatch(
                             buffer: buf, inputSampleRate: tapSampleRate,
-                            converter: tapConverter, pcm16Format: tapPCM16
+                            converter: tapConverter, pcm16Format: tapPCM16, trackRaw: abTestEnabled
                         )
                     }
                 }
@@ -788,10 +811,11 @@ final class DictationEngine {
                 case .batch:
                     AppLogger.log("[DictationEngine] Batch mode (\(batchModel)) — recording locally, no WebSocket")
                     _ = batchAudioBuffer.drain()
+                    _ = rawAudioBuffer.drain()
                     inputNode.installTap(onBus: 0, bufferSize: 2_400, format: inputFormat) { buf, _ in
                         accumulateChunkForBatch(
                             buffer: buf, inputSampleRate: tapSampleRate,
-                            converter: tapConverter, pcm16Format: tapPCM16
+                            converter: tapConverter, pcm16Format: tapPCM16, trackRaw: abTestEnabled
                         )
                     }
                 }
@@ -813,7 +837,7 @@ final class DictationEngine {
                         }
                         AppLogger.log("[DictationEngine] ⚠️ Audio configuration changed mid-recording — aborting session cleanly")
                         self.connectionError = "Zvukové zariadenie sa zmenilo počas nahrávania. Diktovanie zastavené."
-                        self.liveText        = "⚠️ Zariadenie sa zmenilo"
+                        self.liveText        = "Zariadenie sa zmenilo"
                         self.stopSession()
                         self.transcriptionContinuation?.resume(returning: "")
                         self.transcriptionContinuation = nil
@@ -975,9 +999,9 @@ final class DictationEngine {
         // Live insert types as you speak, so by the time you cancel, the words are already in
         // the field — cancelling can't un-type them. Say so rather than implying it undid them.
         if didLiveInsert || liveInsertActive {
-            showNotice("⚠️ Diktovanie zrušené, ale Live vkladanie už časť textu vložilo — treba ho zmazať ručne.")
+            showNotice("Diktovanie zrušené, ale Live vkladanie už časť textu vložilo — treba ho zmazať ručne.")
         } else {
-            showNotice("🗑️ Diktovanie zrušené — nahrávka sa zahodila.", sticky: false)
+            showNotice("Diktovanie zrušené — nahrávka sa zahodila.", sticky: false)
         }
         didLiveInsert    = false
         liveInsertActive = false
@@ -992,7 +1016,7 @@ final class DictationEngine {
             if liveInsertActive || didLiveInsert {
                 // Live insert already typed the raw text into the field as it was spoken —
                 // there's nothing left to rewrite. Say why instead of silently ignoring A.
-                showNotice("⚠️ Live vkladanie už text priebežne vložilo — Smart úprava sa nedá použiť. Vypni Live vkladanie v Nastaveniach.")
+                showNotice("Live vkladanie už text priebežne vložilo — Smart úprava sa nedá použiť. Vypni Live vkladanie v Nastaveniach.")
             } else {
                 isSmartMode = true
             }
@@ -1012,6 +1036,17 @@ final class DictationEngine {
         stopAudio()
         isTranscribing = true
         let firstInfo = chunkCounter.firstChunkInfo
+        let silence = silenceTracker.summary
+        // Temporary diagnostic. The two numbers use different methodology and won't line up
+        // 1:1 — SilenceTracker has no debounce and only counts runs ≥1.5s each, so a pause
+        // broken up by brief mic noise reads as several short runs to it, while SilenceTrimmer's
+        // debounce bridges those into one continuous pause. Logged separately (not as a ratio
+        // or a "should match" pair) specifically so that difference doesn't read as a bug —
+        // see the 2026-09-09 CLAUDE.md note this was clarified from.
+        if Int(silenceTrimmer.trimmedSeconds) > 0 {
+            AppLogger.log("[DictationEngine] Silence trimmer: vystrihnutých \(Int(silenceTrimmer.trimmedSeconds))s pred uploadom (súčet za celé nahrávanie, môže byť z viacerých pauz).")
+        }
+        AppLogger.log("[DictationEngine] Silence tracker (orientačné, iná metodika): \(silence.silentSeconds)s ticha spolu, najdlhší súvislý úsek \(silence.longestRunSeconds)s.")
         // ponytail: was `chunkCounter.sent > 0` — true for any chunk sent, even pure digital
         // silence (wrong/muted input device). hasRealAudio checks actual peak amplitude, which
         // is what "audio sa nezaznamenalo" is meant to detect — see its BT-silence comment.
@@ -1033,7 +1068,7 @@ final class DictationEngine {
             // a few words, rather than silently handing back an incomplete result.
             if sendQueue.droppedCount > 0, connectionError == nil {
                 AppLogger.log("[DictationEngine] ⚠️ \(sendQueue.droppedCount) audio chunk(s) dropped this session")
-                showNotice("⚠️ Časť textu sa možno neprenieslo (nestabilné pripojenie) — over výsledok.")
+                showNotice("Časť textu sa možno neprenieslo (nestabilné pripojenie) — over výsledok.")
             }
 
             // Wait for the completed event (timeout 8 s)
@@ -1062,7 +1097,7 @@ final class DictationEngine {
         if transcriptionMode == .realtime {
             if transcript.isEmpty, !didLiveInsert, lastRecordingCapturedAudio, !batchAudioBuffer.isEmpty {
                 AppLogger.log("[DictationEngine] realtime bez transkriptu — skúšam batch upload z lokálnej kópie")
-                showNotice("⏳ Realtime spojenie zlyhalo — prepisujem z uloženej nahrávky…")
+                showNotice("Realtime spojenie zlyhalo — prepisujem z uloženej nahrávky…")
                 transcript = await transcribeBatch(seconds: elapsed)
             } else {
                 _ = batchAudioBuffer.drain()  // realtime succeeded — drop the fallback copy now
@@ -1143,7 +1178,7 @@ final class DictationEngine {
                     // The raw fallback is deliberately unpunctuated/uncorrected — inserting it
                     // silently reads as "wrong text got pasted" rather than "network hiccup,
                     // here's what you actually said". Say so.
-                    showNotice("⚠️ Smart rewrite zlyhalo (sieť/timeout) — vložený je surový prepis bez úprav.", sticky: false)
+                    showNotice("Smart rewrite zlyhalo (sieť/timeout) — vložený je surový prepis bez úprav.", sticky: false)
                 }
                 isRewriting = false
             } else {
@@ -1186,7 +1221,9 @@ final class DictationEngine {
                                              category: category, seconds: elapsed,
                                              rewrittenText: rewritten, screenshotJPEG: screenshotJPEG,
                                              mode: transcriptionMode.rawValue, smart: wasSmart,
-                                             model: model)
+                                             model: model,
+                                             silentSeconds: silence.silentSeconds,
+                                             longestSilenceSeconds: silence.longestRunSeconds)
         }
         return result
     }
@@ -1201,6 +1238,7 @@ final class DictationEngine {
     /// retry it — losing it was the old behaviour and it made every network blip destructive.
     private func transcribeBatch(seconds: Int) async -> String {
         let pcmData = batchAudioBuffer.drain()
+        let rawPCM = rawAudioBuffer.drain()
         AppLogger.log("[DictationEngine] Batch transcribe — \(pcmData.count) bytes PCM, model: \(batchModel)")
         guard !pcmData.isEmpty else { return "" }
 
@@ -1222,10 +1260,10 @@ final class DictationEngine {
         let watchdog = Task { [weak self] in
             try? await Task.sleep(for: .seconds(6))
             guard let self, !Task.isCancelled else { return }
-            self.showNotice("⏳ Prepis trvá dlhšie než zvyčajne — nahrávka je uložená, nič sa nestratí.")
+            self.showNotice("Prepis trvá dlhšie než zvyčajne — nahrávka je uložená, nič sa nestratí.")
             try? await Task.sleep(for: .seconds(14))
             guard !Task.isCancelled else { return }
-            self.showNotice("⚠️ Server neodpovedá. Nahrávka je uložená — skús ju znova cez menu → Čakajúce nahrávky.")
+            self.showNotice("Server neodpovedá. Nahrávka je uložená — skús ju znova cez menu → Čakajúce nahrávky.")
         }
         defer { watchdog.cancel() }
 
@@ -1241,7 +1279,7 @@ final class DictationEngine {
                 Telemetry.shared.dictation(seconds: seconds, metrics: nil, model: batchModel, mode: "batch",
                                            outcome: "empty", latencyMs: lastTranscriptionLatencyMs, category: .generic)
                 AppLogger.log("[DictationEngine] ⚠️ prázdny prepis napriek zaznamenanému zvuku — nahrávku nechávam uloženú")
-                showNotice("⚠️ Model nevrátil žiadny text, hoci v nahrávke je zvuk. Nahrávka je uložená — skús ju znova cez menu → Čakajúce nahrávky.")
+                showNotice("Model nevrátil žiadny text, hoci v nahrávke je zvuk. Nahrávka je uložená — skús ju znova cez menu → Čakajúce nahrávky.")
                 return ""
             }
             if let pending { PendingDictationStore.shared.remove(pending) }
@@ -1250,6 +1288,7 @@ final class DictationEngine {
             // Started only after the primary is done: the inserted text must never wait on a
             // comparison the user isn't reading yet.
             startShadowTranscription(wav: wav, keywords: keywords, seconds: seconds)
+            startTrimABTest(rawPCM: rawPCM, keywords: keywords, seconds: seconds)
             return text
         } catch {
             AppLogger.log("[DictationEngine] ⚠️ Batch transcription failed: \(error)")
@@ -1258,7 +1297,7 @@ final class DictationEngine {
             connectionError = "Sieťová chyba: \(error.localizedDescription)"
             watchdog.cancel()
             if pending != nil {
-                showNotice("⚠️ Prepis zlyhal — nahrávka je uložená. Skús ju znova cez menu → Čakajúce nahrávky.")
+                showNotice("Prepis zlyhal — nahrávka je uložená. Skús ju znova cez menu → Čakajúce nahrávky.")
             }
             return ""
         }
@@ -1277,7 +1316,7 @@ final class DictationEngine {
                                          mode: transcriptionMode.rawValue, smart: false,
                                          model: transcriptionMode == .realtime ? realtimeModel.rawValue : batchModel)
         // Non-sticky: a new dictation is already recording and its pill must come back.
-        showNotice("⚠️ Predchádzajúci prepis dorazil neskoro (\(text.count) znakov) — vlož ho cez ⌃⌥V.", sticky: false)
+        showNotice("Predchádzajúci prepis dorazil neskoro (\(text.count) znakov) — vlož ho cez ⌃⌥V.", sticky: false)
         AppLogger.log("[DictationEngine] oneskorený prepis odložený do pamäte (\(text.count) znakov)")
     }
 
@@ -1309,12 +1348,38 @@ final class DictationEngine {
         }
     }
 
+    /// Same-model comparison for validating SilenceTrimmer — see the field notes on the type
+    /// itself. Skipped when nothing was actually cut: identical audio would just reproduce the
+    /// same transcript at double the cost, telling us nothing.
+    private func startTrimABTest(rawPCM: Data, keywords: [String], seconds: Int) {
+        let removedSeconds = Int(silenceTrimmer.trimmedSeconds)
+        guard silenceTrimABTestEnabled, !rawPCM.isEmpty, removedSeconds > 0 else { return }
+        let model = batchModel
+        let key = batchAPIKey
+        guard !key.isEmpty else { return }
+        let rawWav = Self.wavData(pcm16: rawPCM, sampleRate: 24_000, channels: 1)
+        let entryID = currentEntryID
+        Task.detached(priority: .background) {
+            do {
+                let text = try await Self.upload(wav: rawWav, model: model, keywords: keywords, apiKey: key)
+                await MainActor.run {
+                    DictationHistoryStore.shared.attachTrimTest(to: entryID, text: text, secondsRemoved: removedSeconds)
+                    // Real second spend on the same model — counted the same way the shadow's is.
+                    UsageStore.shared.logDictation(seconds: seconds, text: text, model: model)
+                }
+                AppLogger.log("[DictationEngine] A/B test strihania (netrimovaná nahrávka, \(model)) hotový — \(text.count) znakov, porovnáva sa oproti \(removedSeconds)s vystrihnutým z primárnej cesty")
+            } catch {
+                AppLogger.log("[DictationEngine] ⚠️ A/B test strihania zlyhal: \(error.localizedDescription)")
+            }
+        }
+    }
+
     /// Re-uploads a recording whose transcription failed earlier. The text goes to history and
     /// the insert-from-memory slot rather than straight into whatever happens to be focused —
     /// minutes may have passed and the field it was dictated into is probably long gone.
     func retryPending(_ item: PendingDictation) async {
         guard hasBatchKey else {
-            showNotice("⚠️ \(Self.isGemini(batchModel) ? "Gemini" : "OpenAI") API kľúč nie je nastavený.")
+            showNotice("\(Self.isGemini(batchModel) ? "Gemini" : "OpenAI") API kľúč nie je nastavený.")
             return
         }
         guard let wav = PendingDictationStore.shared.wav(for: item) else {
@@ -1325,7 +1390,7 @@ final class DictationEngine {
         AppLogger.log("[DictationEngine] retryPending \(item.id) — \(wav.count) B")
         isTranscribing = true
         defer { isTranscribing = false }
-        showNotice("⏳ Skúšam prepis uloženej nahrávky…")
+        showNotice("Skúšam prepis uloženej nahrávky…")
         do {
             // App-profile keywords aren't reused here: sessionProfile belongs to the live
             // session, and the recording's own profile wasn't persisted. Defaults still apply.
@@ -1334,7 +1399,7 @@ final class DictationEngine {
                                              apiKey: batchAPIKey)
             PendingDictationStore.shared.remove(item)
             guard !text.isEmpty else {
-                showNotice("⚠️ Nahrávka neobsahovala rozpoznateľnú reč.")
+                showNotice("Nahrávka neobsahovala rozpoznateľnú reč.")
                 return
             }
             DictationHistoryStore.shared.log(text, appName: item.appName, bundleID: item.bundleID,
@@ -1343,10 +1408,10 @@ final class DictationEngine {
                                              // that failed when the recording was made.
                                              model: batchModel)
             DictationMemoryStore.shared.store(text)
-            showNotice("✅ Prepis dokončený (\(text.count) znakov) — vlož ho cez ⌃⌥V alebo z histórie.")
+            showNotice("Prepis dokončený (\(text.count) znakov) — vlož ho cez ⌃⌥V alebo z histórie.")
         } catch {
             AppLogger.log("[DictationEngine] retryPending zlyhalo: \(error)")
-            showNotice("⚠️ Prepis stále zlyháva: \(error.localizedDescription). Nahrávka ostáva uložená.")
+            showNotice("Prepis stále zlyháva: \(error.localizedDescription). Nahrávka ostáva uložená.")
         }
     }
 
@@ -1652,7 +1717,7 @@ final class DictationEngine {
         guard reconnectAttempts < maxReconnectAttempts else {
             AppLogger.log("[DictationEngine] ⚠️ Reconnect attempts exhausted (\(maxReconnectAttempts)) — giving up (\(reason))")
             connectionError = "Spojenie so serverom sa stratilo. Skús diktovanie znova."
-            liveText        = "⚠️ Chyba spojenia"
+            liveText        = "Chyba spojenia"
             isRecording     = false
             return
         }
@@ -1720,7 +1785,7 @@ final class DictationEngine {
             // all (it used to show the raw English API text, only hidden by a 3 s auto-dismiss).
             if !harmless {
                 connectionError = "[\(code)] \(msg)"
-                liveText = "⚠️ \(msg)"
+                liveText = "\(msg)"
             }
             stopSession()
             if liveInsertActive {
@@ -1738,7 +1803,6 @@ final class DictationEngine {
             if let delta = json["delta"] as? String, !delta.isEmpty {
                 lastDeltaDate = Date()
                 isWaitingForServer = false
-                liveText += delta
                 if transcriptionMode == .realtime, liveInsertEnabled, !isSmartMode {
                     if !liveInsertActive {
                         liveInsertActive = FocusValidator.hasEditableFocus()
@@ -1751,6 +1815,13 @@ final class DictationEngine {
                         liveInsertedCount += delta.count
                     }
                 }
+                // Text already lands in the field when live-inserting — showing it a second
+                // time in the pill too is pure duplication. Pill stays compact (badge +
+                // elapsed time only) in that case; liveText only accumulates when there's no
+                // field to insert into, since the pill is then the only place to see it.
+                if !liveInsertActive {
+                    liveText += delta
+                }
             }
 
         // Transcription completed after buffer commit — resume stopAndTranscribe
@@ -1762,7 +1833,11 @@ final class DictationEngine {
                           ?? ""
             if !transcript.isEmpty {
                 accumulatedText += (accumulatedText.isEmpty ? "" : " ") + transcript
-                liveText = accumulatedText
+                // Same reasoning as the delta case above — don't mirror into the pill when
+                // it's already in the field.
+                if !liveInsertActive {
+                    liveText = accumulatedText
+                }
             }
             if liveInsertActive {
                 if transcriptionContinuation != nil {
@@ -1789,6 +1864,7 @@ final class DictationEngine {
 
     private func stopAudio() {
         AppLogger.log("[DictationEngine] 🔴 stopAudio() | session #\(sessionID) isMicReady=\(isMicReady) btNeg=\(btNegotiating) chunks=\(chunkCounter.sent) err=\(connectionError ?? "nil")")
+        AudioDucking.shared.restore()
         if let cap = deviceCapture {
             cap.stop()
             deviceCapture = nil
@@ -1890,6 +1966,169 @@ private final class ChunkCounter: @unchecked Sendable {
     var failed: Int { lock.lock(); defer { lock.unlock() }; return failCount }
 }
 private let chunkCounter = ChunkCounter()
+
+/// Measurement-only pass (no audio is cut): sums up how much of a recording sits below a
+/// rough silence floor, and the longest single quiet stretch — e.g. the "thinking pause"
+/// this exists to measure. Feeds Telemetry so the VAD-trimming decision is based on real
+/// dictations, not a guess. Same amplitude scale/threshold ballpark as ChunkCounter.hasRealAudio.
+private final class SilenceTracker: @unchecked Sendable {
+    // ponytail: fixed threshold, not adaptive per-mic noise floor — good enough to size the
+    // win; real trimming (if this measurement says it's worth building) would want the
+    // adaptive calibration discussed with the user.
+    private static let threshold: Int16 = 300
+    // Below this, a quiet stretch reads as a normal between-words gap, not a "pause to think" —
+    // only runs at least this long count toward silentSeconds (longestRun tracks any length).
+    private static let minRunSeconds: Double = 1.5
+
+    private let lock = NSLock()
+    private var currentRunSeconds: Double = 0
+    private var silentSeconds: Double = 0
+    private var longestRunSeconds: Double = 0
+
+    func reset() {
+        lock.lock(); defer { lock.unlock() }
+        currentRunSeconds = 0; silentSeconds = 0; longestRunSeconds = 0
+    }
+
+    func recordChunk(maxAmplitude: Int16, seconds: Double) {
+        lock.lock(); defer { lock.unlock() }
+        if maxAmplitude < Self.threshold {
+            currentRunSeconds += seconds
+            if currentRunSeconds > longestRunSeconds { longestRunSeconds = currentRunSeconds }
+        } else {
+            if currentRunSeconds >= Self.minRunSeconds { silentSeconds += currentRunSeconds }
+            currentRunSeconds = 0
+        }
+    }
+
+    var summary: (silentSeconds: Int, longestRunSeconds: Int) {
+        lock.lock(); defer { lock.unlock() }
+        // A run still in progress when recording stops (e.g. trailing silence before the
+        // stop shortcut) counts too — it's real dead air that would've been uploaded.
+        let tail = currentRunSeconds >= Self.minRunSeconds ? currentRunSeconds : 0
+        return (Int(silentSeconds + tail), Int(longestRunSeconds))
+    }
+}
+private let silenceTracker = SilenceTracker()
+
+/// Batch-mode only: actually drops confirmed long silence from the audio before it's ever
+/// appended to `batchAudioBuffer`, unlike SilenceTracker above (measurement only). Deliberately
+/// conservative — see the 2026-09 CLAUDE.md discussion this was built from: only cuts once a
+/// quiet stretch has run past `cutAfterSeconds` (a normal breath or a gap between sentences
+/// never gets touched), and keeps the last `rollSeconds` of that silence right before speech
+/// resumes so the join isn't an audible hard splice. Batch APIs bill per minute of audio, so
+/// every second removed here is a direct, exact cost saving — see Pricing.usdPerMinute.
+///
+/// First real test (2026-09-08, HyperX SoloCast) showed a 7s pause measured by SilenceTracker
+/// as only a 4s longest run — something mid-pause (mic pop, chair creak) briefly crossed the
+/// threshold and reset the count, so nothing got cut at all. `resumeDebounceSeconds` fixes
+/// this: a loud blip shorter than the debounce doesn't count as "speech resumed", it's folded
+/// back into the pause. Only a loud stretch that itself persists past the debounce ends a cut.
+final class SilenceTrimmer: @unchecked Sendable {
+    static let threshold: Int16 = 300
+    static let cutAfterSeconds: Double = 4.0
+    static let rollSeconds: Double = 1.0
+    static let resumeDebounceSeconds: Double = 0.3
+
+    private let lock = NSLock()
+    private var runSeconds: Double = 0
+    private var loudRunSeconds: Double = 0
+    private var dropping = false
+    private var rollBuffer: [(Data, Double)] = []
+    private var rollDuration: Double = 0
+    private var trimmed: Double = 0
+
+    func reset() {
+        lock.lock(); defer { lock.unlock() }
+        runSeconds = 0; loudRunSeconds = 0; dropping = false
+        rollBuffer.removeAll(); rollDuration = 0; trimmed = 0
+    }
+
+    var trimmedSeconds: Double {
+        lock.lock(); defer { lock.unlock() }; return trimmed
+    }
+
+    private func drop(_ bytes: Data, _ seconds: Double) -> [Data] {
+        trimmed += seconds
+        rollBuffer.append((bytes, seconds)); rollDuration += seconds
+        while rollDuration > Self.rollSeconds, let first = rollBuffer.first {
+            rollDuration -= first.1; rollBuffer.removeFirst()
+        }
+        return []
+    }
+
+    /// Returns the chunk(s) that should actually be appended to the batch buffer right now —
+    /// empty while mid-cut, or the flushed roll buffer plus this chunk the moment speech
+    /// genuinely resumes.
+    func process(_ bytes: Data, maxAmplitude: Int16, seconds: Double) -> [Data] {
+        lock.lock(); defer { lock.unlock() }
+
+        guard maxAmplitude < Self.threshold else {
+            loudRunSeconds += seconds
+            // Not yet in a candidate pause at all — ordinary speech, always kept.
+            guard dropping || runSeconds > 0 else { return [bytes] }
+            guard loudRunSeconds >= Self.resumeDebounceSeconds else {
+                // A brief spike inside a pause — still provisionally silence.
+                return dropping ? drop(bytes, seconds) : [bytes]
+            }
+            let wasDropping = dropping
+            dropping = false; runSeconds = 0; loudRunSeconds = 0
+            guard wasDropping else { return [bytes] }
+            let flushed = rollBuffer.map(\.0)
+            rollBuffer.removeAll(); rollDuration = 0
+            return flushed + [bytes]
+        }
+
+        loudRunSeconds = 0
+        runSeconds += seconds
+        guard dropping || runSeconds >= Self.cutAfterSeconds else { return [bytes] }
+        dropping = true
+        return drop(bytes, seconds)
+    }
+
+    #if DEBUG
+    static func selfCheck() {
+        let trimmer = SilenceTrimmer()
+        let loud = Data(repeating: 0, count: 10) // amplitude irrelevant to byte count here
+        var kept = 0, dropped = 0
+        // 2s loud, 6s silent (should start cutting after 4s), 2s loud again.
+        for _ in 0..<20 { kept += trimmer.process(loud, maxAmplitude: 1000, seconds: 0.1).count }
+        for _ in 0..<60 {
+            dropped += trimmer.process(loud, maxAmplitude: 0, seconds: 0.1).isEmpty ? 1 : 0
+        }
+        // Resuming speech must itself clear resumeDebounceSeconds before it flushes — a single
+        // 0.1s chunk isn't enough (that's the whole point of the debounce), so drive a few.
+        var maxFlushCount = 0
+        for _ in 0..<4 {
+            maxFlushCount = max(maxFlushCount, trimmer.process(loud, maxAmplitude: 1000, seconds: 0.1).count)
+        }
+        assert(kept == 20, "chunks before any silence must always pass through")
+        assert(dropped > 0, "a 6s silent run must start dropping chunks after cutAfterSeconds")
+        assert(dropped < 60, "the first ~4s of the silent run must NOT be dropped (natural pause)")
+        assert(maxFlushCount > 1, "resuming speech must flush the roll buffer plus itself, not just itself")
+        assert(trimmer.trimmedSeconds > 0 && trimmer.trimmedSeconds < 6, "trimmed seconds must be less than the full silent run (roll buffer stays)")
+
+        // The bug this was actually built to fix: a 7s pause fragmented by a brief mid-pause
+        // blip (0.2s, under the debounce) must still get cut as if it were one continuous run.
+        let trimmer2 = SilenceTrimmer()
+        for _ in 0..<20 { _ = trimmer2.process(loud, maxAmplitude: 1000, seconds: 0.1) }  // 2s speech
+        for _ in 0..<30 { _ = trimmer2.process(loud, maxAmplitude: 0, seconds: 0.1) }     // 3s silence
+        for _ in 0..<2  { _ = trimmer2.process(loud, maxAmplitude: 1000, seconds: 0.1) }  // 0.2s blip (< debounce)
+        for _ in 0..<40 { _ = trimmer2.process(loud, maxAmplitude: 0, seconds: 0.1) }     // 4s more silence
+        assert(trimmer2.trimmedSeconds > 0, "a brief mid-pause blip must not block the cut for a pause that's continuous in substance")
+
+        // A real resumption (blip long enough to clear the debounce) must still end the cut.
+        let trimmer3 = SilenceTrimmer()
+        for _ in 0..<50 { _ = trimmer3.process(loud, maxAmplitude: 0, seconds: 0.1) }     // 5s silence, cutting
+        for _ in 0..<5  { _ = trimmer3.process(loud, maxAmplitude: 1000, seconds: 0.1) }  // 0.5s real speech
+        let afterReal = trimmer3.process(loud, maxAmplitude: 0, seconds: 0.1)
+        assert(!afterReal.isEmpty || trimmer3.trimmedSeconds < 5.5, "a real resumption must reset the run, not just extend the same cut")
+
+        AppLogger.log("[SilenceTrimmer] selfCheck OK")
+    }
+    #endif
+}
+private let silenceTrimmer = SilenceTrimmer()
 
 /// Passive audio-quality check over the first ~15s of a session — peak level,
 /// clipping, and a noise-floor/SNR estimate (same heuristic as MicTestEngine, minus
@@ -2022,6 +2261,8 @@ private final class BatchAudioBuffer: @unchecked Sendable {
     }
 }
 private let batchAudioBuffer = BatchAudioBuffer()
+// Untrimmed copy, only fed while the silence-trim A/B test is on — see accumulateChunkForBatch.
+private let rawAudioBuffer = BatchAudioBuffer()
 
 // Realtime audio thread: NO file/console I/O here on purpose. Logging from the
 // CoreAudio render thread was the likely cause of SwiftUI/AttributeGraph crashes
@@ -2068,6 +2309,7 @@ private func convertChunk(
         if mag > maxAmp { maxAmp = mag }
     }
     chunkCounter.recordSent(byteCount: frameCount * 2, maxAmplitude: maxAmp)
+    silenceTracker.recordChunk(maxAmplitude: maxAmp, seconds: Double(frameCount) / 24_000)
     qualityMonitor.recordChunk(ptr: ptr, count: frameCount)
     // Normal speech rarely exceeds ~10-30% of full digital scale, so a raw linear
     // ratio barely moves the UI. Apply a perceptual (sqrt) curve + gain so typical
@@ -2096,15 +2338,39 @@ private func sendChunkOverWebSocket(
     queue.enqueueAudio(bytes)
 }
 
-// Same as above, but for .batch mode: no WebSocket, just accumulate in memory.
+// Same as above, but for .batch mode: no WebSocket, just accumulate in memory — and, unlike
+// the realtime path, run confirmed long silence through SilenceTrimmer before it ever lands
+// in batchAudioBuffer, since batch mode has no server-side VAD to do this for us.
+// `trackRaw` is DictationEngine.silenceTrimABTestEnabled, captured on MainActor before this
+// closure was installed (see the "no @MainActor access from audio thread" note above) — when
+// on, the untrimmed audio is also kept, for a same-model before/after comparison.
 private func accumulateChunkForBatch(
     buffer: AVAudioPCMBuffer,
     inputSampleRate: Double,
     converter: AVAudioConverter,
-    pcm16Format: AVAudioFormat
+    pcm16Format: AVAudioFormat,
+    trackRaw: Bool
 ) {
     guard let bytes = convertChunk(buffer: buffer, inputSampleRate: inputSampleRate, converter: converter, pcm16Format: pcm16Format) else { return }
-    batchAudioBuffer.append(bytes)
+    if trackRaw { rawAudioBuffer.append(bytes) }
+    let seconds = Double(bytes.count / 2) / 24_000
+    for chunk in silenceTrimmer.process(bytes, maxAmplitude: peakAmplitude(bytes), seconds: seconds) {
+        batchAudioBuffer.append(chunk)
+    }
+}
+
+// Local re-scan rather than threading convertChunk's already-computed amplitude through —
+// convertChunk is shared with the realtime path, which doesn't need this value, and the
+// duplicate scan over a ~100ms chunk is cheap.
+private func peakAmplitude(_ data: Data) -> Int16 {
+    var maxAmp: Int16 = 0
+    data.withUnsafeBytes { (raw: UnsafeRawBufferPointer) in
+        for v in raw.bindMemory(to: Int16.self) {
+            let mag = v == Int16.min ? Int16.max : abs(v)
+            if mag > maxAmp { maxAmp = mag }
+        }
+    }
+    return maxAmp
 }
 
 private extension AVAuthorizationStatus {

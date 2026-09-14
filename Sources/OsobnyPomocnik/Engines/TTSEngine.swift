@@ -27,9 +27,27 @@ final class TTSEngine: NSObject {
     var mode: TTSMode {
         didSet { UserDefaults.standard.set(mode.rawValue, forKey: "tts.mode") }
     }
-    var rate: Float {
-        didSet { UserDefaults.standard.set(Double(rate), forKey: "tts.rate") }
+    /// Every speed the settings screen offers, in cycling order (Vyvoj/Komponenty/nastavenia-rychlosti.md).
+    static let allSpeeds: [Double] = [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 2.5, 3]
+    static let defaultSpeeds: [Double] = [0.75, 1, 1.25, 1.5, 2]
+    static func format(_ speed: Double) -> String { String(format: "%g×", speed) }
+
+    /// Playback speed as a multiplier (1 = normal). macOS voices top out at 2×, Google honours up to 3×.
+    var speed: Double {
+        didSet { UserDefaults.standard.set(speed, forKey: "tts.speed") }
     }
+    /// Speeds the pill button cycles through — kept sorted and always containing 1×, so the
+    /// user can never end up with an empty set.
+    var enabledSpeeds: [Double] {
+        didSet {
+            let clean = Self.allSpeeds.filter { enabledSpeeds.contains($0) || $0 == 1 }
+            if clean != enabledSpeeds { enabledSpeeds = clean }
+            UserDefaults.standard.set(enabledSpeeds, forKey: "tts.enabledSpeeds")
+        }
+    }
+    var orderedSpeeds: [Double] { Self.allSpeeds.filter { enabledSpeeds.contains($0) } }
+    /// Engine-native rate: 0.5 = normal for both AVSpeech and the Google mapping.
+    private var rate: Float { Float(speed / 2) }
     var selectedVoiceIdentifier: String? {
         didSet { UserDefaults.standard.set(selectedVoiceIdentifier, forKey: "tts.voiceIdentifier") }
     }
@@ -40,13 +58,21 @@ final class TTSEngine: NSObject {
     }
 
     private let synthesizer = AVSpeechSynthesizer()
+    /// The utterance whose finish/cancel is allowed to flip `isSpeaking` — stopSpeaking() of
+    /// the previous utterance delivers its didCancel *after* the replacement already started.
+    private var currentUtterance: ObjectIdentifier?
     private var googleEngine: GoogleCloudTTSEngine { .shared }
 
     override private init() {
         let savedMode = TTSMode(rawValue: UserDefaults.standard.string(forKey: "tts.mode") ?? "") ?? .googleCloud
-        let savedRate = Float(UserDefaults.standard.double(forKey: "tts.rate"))
         self.mode = savedMode
-        self.rate = savedRate > 0 ? savedRate.clamped(0.1, 1.0) : 0.5
+        let savedSpeed = UserDefaults.standard.double(forKey: "tts.speed")
+        let legacyRate = UserDefaults.standard.double(forKey: "tts.rate")   // pre-redesign slider 0.1–1.0 (= ×0.2–×2)
+        let migrated = legacyRate > 0
+            ? Self.allSpeeds.min { abs($0 - legacyRate * 2) < abs($1 - legacyRate * 2) } ?? 1
+            : 1
+        self.speed = savedSpeed > 0 ? savedSpeed : migrated
+        self.enabledSpeeds = UserDefaults.standard.array(forKey: "tts.enabledSpeeds") as? [Double] ?? Self.defaultSpeeds
         self.selectedVoiceIdentifier = UserDefaults.standard.string(forKey: "tts.voiceIdentifier")
         self.languageMode = UserDefaults.standard.string(forKey: "tts.languageMode") ?? "auto"
         super.init()
@@ -70,6 +96,17 @@ final class TTSEngine: NSObject {
     func replayLast() {
         guard let text = RecentTextStore.shared.lastText else { return }
         speak(text)
+    }
+
+    /// Steps to the next enabled speed (wrapping). Mid-read, the current text restarts at the
+    /// new speed — neither engine can change rate inside an utterance (client decision 2026-09-11).
+    @discardableResult
+    func cycleSpeed() -> Double {
+        let list = orderedSpeeds
+        let next = list.first { $0 > speed + 0.001 } ?? list.first ?? 1
+        speed = next
+        if isSpeaking, let text = currentText { speak(text, trackUsage: false) }
+        return next
     }
 
     func pause() {
@@ -111,6 +148,7 @@ final class TTSEngine: NSObject {
         let utterance = AVSpeechUtterance(string: text)
         utterance.rate = rate.clamped(AVSpeechUtteranceMinimumSpeechRate, AVSpeechUtteranceMaximumSpeechRate)
         utterance.voice = preferredSystemVoice(language: language)
+        currentUtterance = ObjectIdentifier(utterance)
         synthesizer.speak(utterance)
         isSpeaking = true
         isPaused   = false
@@ -170,10 +208,16 @@ final class TTSEngine: NSObject {
 
 extension TTSEngine: AVSpeechSynthesizerDelegate {
     nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {
-        Task { @MainActor in self.isSpeaking = false; self.isPaused = false }
+        utteranceEnded(ObjectIdentifier(utterance))
     }
     nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didCancel utterance: AVSpeechUtterance) {
-        Task { @MainActor in self.isSpeaking = false; self.isPaused = false }
+        utteranceEnded(ObjectIdentifier(utterance))
+    }
+    nonisolated private func utteranceEnded(_ id: ObjectIdentifier) {
+        Task { @MainActor in
+            guard id == self.currentUtterance else { return }
+            self.isSpeaking = false; self.isPaused = false
+        }
     }
 }
 

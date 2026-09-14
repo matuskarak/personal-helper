@@ -8,86 +8,16 @@ extension PreferencesView {
     // MARK: - O aplikácii
 
     var aboutTab: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("O aplikácii").font(.title2.bold())
+        VStack(alignment: .leading, spacing: 14) {
+            Text("O aplikácii").font(Theme.title(22))
 
             HStack(spacing: 14) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 14).fill(accent).frame(width: 56, height: 56)
-                    Image(systemName: "mic.fill")
-                        .font(.system(size: 26, weight: .medium))
-                        .foregroundStyle(.white)
-                }
+                Image(nsImage: NSApp.applicationIconImage)
+                    .resizable().frame(width: 56, height: 56)
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("Osobný pomocník").font(.title3.bold())
+                    Text("Osobný pomocník").font(Theme.title(17))
                     Text("Verzia \(appVersion) (build \(appBuild))")
-                        .font(.subheadline).foregroundStyle(.secondary)
-                }
-            }
-
-            card {
-                externalLinkRow("GitHub",
-                    url: URL(string: "https://github.com")!)
-            }
-
-            // Always visible: a tester's "it broke" report is worthless without the log,
-            // and release builds have no developer mode to unlock it with.
-            card {
-                VStack(alignment: .leading, spacing: 0) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Diagnostika").font(.body.bold())
-                        Text("Keď niečo nefunguje: nechaj zapnutý záznam, zopakuj problém a klikni na „Pripraviť na poslanie“. Vznikne súbor, ktorý sa dá priložiť k správe.")
-                            .font(.caption).foregroundStyle(.secondary)
-                    }
-                    .padding(.horizontal, 16).padding(.top, 13).padding(.bottom, 2)
-
-                    toggleRow(title: "Diagnostika",
-                              subtitle: loggingEnabled
-                                ? "Zapnuté — zaznamenáva priebeh appky a audio udalosti (bez prepisov a kľúčov). Veľkosť: \(logSizeText)"
-                                : "Vypnuté — nič sa nezaznamenáva, tlačidlá nižšie sú skryté",
-                              isOn: Binding(
-                        get: { loggingEnabled },
-                        set: { loggingEnabled = $0; AppLogger.isEnabled = $0; refreshLogSize() }
-                    ))
-                    if loggingEnabled {
-                    rowDivider
-
-                    HStack(spacing: 8) {
-                        Text("Súbor záznamu").font(.body)
-                        Spacer()
-                        Button("Pripraviť na poslanie") { exportLogToDesktop() }
-                            .buttonStyle(.borderedProminent).tint(accent)
-                            .help("Uloží kópiu na plochu a označí ju vo Finderi")
-                        Button("Zobraziť") { LogViewerWindowController.shared.show() }
-                            .buttonStyle(.bordered)
-                        Button("Vymazať") { AppLogger.clear(); refreshLogSize(); exportedLogName = nil }
-                            .buttonStyle(.bordered).foregroundStyle(.red)
-                    }
-                    .padding(.horizontal, 16).padding(.vertical, 12)
-                    rowDivider
-
-                    HStack(spacing: 8) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Záznam audio problémov").font(.body)
-                            Text("Odpojenia a pripojenia mikrofónov, pomalé alebo zaseknuté odpovede audio subsystému. Samostatný súbor — nemaže sa spolu so záznamom vyššie, aby sa dal spätne dohľadať vzorec.")
-                                .font(.caption).foregroundStyle(.secondary)
-                        }
-                        Spacer()
-                        Button("Zobraziť") { NSWorkspace.shared.activateFileViewerSelecting([AudioHealth.fileURL]) }
-                            .buttonStyle(.bordered)
-                            .disabled(!FileManager.default.fileExists(atPath: AudioHealth.fileURL.path))
-                    }
-                    .padding(.horizontal, 16).padding(.vertical, 12)
-
-                    if let name = exportedLogName {
-                        rowDivider
-                        HStack(spacing: 6) {
-                            Image(systemName: "checkmark.circle.fill").foregroundStyle(greenDot)
-                            Text("Uložené na plochu: \(name)").font(.caption)
-                        }
-                        .padding(.horizontal, 16).padding(.vertical, 10)
-                    }
-                    } // loggingEnabled
+                        .font(Theme.body(12)).foregroundStyle(Theme.textSecondary)
                 }
             }
 
@@ -98,22 +28,80 @@ extension PreferencesView {
                 ))
                 rowDivider
                 HStack {
-                    Text("Povolenia").font(.body)
+                    Text("Povolenia").font(Theme.body(13))
                     Spacer()
                     Button("Skontrolovať…") { showOnboarding = true }
-                        .buttonStyle(.bordered)
+                        .buttonStyle(.bordered).controlSize(.small)
                 }
-                .padding(.horizontal, 16).padding(.vertical, 12)
+                .padding(.horizontal, 16).padding(.vertical, 11)
+                rowDivider
+                externalLinkRow("GitHub", url: URL(string: "https://github.com/matuskarak/personal-helper")!)
+            }
+
+            // Always available: a tester's "it broke" report is worthless without the log.
+            sectionCard("Diagnostika",
+                        status: loggingEnabled ? "zapnuté · \(logSizeText)" : "vypnuté",
+                        isExpanded: $diagnosticsExpanded) {
+                toggleRow(title: "Záznam",
+                          subtitle: "Priebeh appky a audio udalosti — bez prepisov a kľúčov.",
+                          isOn: Binding(
+                    get: { loggingEnabled },
+                    set: { loggingEnabled = $0; AppLogger.isEnabled = $0; refreshLogSize() }
+                ))
+                if loggingEnabled {
+                    rowDivider
+                    HStack(alignment: .top, spacing: 8) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Súbor záznamu").font(Theme.body(13))
+                            Text("Keď niečo nefunguje: zopakuj problém a klikni Pripraviť na poslanie.")
+                                .font(Theme.body(11)).foregroundStyle(Theme.textSecondary)
+                        }
+                        Spacer()
+                        Button("Pripraviť na poslanie") { exportLogToDesktop() }
+                            .buttonStyle(.borderedProminent).controlSize(.small).tint(accent)
+                            .help("Uloží kópiu na plochu a označí ju vo Finderi")
+                        Button("Zobraziť") { LogViewerWindowController.shared.show() }
+                            .buttonStyle(.bordered).controlSize(.small)
+                        Button("Vymazať") { AppLogger.clear(); refreshLogSize(); exportedLogName = nil }
+                            .buttonStyle(.bordered).controlSize(.small).foregroundStyle(Theme.error)
+                    }
+                    .padding(.horizontal, 16).padding(.vertical, 12)
+                    rowDivider
+                    HStack(alignment: .top, spacing: 8) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Záznam audio problémov").font(Theme.body(13))
+                            Text("Odpojenia mikrofónov a zaseknutý audio subsystém.")
+                                .font(Theme.body(11)).foregroundStyle(Theme.textSecondary)
+                        }
+                        Spacer()
+                        Button("Zobraziť") { NSWorkspace.shared.activateFileViewerSelecting([AudioHealth.fileURL]) }
+                            .buttonStyle(.bordered).controlSize(.small)
+                            .disabled(!FileManager.default.fileExists(atPath: AudioHealth.fileURL.path))
+                    }
+                    .padding(.horizontal, 16).padding(.vertical, 12)
+                    if let name = exportedLogName {
+                        rowDivider
+                        captionRow("Uložené na plochu: \(name)", color: greenDot)
+                    }
+                }
             }
 
             #if DEBUG
             card {
                 toggleRow(title: "Developer mode",
-                          subtitle: "Vývojárske nástroje: reštart aplikácie z menu bar ikonky (podržaním ⌥) a funkcie vo vývoji. Na poslanie záznamu ho zapínať netreba.",
+                          subtitle: "Reštart z menu bar ikonky (⌥) a funkcie vo vývoji.",
                           isOn: Binding(
                     get: { developerMode },
                     set: { developerMode = $0; DeveloperMode.isEnabled = $0 }
                 ))
+                if developerMode {
+                    rowDivider
+                    toggleRow(title: "A/B test strihania ticha",
+                              subtitle: dictation.silenceTrimABTestEnabled
+                                ? "Každé diktovanie so strihom ticha sa prepíše aj netrimované — dvojnásobná cena."
+                                : "Overí, či strih ticha niekde neorezal reč.",
+                              isOn: $dictation.silenceTrimABTestEnabled)
+                }
             }
             #endif
 
@@ -154,7 +142,7 @@ extension PreferencesView {
     func externalLinkRow(_ label: String, url: URL) -> some View {
         Link(destination: url) {
             HStack {
-                Text(label).font(.body).foregroundStyle(.primary)
+                Text(label).font(Theme.body(13)).foregroundStyle(Theme.textPrimary)
                 Spacer()
                 Image(systemName: "arrow.up.right")
                     .font(.system(size: 12))

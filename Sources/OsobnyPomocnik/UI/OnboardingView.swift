@@ -16,7 +16,7 @@ struct OnboardingView: View {
     @State private var openAIKeyInput = ""
     @State private var openAIKeySaved = false
     @State private var apiKeyTestRunning = false
-    @State private var apiKeyTestResult: String?
+    @State private var apiKeyTestResult: Theme.KeyCheck?
     @State private var googleKeyInput = ""
     @State private var googleKeySaved = false
     @State private var geminiKeyInput = ""
@@ -32,18 +32,18 @@ struct OnboardingView: View {
         ScrollView {
         VStack(alignment: .leading, spacing: 20) {
             VStack(alignment: .leading, spacing: 8) {
-                Text("Vitaj v Osobnom pomocníkovi").font(.title2.bold())
+                Text("Vitaj v Osobnom pomocníkovi").font(Theme.title(22))
                 Text("Diktuješ hlasom do ľubovoľnej appky, text sa vloží tam, kde píšeš; k tomu čítanie označeného textu nahlas a OCR z obrazovky. Na rozbehnutie budeš potrebovať tri veci: povolenia nižšie, vlastný OpenAI API kľúč a pár minút.")
-                    .font(.callout).foregroundStyle(.secondary)
+                    .font(Theme.body(12)).foregroundStyle(Theme.textSecondary)
             }
 
             Divider()
 
             Text("Nastavenie povolení")
-                .font(.title3.bold())
+                .font(Theme.title(17))
 
             Text("Osobný pomocník potrebuje nasledujúce povolenia:")
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Theme.textSecondary)
 
             PermissionRow(
                 icon: "accessibility",
@@ -79,9 +79,9 @@ struct OnboardingView: View {
             Divider()
 
             Text("API kľúč pre diktovanie")
-                .font(.title3.bold())
+                .font(Theme.title(17))
             Text("Diktovanie posiela zvuk na prepis cez OpenAI — appka nemá vlastný kľúč zahrnutý, treba si vytvoriť vlastný (pár minút, platíš len za to, čo skutočne nadiktuješ).")
-                .font(.caption).foregroundStyle(.secondary)
+                .font(Theme.body(11)).foregroundStyle(Theme.textSecondary)
 
             VStack(alignment: .leading, spacing: 6) {
                 numberedStep(1, "Vytvor si účet na", link: "platform.openai.com/signup", url: "https://platform.openai.com/signup")
@@ -96,7 +96,7 @@ struct OnboardingView: View {
                     if let s = NSPasteboard.general.string(forType: .string) { openAIKeyInput = s }
                 }
                 .buttonStyle(.bordered)
-                Button(openAIKeySaved ? "Uložené ✓" : "Uložiť") {
+                Button(openAIKeySaved ? "Uložené" : "Uložiť") {
                     dictation.openAIKey = openAIKeyInput
                     openAIKeySaved = true
                 }
@@ -116,18 +116,17 @@ struct OnboardingView: View {
                 if apiKeyTestRunning { ProgressView().controlSize(.small) }
             }
             if let result = apiKeyTestResult {
-                Text(result).font(.caption)
-                    .foregroundStyle(result.hasPrefix("✅") ? .green : (result.hasPrefix("⚠️") ? .orange : .red))
+                Text(result.message).font(Theme.body(11)).foregroundStyle(result.color)
             }
 
             DisclosureGroup("Gemini kľúč (voliteľné — pre Gemini modely)") {
                 VStack(alignment: .leading, spacing: 10) {
                     Text("Prepisovať vie aj Google Gemini (presnejší na odborné termíny). Ak si v Nastaveniach vyberieš Gemini model, treba kľúč z Google AI Studio — inak toto pole ignoruj.")
-                        .font(.caption).foregroundStyle(.secondary)
+                        .font(Theme.body(11)).foregroundStyle(Theme.textSecondary)
                     numberedStep(1, "Vytvor si kľúč na", link: "aistudio.google.com/apikey", url: "https://aistudio.google.com/apikey")
                     HStack {
                         SecureField("AIza…", text: $geminiKeyInput).textFieldStyle(.roundedBorder)
-                        Button(geminiKeySaved ? "Uložené ✓" : "Uložiť") {
+                        Button(geminiKeySaved ? "Uložené" : "Uložiť") {
                             dictation.geminiKey = geminiKeyInput
                             geminiKeySaved = true
                         }
@@ -143,12 +142,12 @@ struct OnboardingView: View {
             DisclosureGroup("Čítanie kvalitnejším hlasom (voliteľné)") {
                 VStack(alignment: .leading, spacing: 10) {
                     Text("Appka vie čítať aj vstavaným systémovým hlasom bez akéhokoľvek nastavenia — toto je len voliteľné vylepšenie na prirodzenejšie znejúci hlas cez Google Cloud.")
-                        .font(.caption).foregroundStyle(.secondary)
+                        .font(Theme.body(11)).foregroundStyle(Theme.textSecondary)
                     numberedStep(1, "V Google Cloud Console zapni „Cloud Text-to-Speech API“", link: "console.cloud.google.com/apis/library/texttospeech.googleapis.com", url: "https://console.cloud.google.com/apis/library/texttospeech.googleapis.com")
                     numberedStep(2, "Vytvor API kľúč v Credentials a vlož ho sem:", link: "console.cloud.google.com/apis/credentials", url: "https://console.cloud.google.com/apis/credentials")
                     HStack {
                         SecureField("AIza…", text: $googleKeyInput).textFieldStyle(.roundedBorder)
-                        Button(googleKeySaved ? "Uložené ✓" : "Uložiť") {
+                        Button(googleKeySaved ? "Uložené" : "Uložiť") {
                             google.apiKey = googleKeyInput
                             googleKeySaved = true
                         }
@@ -166,21 +165,21 @@ struct OnboardingView: View {
                     get: { telemetry.isEnabled },
                     set: { telemetry.isEnabled = $0; if !$0 { telemetry.clearQueue() } }
                 )) {
-                    Text("Zdieľať anonymné štatistiky používania").font(.body.bold())
+                    Text("Zdieľať anonymné štatistiky používania").font(Theme.bodyBold(13))
                 }
                 Text("Tempo reči, počet slov, výplňové slová, dĺžka diktovania a typ appky — bez samotného textu, mien, kľúčových slov či kľúčov. Ide to do mojej tabuľky a pomáha zlepšovať prepis. Kedykoľvek vypneš v Nastaveniach → Všeobecné.")
-                    .font(.caption).foregroundStyle(.secondary)
+                    .font(Theme.body(11)).foregroundStyle(Theme.textSecondary)
             }
 
             Divider()
 
             VStack(alignment: .leading, spacing: 10) {
-                Text("Prístupový kód (voliteľné)").font(.body.bold())
+                Text("Prístupový kód (voliteľné)").font(Theme.bodyBold(13))
                 Text("Ak ti niekto poslal prístupový kód, vlož ho sem — odomkne funkcie, ktoré ti povolil.")
-                    .font(.caption).foregroundStyle(.secondary)
+                    .font(Theme.body(11)).foregroundStyle(Theme.textSecondary)
                 HStack {
                     TextField("napr. jano-x7k2", text: $accessCodeInput).textFieldStyle(.roundedBorder)
-                    Button(accessCodeSaved ? "Uložené ✓" : "Uložiť") {
+                    Button(accessCodeSaved ? "Uložené" : "Uložiť") {
                         remoteConfig.accessCode = accessCodeInput
                         accessCodeSaved = true
                     }
@@ -201,6 +200,9 @@ struct OnboardingView: View {
         }
         .padding(24)
         .frame(width: 480)
+        .font(Theme.body(13))
+        .foregroundStyle(Theme.textPrimary)
+        .tint(Theme.brandBlueSafe)
         .onAppear {
             refresh()
             openAIKeyInput = dictation.openAIKey
@@ -223,11 +225,11 @@ struct OnboardingView: View {
     @ViewBuilder
     private func numberedStep(_ n: Int, _ text: String, link: String? = nil, url: String? = nil) -> some View {
         HStack(alignment: .top, spacing: 8) {
-            Text("\(n).").font(.caption.bold()).foregroundStyle(.secondary).frame(width: 16, alignment: .trailing)
+            Text("\(n).").font(Theme.bodyBold(11)).foregroundStyle(Theme.textSecondary).frame(width: 16, alignment: .trailing)
             VStack(alignment: .leading, spacing: 2) {
-                Text(text).font(.caption)
+                Text(text).font(Theme.body(11))
                 if let link, let url, let u = URL(string: url) {
-                    Link(link, destination: u).font(.caption2)
+                    Link(link, destination: u).font(Theme.body(10))
                 }
             }
         }
@@ -250,19 +252,19 @@ struct PermissionRow: View {
     var body: some View {
         HStack(spacing: 14) {
             Image(systemName: icon)
-                .font(.title2)
+                .font(Theme.title(22))
                 .frame(width: 32)
-                .foregroundStyle(granted ? .green : .orange)
+                .foregroundStyle(granted ? Theme.success : Theme.brandAmberSafe)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(title).bold()
-                Text(description).font(.caption).foregroundStyle(.secondary)
+                Text(description).font(Theme.body(11)).foregroundStyle(Theme.textSecondary)
             }
 
             Spacer()
 
             if granted {
-                Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+                Image(systemName: "checkmark.circle.fill").foregroundStyle(Theme.success)
             } else {
                 Button("Povoliť", action: action).buttonStyle(.bordered).controlSize(.small)
             }

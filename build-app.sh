@@ -35,9 +35,13 @@ rm -rf "$BUNDLE"
 mkdir -p "$BUNDLE/Contents/MacOS"
 mkdir -p "$BUNDLE/Contents/Resources"
 
-# Skopíruj binárku a Info.plist
+# Skopíruj binárku, Info.plist a assety (ikona, menu bar ikona, fonty — Package.swift ich
+# vylučuje zo SPM, bundlujú sa tu ručne; fonty registruje ATSApplicationFontsPath v Info.plist)
 cp "$BINARY" "$BUNDLE/Contents/MacOS/$APP_NAME"
 cp "$INFO_PLIST" "$BUNDLE/Contents/Info.plist"
+RES_SRC="Sources/$APP_NAME/Resources"
+cp "$RES_SRC/AppIcon.icns" "$RES_SRC"/MenuBarIcon*.png "$BUNDLE/Contents/Resources/"
+cp -R "$RES_SRC/Fonts" "$BUNDLE/Contents/Resources/Fonts"
 
 # Sparkle.framework je dynamický — zabaľ ho a nasmeruj naň rpath.
 SPARKLE_FRAMEWORK=$(find .build/artifacts/sparkle -maxdepth 4 -iname "Sparkle.framework" -type d | head -1)

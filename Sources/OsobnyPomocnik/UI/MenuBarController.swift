@@ -1,10 +1,12 @@
 import AppKit
 import SwiftUI
+import Observation
 
 @MainActor
 final class MenuBarController: NSObject, NSMenuDelegate {
     private var statusItem: NSStatusItem
     private var preferencesWindowController: NSWindowController?
+    private var accessibilityWarningActive = false
 
     // Placeholders refreshed in menuWillOpen
     private var micSubmenuItem      = NSMenuItem(title: "Mikrofón", action: nil, keyEquivalent: "")
@@ -17,12 +19,44 @@ final class MenuBarController: NSObject, NSMenuDelegate {
 
     override init() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-        if let button = statusItem.button {
-            button.image = NSImage(systemSymbolName: "accessibility", accessibilityDescription: "Osobný pomocník")
-            button.image?.isTemplate = true
-        }
         super.init()
+        updateStatusIcon()
         buildMenu()
+        observeRecording()
+    }
+
+    /// The pill is the primary "you're recording" signal, but it can be dragged off-screen,
+    /// parked on another display, or just missed — the menu bar icon is the one place that's
+    /// always in the same spot, so it gets its own state too.
+    private func updateStatusIcon() {
+        guard let button = statusItem.button else { return }
+        let recording = DictationEngine.shared.isRecording
+        // Idle = brand logo (monochrome template PNG from Resources/MenuBarIcon*.png, tinted by
+        // the system per light/dark). Transient states stay SF Symbols — clearer at 18 pt.
+        let symbol = accessibilityWarningActive ? "exclamationmark.triangle.fill"
+                   : recording ? "record.circle.fill" : nil
+        let image = symbol.flatMap { NSImage(systemSymbolName: $0, accessibilityDescription: "Osobný pomocník") }
+            ?? NSImage(named: "MenuBarIcon")
+        image?.isTemplate = true
+        image?.accessibilityDescription = "Osobný pomocník"
+        button.image = image
+        button.toolTip = accessibilityWarningActive
+            ? "Chýba Accessibility povolenie – System Settings → Privacy → Accessibility"
+            : (recording ? "Diktovanie beží" : nil)
+    }
+
+    /// Bridges DictationEngine's @Observable state into this AppKit-only controller — there's
+    /// no SwiftUI view here to pick the change up automatically, so re-subscribing after every
+    /// firing is the standard manual pattern for Observation outside a View body.
+    private func observeRecording() {
+        withObservationTracking {
+            _ = DictationEngine.shared.isRecording
+        } onChange: { [weak self] in
+            Task { @MainActor in
+                self?.updateStatusIcon()
+                self?.observeRecording()
+            }
+        }
     }
 
     // MARK: - Menu
@@ -267,8 +301,23 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     }
 
     @objc private func clearPending() {
+        guard confirmDestructive(title: "Zmazať všetky čakajúce nahrávky?",
+                                  message: "Nedá sa vrátiť späť — nahrávky sa stratia bez prepisu.") else { return }
         AppLogger.log("[MenuBarController] clearPending — mažem \(PendingDictationStore.shared.pending.count) nahrávok")
         PendingDictationStore.shared.removeAll()
+    }
+
+    /// Blocking Áno/Zrušiť dialog for a menu action that can't undo itself — the SwiftUI
+    /// tabs use `.confirmationDialog`, this is the AppKit-menu equivalent of the same rule.
+    private func confirmDestructive(title: String, message: String) -> Bool {
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.informativeText = message
+        alert.addButton(withTitle: "Zmazať")
+        alert.addButton(withTitle: "Zrušiť")
+        alert.buttons.first?.hasDestructiveAction = true
+        NSApp.activate(ignoringOtherApps: true)
+        return alert.runModal() == .alertFirstButtonReturn
     }
 
     @objc private func insertHistoryEntry(_ sender: NSMenuItem) {
@@ -280,6 +329,8 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     }
 
     @objc private func clearHistory() {
+        guard confirmDestructive(title: "Vymazať celú históriu diktovania?",
+                                  message: "Nedá sa vrátiť späť — zmažú sa všetky uložené prepisy.") else { return }
         DictationHistoryStore.shared.clearAll()
     }
 
@@ -287,15 +338,20 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         if preferencesWindowController == nil {
             let window = NSWindow(
                 contentRect: NSRect(x: 0, y: 0, width: 720, height: 520),
-                styleMask: [.titled, .closable],
+                styleMask: [.titled, .closable, .resizable, .miniaturizable],
                 backing: .buffered,
                 defer: false
             )
             window.title = "Nastavenia"
+            window.minSize = NSSize(width: 680, height: 480)
             window.center()
             window.contentView = FirstMouseHostingView(rootView: PreferencesView())
             window.isReleasedWhenClosed = false
             preferencesWindowController = NSWindowController(window: window)
+            // Remembers size AND position across launches (restores immediately if a saved
+            // frame exists, overriding the centered default above) — a user who resizes once
+            // for larger text shouldn't have to redo it every time.
+            preferencesWindowController?.windowFrameAutosaveName = "PreferencesWindow"
         }
         preferencesWindowController?.showWindow(nil)
         preferencesWindowController?.window?.makeKeyAndOrderFront(nil)
@@ -322,12 +378,8 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     // MARK: - Public helpers
 
     func setAccessibilityWarning(_ on: Bool) {
-        let name = on ? "exclamationmark.triangle.fill" : "accessibility"
-        if let btn = statusItem.button {
-            btn.image = NSImage(systemSymbolName: name, accessibilityDescription: "Osobný pomocník")
-            btn.image?.isTemplate = true
-            btn.toolTip = on ? "⚠️ Chýba Accessibility povolenie – System Settings → Privacy → Accessibility" : nil
-        }
+        accessibilityWarningActive = on
+        updateStatusIcon()
     }
 
     /// Surfaces a standalone message in the same floating pill used during dictation,
