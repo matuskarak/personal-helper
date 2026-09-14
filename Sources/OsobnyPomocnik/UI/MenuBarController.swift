@@ -35,10 +35,10 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         // the system per light/dark). Transient states stay SF Symbols — clearer at 18 pt.
         let symbol = accessibilityWarningActive ? "exclamationmark.triangle.fill"
                    : recording ? "record.circle.fill" : nil
-        let image = symbol.flatMap { NSImage(systemSymbolName: $0, accessibilityDescription: "Osobný pomocník") }
+        let image = symbol.flatMap { NSImage(systemSymbolName: $0, accessibilityDescription: "Ozvena") }
             ?? NSImage(named: "MenuBarIcon")
         image?.isTemplate = true
-        image?.accessibilityDescription = "Osobný pomocník"
+        image?.accessibilityDescription = "Ozvena"
         button.image = image
         button.toolTip = accessibilityWarningActive
             ? "Chýba Accessibility povolenie – System Settings → Privacy → Accessibility"

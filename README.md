@@ -1,4 +1,4 @@
-# Osobný pomocník
+# Ozvena
 
 macOS menu bar appka pre slabozrakých — rýchle prečítanie textu (SK/EN, s OCR fallbackom) a diktovanie do ľubovoľného poľa, s voliteľným AI doladením prepisu podľa cieľovej appky ("Smart diktovanie").
 

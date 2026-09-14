@@ -15,7 +15,14 @@ extension PreferencesView {
                 Image(nsImage: NSApp.applicationIconImage)
                     .resizable().frame(width: 56, height: 56)
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("Osobný pomocník").font(Theme.title(17))
+                    HStack(spacing: 6) {
+                        Text("Ozvena").font(Theme.title(17))
+                        Text("alfa")
+                            .font(Theme.bodyBold(10))
+                            .foregroundStyle(Theme.brandAmberSafe)
+                            .padding(.horizontal, 6).padding(.vertical, 2)
+                            .background(Theme.brandAmber.opacity(0.16), in: Capsule())
+                    }
                     Text("Verzia \(appVersion) (build \(appBuild))")
                         .font(Theme.body(12)).foregroundStyle(Theme.textSecondary)
                 }
