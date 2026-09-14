@@ -3,6 +3,21 @@
     <channel>
         <title>OsobnyPomocnik</title>
         <item>
+            <title>0.4.1</title>
+            <pubDate>Mon, 14 Sep 2026 16:49:00 +0200</pubDate>
+            <sparkle:version>5</sparkle:version>
+            <sparkle:shortVersionString>0.4.1</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <sparkle:releaseNotesLink>https://raw.githubusercontent.com/matuskarak/personal-helper/master/OsobnyPomocnik-0.4.1.txt</sparkle:releaseNotesLink>
+            <enclosure url="https://github.com/matuskarak/personal-helper/releases/download/builds/OsobnyPomocnik-0.4.1.zip" length="3388853" type="application/octet-stream" sparkle:edSignature="jTX1yoplvZ5LCp2rbJdMwoemj4BQaIPkZYdwrcMpzO49UrwmCJilXVSKVJDslaDxL05KzbiASa/XeWJ4ETWLCw=="/>
+            <sparkle:deltas>
+                <enclosure url="https://github.com/matuskarak/personal-helper/releases/download/builds/OsobnyPomocnik5-4.delta" sparkle:deltaFrom="4" length="348418" type="application/octet-stream" sparkle:deltaFromSparkleExecutableSize="977712" sparkle:deltaFromSparkleLocales="de,he,ar,el,ja,fa,uk" sparkle:edSignature="AutEBd7QV2dRUbY3/9X73NDTsgt+yMHBWxCL3G+1hzFKKAZzDnoB1OHm2uAIpECNBCq6OGW+b/y3x4D3Gk80Bg=="/>
+                <enclosure url="https://github.com/matuskarak/personal-helper/releases/download/builds/OsobnyPomocnik5-3.delta" sparkle:deltaFrom="3" length="1387374" type="application/octet-stream" sparkle:deltaFromSparkleExecutableSize="977712" sparkle:deltaFromSparkleLocales="de,he,ar,el,ja,fa,uk" sparkle:edSignature="o/jUIrc5R0NhULe73XNqaWuCTqFIVxrNjiBxufSBJWXtfZooDzzZeDWI4O216wYhp2A0LMfWkhKc/KX84aaMAQ=="/>
+                <enclosure url="https://github.com/matuskarak/personal-helper/releases/download/builds/OsobnyPomocnik5-2.delta" sparkle:deltaFrom="2" length="1402822" type="application/octet-stream" sparkle:deltaFromSparkleExecutableSize="977712" sparkle:deltaFromSparkleLocales="de,he,ar,el,ja,fa,uk" sparkle:edSignature="Dv0q5TzBd2+QR8koyJzx/GwIugnikSAuvVKSXJVzENuLoGOe47TtFJSL47W1USfuc/6HTPrclXhGoA2fAHjvDw=="/>
+            </sparkle:deltas>
+        </item>
+        <item>
             <title>0.4.0</title>
             <pubDate>Mon, 14 Sep 2026 12:37:45 +0200</pubDate>
             <sparkle:version>4</sparkle:version>
@@ -28,16 +43,6 @@
             <sparkle:deltas>
                 <enclosure url="https://github.com/matuskarak/personal-helper/releases/download/builds/OsobnyPomocnik3-2.delta" sparkle:deltaFrom="2" length="358322" type="application/octet-stream" sparkle:deltaFromSparkleExecutableSize="977712" sparkle:deltaFromSparkleLocales="de,he,ar,el,ja,fa,uk" sparkle:edSignature="Q270nVApntAz02uNpIq3fhJ0+2HXZnGG7AiCXb8eXRvYhaGOAOObHteIL5qjWtnw9Y+ZQEyBh8Md0dWhxcqeCQ=="/>
             </sparkle:deltas>
-        </item>
-        <item>
-            <title>0.2.0</title>
-            <pubDate>Wed, 02 Sep 2026 12:23:20 +0200</pubDate>
-            <sparkle:version>2</sparkle:version>
-            <sparkle:shortVersionString>0.2.0</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <sparkle:releaseNotesLink>https://raw.githubusercontent.com/matuskarak/personal-helper/master/OsobnyPomocnik-0.2.0.txt</sparkle:releaseNotesLink>
-            <enclosure url="https://github.com/matuskarak/personal-helper/releases/download/builds/OsobnyPomocnik-0.2.0.zip" length="2558618" type="application/octet-stream" sparkle:edSignature="DaVh2IsnTp+JMipuvOnXnCG0tDLbM0mnIh2Pv1fIUPJHX8a8qEal9SURRZC6308uEXHJ0dghfMlt02QLti/wDw=="/>
         </item>
     </channel>
 </rss>
