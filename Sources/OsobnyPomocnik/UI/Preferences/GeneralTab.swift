@@ -8,159 +8,150 @@ extension PreferencesView {
     // MARK: - Všeobecné
 
     var generalTab: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("Všeobecné").font(.title2.bold())
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Všeobecné").font(Theme.title(22))
 
             card {
-                HStack {
+                HStack(alignment: .top, spacing: 16) {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("Mena pre ceny").font(.body)
-                        Text("Ceny sú orientačné, podľa cenníka OpenAI (\(Pricing.ratesCheckedOn)). Prepočet z dolárov je fixný, nie podľa aktuálneho kurzu.")
-                            .font(.caption).foregroundStyle(.secondary)
+                        Text("Mena pre ceny").font(Theme.body(13))
+                        Text("Orientačne, podľa cenníka OpenAI (\(Pricing.ratesCheckedOn)).")
+                            .font(Theme.body(11)).foregroundStyle(Theme.textSecondary)
                     }
                     Spacer()
                     Picker("", selection: Binding(
                         get: { currency },
                         set: { currency = $0; AppCurrency.selected = $0 }
                     )) {
-                        ForEach(AppCurrency.allCases, id: \.self) { c in
-                            Text(c.label).tag(c)
-                        }
+                        ForEach(AppCurrency.allCases, id: \.self) { Text($0.label).tag($0) }
                     }
-                    .pickerStyle(.segmented)
-                    .frame(width: 180)
-                    .labelsHidden()
+                    .pickerStyle(.segmented).frame(width: 180).labelsHidden()
                 }
                 .padding(.horizontal, 16).padding(.vertical, 12)
-            }
-
-            card {
-                toggleRow(title: "Zdieľať anonymné štatistiky používania",
-                          subtitle: "Posiela sa tempo reči, počet slov, výplňové slová, dĺžka a výsledok diktovania, použitý model a typ appky (správy / e-mail / dokument). Nikdy nie samotný text, kľúčové slová, názvy appiek ani kľúče. Pomáha mi zlepšovať prepis.",
+                rowDivider
+                toggleRow(title: "Zdieľať anonymné štatistiky",
+                          subtitle: "Tempo, dĺžka, model a typ appky — nikdy text ani kľúče.",
                           isOn: Binding(
                     get: { telemetry.isEnabled },
                     set: { telemetry.isEnabled = $0; if !$0 { telemetry.clearQueue() } }
                 ))
             }
 
-            // All three provider keys live here, always visible — a conditionally appearing
-            // card is exactly what a visually impaired user cannot hunt for.
-            Text("API kľúče").font(.headline)
+            // One row per key; the field + test unfold only for the key being edited.
+            let keyCount = [dictation.hasOpenAIKey, dictation.hasGeminiKey, google.hasAPIKey].filter { $0 }.count
+            sectionCard("API kľúče", status: "\(keyCount) z 3 nastavené", isExpanded: $keysSectionExpanded) {
+                apiKeyRow(
+                    id: "openai", title: "OpenAI", subtitle: "Diktovanie, Smart a návrhy kľúčových slov.",
+                    placeholder: "sk-…", keyInput: $openAIKeyInput, saved: $openAIKeySaved,
+                    hasKey: dictation.hasOpenAIKey,
+                    onSave: { dictation.openAIKey = openAIKeyInput },
+                    testResult: $apiKeyTestResult, testRunning: $apiKeyTestRunning,
+                    onTest: { await dictation.testAPIKey() },
+                    getKeyURL: URL(string: "https://platform.openai.com/api-keys")!
+                )
+                rowDivider
+                apiKeyRow(
+                    id: "gemini", title: "Gemini", subtitle: "Len pre model gemini-3.5-transcribe.",
+                    placeholder: "AIza…", keyInput: $geminiKeyInput, saved: $geminiKeySaved,
+                    hasKey: dictation.hasGeminiKey,
+                    onSave: { dictation.geminiKey = geminiKeyInput },
+                    testResult: $geminiKeyTestResult, testRunning: $geminiKeyTestRunning,
+                    onTest: { await dictation.testGeminiKey() },
+                    getKeyURL: URL(string: "https://aistudio.google.com/apikey")!
+                )
+                rowDivider
+                apiKeyRow(
+                    id: "google", title: "Google Cloud", subtitle: "Len pre čítanie Google hlasom.",
+                    placeholder: "AIza…", keyInput: $apiKeyInput, saved: $apiKeySaved,
+                    hasKey: google.hasAPIKey,
+                    onSave: { google.apiKey = apiKeyInput; Task { await loadGoogleVoices() } },
+                    testResult: $googleKeyTestResult, testRunning: $googleKeyTestRunning,
+                    onTest: {
+                        do { _ = try await google.fetchVoices(); return .ok("Kľúč funguje") }
+                        catch { return .failure(error.localizedDescription) }
+                    },
+                    getKeyURL: URL(string: "https://console.cloud.google.com/apis/credentials")!
+                )
+            }
 
-            // OpenAI API key
             card {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("OpenAI API kľúč").font(.body)
-                    HStack {
-                        SecureField("sk-…", text: $openAIKeyInput).textFieldStyle(.roundedBorder)
-                        Button(openAIKeySaved ? "Uložené ✓" : "Uložiť") {
-                            dictation.openAIKey = openAIKeyInput
-                            openAIKeySaved = true
-                        }
-                        .disabled(openAIKeyInput.isEmpty)
-                        .buttonStyle(.borderedProminent).tint(accent)
+                HStack(alignment: .top, spacing: 16) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Prístupový kód").font(Theme.body(13))
+                        Text("Odomkne funkcie, ktoré ti niekto povolil.")
+                            .font(Theme.body(11)).foregroundStyle(Theme.textSecondary)
                     }
-                    if let result = apiKeyTestResult {
-                        Text(result).font(.caption)
-                            .foregroundStyle(result.hasPrefix("✅") ? .green :
-                                            (result.hasPrefix("⚠️") ? .orange : .red))
+                    Spacer()
+                    TextField("napr. jano-x7k2", text: $accessCodeInput)
+                        .textFieldStyle(.roundedBorder).frame(width: 160)
+                    Button(accessCodeSaved ? "Uložené" : "Uložiť") {
+                        remoteConfig.accessCode = accessCodeInput
+                        accessCodeSaved = true
+                    }
+                    .buttonStyle(.bordered)
+                }
+                .padding(.horizontal, 16).padding(.vertical, 12)
+            }
+        }
+    }
+
+    func apiKeyRow(
+        id: String,
+        title: String,
+        subtitle: String,
+        placeholder: String,
+        keyInput: Binding<String>,
+        saved: Binding<Bool>,
+        hasKey: Bool,
+        onSave: @escaping () -> Void,
+        testResult: Binding<Theme.KeyCheck?>,
+        testRunning: Binding<Bool>,
+        onTest: @escaping () async -> Theme.KeyCheck,
+        getKeyURL: URL
+    ) -> some View {
+        let editing = editingKey == id
+        return VStack(spacing: 0) {
+            HStack(alignment: .top, spacing: 12) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title).font(Theme.body(13))
+                    Text(subtitle).font(Theme.body(11)).foregroundStyle(Theme.textSecondary)
+                    if let result = testResult.wrappedValue {
+                        Text(result.message).font(Theme.body(11)).foregroundStyle(result.color)
+                    }
+                }
+                Spacer()
+                statusChip(hasKey ? "nastavený" : "chýba", color: hasKey ? Theme.success : Theme.brandAmberSafe)
+                Button(editing ? "Hotovo" : (hasKey ? "Upraviť" : "Nastaviť")) {
+                    withAnimation(Self.sectionAnim) { editingKey = editing ? nil : id }
+                }
+                .buttonStyle(.bordered).controlSize(.small)
+            }
+            .padding(.horizontal, 16).padding(.vertical, 12)
+            if editing {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        SecureField(placeholder, text: keyInput).textFieldStyle(.roundedBorder)
+                        Button(saved.wrappedValue ? "Uložené" : "Uložiť") { onSave(); saved.wrappedValue = true }
+                            .disabled(keyInput.wrappedValue.isEmpty)
+                            .buttonStyle(.borderedProminent).tint(accent)
                     }
                     HStack {
                         Button("Testovať kľúč") {
                             Task {
-                                apiKeyTestRunning = true
-                                apiKeyTestResult = await dictation.testAPIKey()
-                                apiKeyTestRunning = false
+                                testRunning.wrappedValue = true
+                                testResult.wrappedValue = await onTest()
+                                testRunning.wrappedValue = false
                             }
                         }
-                        .buttonStyle(.bordered)
-                        .disabled(apiKeyTestRunning || !dictation.hasOpenAIKey)
-                        if apiKeyTestRunning { ProgressView().controlSize(.small) }
+                        .buttonStyle(.bordered).controlSize(.small)
+                        .disabled(testRunning.wrappedValue || !hasKey)
+                        if testRunning.wrappedValue { ProgressView().controlSize(.small) }
                         Spacer()
-                        Link("Získať kľúč →",
-                             destination: URL(string: "https://platform.openai.com/api-keys")!)
-                            .font(.caption)
-                    }
-                }
-                .padding(16)
-            }
-
-            card {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("Gemini API kľúč").font(.body)
-                    Text("Gemini beží na Google účte, nie na OpenAI kľúči vyššie. Realtime diktovanie a Smart spracovanie používajú naďalej OpenAI.")
-                        .font(.caption).foregroundStyle(.secondary)
-                    HStack {
-                        SecureField("AIza…", text: $geminiKeyInput).textFieldStyle(.roundedBorder)
-                        Button(geminiKeySaved ? "Uložené ✓" : "Uložiť") {
-                            dictation.geminiKey = geminiKeyInput
-                            geminiKeySaved = true
-                        }
-                        .disabled(geminiKeyInput.isEmpty)
-                        .buttonStyle(.borderedProminent).tint(accent)
-                    }
-                    if let result = geminiKeyTestResult {
-                        Text(result).font(.caption)
-                            .foregroundStyle(result.hasPrefix("✅") ? .green : .red)
-                    }
-                    HStack {
-                        Button("Testovať kľúč") {
-                            Task {
-                                geminiKeyTestRunning = true
-                                geminiKeyTestResult = await dictation.testGeminiKey()
-                                geminiKeyTestRunning = false
-                            }
-                        }
-                        .buttonStyle(.bordered)
-                        .disabled(geminiKeyTestRunning || !dictation.hasGeminiKey)
-                        if geminiKeyTestRunning { ProgressView().controlSize(.small) }
-                        Spacer()
-                        Link("Získať kľúč →",
-                             destination: URL(string: "https://aistudio.google.com/apikey")!)
-                            .font(.caption)
+                        Link("Získať kľúč ↗", destination: getKeyURL).font(Theme.body(11))
                     }
                 }
                 .padding(.horizontal, 16).padding(.vertical, 12)
-            }
-
-            card {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("Google Cloud API kľúč").font(.body)
-                    Text("Potrebný len pre čítanie kvalitnejším Google hlasom (záložka Čítanie).")
-                        .font(.caption).foregroundStyle(.secondary)
-                    HStack {
-                        SecureField("AIza...", text: $apiKeyInput).textFieldStyle(.roundedBorder)
-                        Button(apiKeySaved ? "Uložené ✓" : "Uložiť") {
-                            google.apiKey = apiKeyInput
-                            apiKeySaved = true
-                            Task { await loadGoogleVoices() }
-                        }
-                        .disabled(apiKeyInput.isEmpty)
-                        .buttonStyle(.borderedProminent).tint(accent)
-                    }
-                    if let err = voiceError {
-                        Text(err).foregroundStyle(.red).font(.caption)
-                    }
-                }
-                .padding(.horizontal, 16).padding(.vertical, 12)
-            }
-
-            card {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("Prístupový kód").font(.body.bold())
-                    Text("Ak ti niekto poslal prístupový kód, vlož ho sem — odomkne funkcie, ktoré ti povolil.")
-                        .font(.caption).foregroundStyle(.secondary)
-                    HStack {
-                        TextField("napr. jano-x7k2", text: $accessCodeInput)
-                            .textFieldStyle(.roundedBorder)
-                        Button(accessCodeSaved ? "Uložené ✓" : "Uložiť") {
-                            remoteConfig.accessCode = accessCodeInput
-                            accessCodeSaved = true
-                        }
-                        .buttonStyle(.borderedProminent)
-                    }
-                }
-                .padding(16)
+                .nestedRow()
             }
         }
     }

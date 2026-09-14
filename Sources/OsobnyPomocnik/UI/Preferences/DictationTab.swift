@@ -6,287 +6,369 @@ import Charts
 
 extension PreferencesView {
     // MARK: - Diktovanie
+    //
+    // One collapsible section per mode; a setting appears only inside the mode it belongs to
+    // (VAD / live-insert → realtime, shadow compare → batch, screenshot + profiles → Smart).
+    // Every caption is one sentence, visible under its control — never a tooltip.
 
     var dictationTab: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("Diktovanie").font(.title2.bold())
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Diktovanie").font(Theme.title(22))
 
-            // How the shortcut scheme works — the mode/processing split lives in the
-            // shortcuts now, so the settings only pick MODELS per mode, not the mode itself.
-            if remoteConfig.realtimeAllowed {
-                Text("Režim prepisu voliš skratkou, ktorou diktovanie SPUSTÍŠ (\(scLabel(.dictateRealtime)) = realtime, \(scLabel(.dictateBatch)) = po nahraní). Skratka, ktorou diktovanie UKONČÍŠ, rozhoduje o spracovaní: tá istá ako pri štarte = vloží sa čistý prepis; \(scLabel(.smartStop)) = text pred vložením upraví AI s kontextom obrazovky (Smart). Iné diktovacie skratky sa počas nahrávania ignorujú. Ak sa pri diktovaní pomýliš, \(scLabel(.cancelDictation)) ho zruší — nahrávka sa zahodí, nič sa neprepíše ani nevloží.")
-                    .font(.caption).foregroundStyle(.secondary).padding(.horizontal, 4)
-            } else {
-                Text("Diktovanie spustíš aj zastavíš skratkou \(scLabel(.dictateBatch)) — celé sa nahrá a po zastavení prepíše a vloží tam, kde máš kurzor. Ak sa pomýliš, \(scLabel(.cancelDictation)) diktovanie zruší a nahrávku zahodí.")
-                    .font(.caption).foregroundStyle(.secondary).padding(.horizontal, 4)
+            VStack(alignment: .leading, spacing: 4) {
+                if remoteConfig.realtimeAllowed {
+                    Text("Spúšťacia skratka volí režim, ukončovacia spracovanie.")
+                        .font(Theme.body(11)).foregroundStyle(Theme.textSecondary)
+                    if dictationIntroExpanded {
+                        Text("\(scLabel(.dictateRealtime)) spustí realtime, \(scLabel(.dictateBatch)) diktovanie po nahraní. Tá istá skratka = čistý prepis, \(scLabel(.smartStop)) = Smart úprava podľa obrazovky. \(scLabel(.cancelDictation)) zruší bez vloženia.")
+                            .font(Theme.body(11)).foregroundStyle(Theme.textSecondary)
+                    }
+                } else {
+                    Text("Diktovanie spustíš aj zastavíš skratkou \(scLabel(.dictateBatch)).")
+                        .font(Theme.body(11)).foregroundStyle(Theme.textSecondary)
+                    if dictationIntroExpanded {
+                        Text("Po zastavení sa prepis vloží tam, kde máš kurzor. \(scLabel(.cancelDictation)) zruší bez vloženia.")
+                            .font(Theme.body(11)).foregroundStyle(Theme.textSecondary)
+                    }
+                }
+                Button(dictationIntroExpanded ? "Menej" : "Viac") { dictationIntroExpanded.toggle() }
+                    .font(Theme.body(11)).buttonStyle(.plain).pointingHandCursor().foregroundStyle(accent)
             }
+            .padding(.horizontal, 4)
 
-            if remoteConfig.realtimeAllowed {
-            card {
-                toggleRow(title: "Live vkladanie",
-                          subtitle: "Píše text do poľa priebežne počas realtime diktovania. Kým je zapnuté, Smart ukončenie (\(scLabel(.smartStop))) sa pri realtime nedá použiť — text je už vložený.",
-                          isOn: $dictation.liveInsertEnabled)
-                if dictation.liveInsertEnabled {
-                    rowDivider
-                    toggleRow(title: "Enter zastaví diktovanie",
-                              subtitle: "Stlačenie Enter automaticky ukončí nahrávanie",
-                              isOn: $dictation.enterAutoStop)
-                }
-            }
+            if remoteConfig.realtimeAllowed { realtimeSection }
+            batchSection
+            if remoteConfig.smartDictationAllowed { smartSection }
+            keywordsSection
+            pillSection
+            duckSection
 
-            // Realtime mode — model + keywords + VAD (VAD is a realtime-socket setting)
-            Text("Realtime diktovanie — skratka \(scLabel(.dictateRealtime))").font(.headline)
-            card {
-                Text("Slová nabiehajú priebežne už počas rozprávania — najrýchlejšia cesta pre krátke diktovania. \(Pricing.perMinuteLabel(realtime: true)).")
-                    .font(.caption).foregroundStyle(.secondary)
-                    .padding(.horizontal, 16).padding(.top, 10)
-                rowDivider
-                // Both realtime models cost the same, so no price in the labels here.
-                pickerRow(title: "Model", selection: $dictation.realtimeModel) {
-                    ForEach(DictationEngine.RealtimeModel.allCases, id: \.self) { model in
-                        Text(model.label).tag(model)
-                    }
-                }
-                if dictation.realtimeModel == .live {
-                    rowDivider
-                    Text("gpt-live-transcribe je vyhradený prepisovací model — na rozdiel od pôvodného gpt-realtime-whisper vie využiť kľúčové slová a kontext appky. Cena je rovnaká.")
-                        .font(.caption).foregroundStyle(.secondary)
-                        .padding(.horizontal, 16).padding(.vertical, 10)
-                }
-                rowDivider
-                HStack(alignment: .top) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Citlivosť VAD").font(.body)
-                        Text(vadSubtitle).font(.caption).foregroundStyle(.secondary)
-                    }
-                    Spacer()
-                    Picker("", selection: $dictation.transcriptionDelay) {
-                        Text("Rýchla").tag("low")
-                        Text("Stredná").tag("medium")
-                        Text("Pomalá").tag("high")
-                    }
-                    .pickerStyle(.segmented)
-                    .frame(width: 210)
-                    .labelsHidden()
-                }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 12)
-            }
-            } // realtimeAllowed
-
-            // Keywords apply to BOTH modes — the batch path forwards them as `prompt` too —
-            // so this gets its own card instead of living under the realtime model.
-            Text("Kľúčové slová").font(.headline)
-            card {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Predvolené kľúčové slová").font(.body)
-                    Text("Platia pri každom diktovaní v oboch režimoch, nezávisle od appky — jedno slovo alebo fráza na riadok. Napríklad tvoje meno, názvy klientov, nástrojov a odborné termíny, ktoré bežne diktuješ. Sú to nápovede pre model, nie príkazy — pomáhajú hlavne pri anglických výrazoch v slovenskej vete. Pri diktovaní do konkrétnej appky sa k nim pridajú aj kľúčové slová z jej App profilu.")
-                        .font(.caption).foregroundStyle(.secondary)
-                    MultilineField(text: $dictation.defaultKeywords, accent: accent)
-                }
-                .padding(.horizontal, 16).padding(.vertical, 12)
-            }
-
-            // Batch mode — model only
-            Text(remoteConfig.realtimeAllowed ? "Diktovanie po nahraní — skratka \(scLabel(.dictateBatch))" : "Model prepisu").font(.headline)
-            card {
-                Text("Celé sa najprv nahrá a prepíše až po zastavení — presnejšie a lacnejšie, vhodné na dlhšie diktovania. Počas nahrávania sa nezobrazujú priebežné slová.")
-                    .font(.caption).foregroundStyle(.secondary)
-                    .padding(.horizontal, 16).padding(.top, 10)
-                rowDivider
-                pickerRow(title: "Model", selection: $dictation.batchModel) {
-                    // Remote catalog drives the offer; a selected-but-retired model stays in
-                    // the list so the Picker binding never dangles.
-                    let infos = remoteConfig.catalog.batchModels.filter { $0.available || remoteConfig.allModelsAllowed || $0.id == dictation.batchModel }
-                    ForEach(infos) { info in
-                        Text("\(info.displayName) — \(Pricing.perMinuteLabel(realtime: false, batchModel: info.id))")
-                            .tag(info.id)
-                    }
-                    if !infos.contains(where: { $0.id == dictation.batchModel }) {
-                        Text(dictation.batchModel).tag(dictation.batchModel)
-                    }
-                }
-                // Kľúče žijú vo Všeobecné — tu len upozorni, keď pre zvolený model chýba.
-                if DictationEngine.isGemini(dictation.batchModel) ? !dictation.hasGeminiKey : !dictation.hasOpenAIKey {
-                    rowDivider
-                    Text("⚠️ Chýba \(DictationEngine.isGemini(dictation.batchModel) ? "Gemini" : "OpenAI") API kľúč — nastavíš ho v záložke Všeobecné.")
-                        .font(.caption).foregroundStyle(.orange)
-                        .padding(.horizontal, 16).padding(.vertical, 8)
-                }
-                if remoteConfig.shadowCompareAllowed {
-                rowDivider
-                toggleRow(title: "Porovnávať s druhým modelom (tieňový prepis)",
-                          subtitle: dictation.canShadowCompare
-                            ? "Každú nahrávku prepíše aj \(dictation.shadowModelName) a výsledok uloží k diktovaniu. Vkladá sa vždy len text zvoleného modelu — druhý slúži na porovnanie v záložke Kvalita. Kým je zapnuté, platíš oba prepisy."
-                            : "Vyžaduje nastavený OpenAI aj Gemini kľúč — porovnanie beží medzi dvoma poskytovateľmi.",
-                          isOn: $dictation.shadowCompareEnabled)
-                    .disabled(!dictation.canShadowCompare)
-                }
-            }
-
-            // Pozícia pilulky
-            card {
-                toggleRow(title: "Zobrazovať pilulku nad aktívnym poľom",
-                          subtitle: "Namiesto stredu obrazovky sa pilulka zobrazí priamo nad textovým poľom, do ktorého diktuješ",
-                          isOn: Binding(
-                    get: { pillFollowsField },
-                    set: { pillFollowsField = $0; PillPosition.followFocusedField = $0 }
-                ))
-                rowDivider
-                toggleRow(title: "Vysvetlivky v pilulke",
-                          subtitle: "Doplňujúce popisky (napr. prepis až po zastavení, Klikni na zatvorenie). Vypni, keď už skratky poznáš — pilulka bude menšia.",
-                          isOn: Binding(
-                    get: { dictation.pillHintsEnabled },
-                    set: { dictation.pillHintsEnabled = $0 }
-                ))
-                rowDivider
-                HStack {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Pozícia pilulky").font(.body)
-                        Text("Pilulku môžeš kedykoľvek presunúť ťahaním myšou. Predvolene sa centruje na obrazovke, na ktorej práve pracuješ.")
-                            .font(.caption).foregroundStyle(.secondary)
-                    }
-                    Spacer()
-                    Button("Resetovať pozíciu") { PillPosition.reset() }
-                        .buttonStyle(.bordered)
-                }
-                .padding(.horizontal, 16).padding(.vertical, 12)
-            }
-
-            if remoteConfig.smartDictationAllowed {
-                // Smart rewrite model
-                Text("Smart spracovanie — ukonči diktovanie skratkou \(scLabel(.smartStop))").font(.headline)
-                card {
-                    Text("Smart nie je samostatný režim — je to spôsob UKONČENIA. Diktovanie spustíš hociktorou z dvoch skratiek vyššie; keď ho ukončíš skratkou \(scLabel(.smartStop)), AI pred vložením prepis upraví podľa kontextu obrazovky (opraví názvy, formu, appke primeraný tón). Stlačená mimo diktovania nerobí nič.")
-                        .font(.caption).foregroundStyle(.secondary)
-                        .padding(.horizontal, 16).padding(.top, 10)
-                    if !CGPreflightScreenCaptureAccess() {
-                        warningBanner(
-                            "Bez povolenia 'Nahrávanie obrazovky' Smart spracovanie neuvidí obsah obrazovky — funguje len ako oprava gramatiky.",
-                            action: ("Otvoriť nastavenia", { PermissionsChecker.shared.openScreenRecordingSettings() })
-                        )
-                        .padding(.horizontal, 16)
-                        .padding(.top, 8)
-                    }
-                    rowDivider
-                    pickerRow(title: "Model Smart prepisu", selection: $smartModelInput) {
-                        Text("gpt-4o-mini (rýchly, odporúčaný)").tag("gpt-4o-mini")
-                        Text("gpt-4o (presnejší)").tag("gpt-4o")
-                        Text("gpt-4.1-mini").tag("gpt-4.1-mini")
-                        Text("gpt-4.1").tag("gpt-4.1")
-                    }
-                    .onChange(of: smartModelInput) { _, v in rewriteEngine.model = v }
-                }
-
-                // Vision-context prompt
-                card {
-                    toggleRow(title: "Kontext zo screenshotu",
-                              subtitle: "Vysvetlí modelu, ako má screenshot použiť pri oprave prepisu",
-                              isOn: $rewriteEngine.visionPromptEnabled)
-                    if rewriteEngine.visionPromptEnabled {
-                        rowDivider
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text("Prompt").font(.body)
-                            Text("Uprav si predvolený text podľa potreby. Úplným vymazaním sa vráti predvolený prompt.")
-                                .font(.caption).foregroundStyle(.secondary)
-                            TextEditor(text: $rewriteEngine.visionPromptOverride)
-                                .font(.body)
-                                .frame(height: visionPromptExpanded ? 200 : 54)
-                                .overlay(RoundedRectangle(cornerRadius: 6).stroke(.separator))
-                            Button(visionPromptExpanded ? "Zobraziť menej" : "Zobraziť viac") {
-                                visionPromptExpanded.toggle()
-                            }
-                            .buttonStyle(.plain).pointingHandCursor().font(.caption).foregroundStyle(accent)
-                        }
-                        .padding(.horizontal, 16).padding(.vertical, 12)
-                    }
-                    rowDivider
-                    toggleRow(title: "Ukladať screenshoty do histórie",
-                              subtitle: "Na ladenie: uloží presne to, čo model videl pri Smart prepise, ku každému diktovaniu v karte Kvalita. Môžu obsahovať citlivý obsah obrazovky — vypni, keď doladíš.",
-                              isOn: $rewriteEngine.saveScreenshotsToHistory)
-                }
-
-                // App profiles
-                card {
-                    VStack(alignment: .leading, spacing: 0) {
-                        HStack {
-                            Text("Profily podľa aplikácie").font(.body)
-                            Spacer()
-                            Button("+ Pridať") { profileStore.addBlank() }
-                                .buttonStyle(.bordered).font(.caption)
-                            Button("Aktuálna appka") { addProfileFromFrontmostApp() }
-                                .buttonStyle(.bordered).font(.caption)
-                            Button("Vybrať appku…") { addProfileFromFilePicker() }
-                                .buttonStyle(.bordered).font(.caption)
-                        }
-                        .padding(.horizontal, 16).padding(.vertical, 12)
-
-                        if !profileStore.profiles.isEmpty {
-                            rowDivider
-                            ForEach($profileStore.profiles) { $profile in
-                                DisclosureGroup(
-                                    profile.displayName.isEmpty ? "Bez názvu" : profile.displayName
-                                ) {
-                                    VStack(alignment: .leading, spacing: 8) {
-                                        TextField("Názov", text: $profile.displayName)
-                                        TextField("Bundle ID (napr. com.tinyspeck.slackmacgap)",
-                                                  text: $profile.bundleID)
-                                        TextField("Kľúčové slovo v titulku (voliteľné)",
-                                                  text: $profile.titleKeyword)
-                                        HStack {
-                                            Text("Typ cieľa").font(.callout)
-                                            Picker("", selection: $profile.category) {
-                                                ForEach(AppCategory.allCases, id: \.self) { cat in
-                                                    Text(cat.label).tag(cat)
-                                                }
-                                            }
-                                            .labelsHidden()
-                                        }
-                                        Text("Určuje rubriku hodnotenia na karte Kvalita a (pri gpt-live-transcribe) kontextovú vetu poslanú modelu — napr. pre AI chat: \"Používateľ diktuje prompt pre AI nástroj.\" Needituje sa ručne.")
-                                            .font(.caption2).foregroundStyle(.secondary)
-                                        MultilineField(text: $profile.instructions, collapsedLines: 4, accent: accent)
-                                        Text("Kľúčové slová").font(.callout)
-                                        Text("Platia iba pri diktovaní do TEJTO appky, naviac k predvoleným v Nastaveniach → Diktovanie. Nápoveda pre gpt-live-transcribe, jedno slovo/fráza na riadok.")
-                                            .font(.caption2).foregroundStyle(.secondary)
-                                        MultilineField(text: $profile.keywords, accent: accent)
-                                        HStack {
-                                            Spacer()
-                                            Button("Odstrániť", role: .destructive) {
-                                                profileStore.remove(profile)
-                                            }.font(.caption)
-                                        }
-                                    }
-                                    .padding(.vertical, 8)
-                                }
-                                .padding(.horizontal, 16).padding(.vertical, 10)
-                                rowDivider
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Usage — a real calendar month from the daily buckets, not the old lifetime
-            // counter that only pretended to be monthly until someone hit Reset.
             let monthStart = Calendar.current.dateInterval(of: .month, for: Date())?.start ?? Date()
             let dictMins = Double(usageStore.summary(from: monthStart, to: Date()).dictationSeconds) / 60
             let dictCost = dictMins * dictation.costPerMinute
-            Text(String(format: "Využité tento mesiac: %.1f min (~%@)", dictMins, currency.format(usd: dictCost)))
-                .font(.caption).foregroundStyle(.secondary)
+            Text(String(format: "Tento mesiac: %.1f min · ~%@", dictMins, currency.format(usd: dictCost)))
+                .font(Theme.body(11).monospacedDigit()).foregroundStyle(Theme.textSecondary)
                 .padding(.horizontal, 4)
         }
+        // One sheet for the whole tab — the global field's button and each profile's button
+        // open the same popover (it groups suggestions by profile). .sheet, not .popover:
+        // a popover squashed 20-30 suggestions into a sliver a few points tall.
+        .sheet(isPresented: $showKeywordSuggestions) {
+            KeywordSuggestionPopover(isPresented: $showKeywordSuggestions)
+        }
+    }
+
+    // MARK: Realtime
+
+    var realtimeSection: some View {
+        sectionCard("Realtime diktovanie", shortcut: scLabel(.dictateRealtime),
+                    status: realtimeSectionExpanded ? nil : dictation.realtimeModel.rawValue,
+                    isExpanded: $realtimeSectionExpanded) {
+            pickerRow(title: "Model", subtitle: realtimeModelCaption, selection: $dictation.realtimeModel) {
+                ForEach(DictationEngine.RealtimeModel.allCases, id: \.self) { model in
+                    Text(model.rawValue).tag(model)
+                }
+            }
+            rowDivider
+            HStack(alignment: .top, spacing: 16) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Citlivosť VAD").font(Theme.body(13))
+                    Text("Ako dlho model čaká, kým usúdi, že si dohovoril.")
+                        .font(Theme.body(11)).foregroundStyle(Theme.textSecondary)
+                }
+                Spacer()
+                Picker("", selection: $dictation.transcriptionDelay) {
+                    Text("Rýchla").tag("low")
+                    Text("Stredná").tag("medium")
+                    Text("Pomalá").tag("high")
+                }
+                .pickerStyle(.segmented).frame(width: 210).labelsHidden()
+            }
+            .padding(.horizontal, 16).padding(.vertical, 12)
+            rowDivider
+            toggleRow(title: "Live vkladanie",
+                      subtitle: "Text sa píše priebežne. Smart ukončenie (\(scLabel(.smartStop))) sa vtedy nedá použiť.",
+                      isOn: $dictation.liveInsertEnabled)
+            if dictation.liveInsertEnabled {
+                rowDivider
+                toggleRow(title: "Enter zastaví diktovanie", isOn: $dictation.enterAutoStop)
+                    .nestedRow()
+            }
+        }
+    }
+
+    var realtimeModelCaption: String {
+        let price = Pricing.perMinuteLabel(realtime: true)
+        switch dictation.realtimeModel {
+        case .live:   return "Využíva kľúčové slová aj kontext appky. \(price)"
+        case .legacy: return "Pôvodný model, bez kľúčových slov. \(price)"
+        }
+    }
+
+    // MARK: Po nahraní
+
+    var batchSection: some View {
+        let title = remoteConfig.realtimeAllowed ? "Diktovanie po nahraní" : "Diktovanie"
+        return sectionCard(title, shortcut: scLabel(.dictateBatch),
+                           status: batchSectionExpanded ? nil : dictation.batchModel,
+                           isExpanded: $batchSectionExpanded) {
+            // Remote catalog drives the offer; a selected-but-retired model stays in the list
+            // so the Picker binding never dangles.
+            let infos = remoteConfig.catalog.batchModels.filter {
+                $0.available || remoteConfig.allModelsAllowed || $0.id == dictation.batchModel
+            }
+            pickerRow(title: "Model", subtitle: batchModelCaption(infos), selection: $dictation.batchModel) {
+                ForEach(infos) { Text($0.id).tag($0.id) }
+                if !infos.contains(where: { $0.id == dictation.batchModel }) {
+                    Text(dictation.batchModel).tag(dictation.batchModel)
+                }
+            }
+            if DictationEngine.isGemini(dictation.batchModel) ? !dictation.hasGeminiKey : !dictation.hasOpenAIKey {
+                rowDivider
+                captionRow("Chýba \(DictationEngine.isGemini(dictation.batchModel) ? "Gemini" : "OpenAI") API kľúč — nastavíš ho vo Všeobecné.",
+                           color: Theme.brandAmberSafe)
+            }
+            if remoteConfig.shadowCompareAllowed {
+                rowDivider
+                toggleRow(title: "Porovnať s druhým modelom",
+                          subtitle: dictation.canShadowCompare
+                            ? "Prepíše aj cez \(dictation.shadowModelName), porovnanie v Kvalite. Platíš oba prepisy."
+                            : "Vyžaduje OpenAI aj Gemini kľúč.",
+                          isOn: $dictation.shadowCompareEnabled)
+                    .disabled(!dictation.canShadowCompare)
+            }
+        }
+    }
+
+    /// "Rýchly, odporúčaný. 0,006 € / min." — the note comes from the catalog's displayName
+    /// ("gpt-transcribe (rýchly, odporúčaný)"), the id itself is already in the picker.
+    func batchModelCaption(_ infos: [ModelInfo]) -> String {
+        let price = Pricing.perMinuteLabel(realtime: false, batchModel: dictation.batchModel)
+        guard let info = infos.first(where: { $0.id == dictation.batchModel }) else { return price }
+        let note = info.displayName.replacingOccurrences(of: info.id, with: "")
+            .trimmingCharacters(in: CharacterSet(charactersIn: " ()"))
+        return note.isEmpty ? price : "\(note.prefix(1).uppercased())\(note.dropFirst()). \(price)"
+    }
+
+    // MARK: Smart
+
+    var smartSection: some View {
+        sectionCard("Smart ukončenie", shortcut: scLabel(.smartStop),
+                    status: profilesStatus, isExpanded: $smartSectionExpanded) {
+            captionRow("Ukončí bežiace diktovanie a AI upraví prepis podľa obrazovky pred vložením.")
+            if !CGPreflightScreenCaptureAccess() {
+                warningBanner(
+                    "Bez povolenia Nahrávanie obrazovky Smart nevidí obsah obrazovky — opraví len gramatiku.",
+                    action: ("Otvoriť nastavenia", { PermissionsChecker.shared.openScreenRecordingSettings() })
+                )
+                .padding(.horizontal, 16).padding(.bottom, 10)
+            }
+            rowDivider
+            pickerRow(title: "Model", selection: $smartModelInput) {
+                Text("gpt-4o-mini (rýchly, odporúčaný)").tag("gpt-4o-mini")
+                Text("gpt-4o (presnejší)").tag("gpt-4o")
+                Text("gpt-4.1-mini").tag("gpt-4.1-mini")
+                Text("gpt-4.1").tag("gpt-4.1")
+            }
+            .onChange(of: smartModelInput) { _, v in rewriteEngine.model = v }
+            rowDivider
+            toggleRow(title: "Kontext zo screenshotu",
+                      subtitle: "Model vidí obrazovku a podľa nej opraví prepis.",
+                      isOn: $rewriteEngine.visionPromptEnabled)
+            if rewriteEngine.visionPromptEnabled {
+                rowDivider
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Prompt").font(Theme.body(13))
+                    TextEditor(text: $rewriteEngine.visionPromptOverride)
+                        .font(Theme.body(13))
+                        .frame(height: visionPromptExpanded ? 200 : 54)
+                        .overlay(RoundedRectangle(cornerRadius: 6).stroke(.separator))
+                    HStack {
+                        Button(visionPromptExpanded ? "Zobraziť menej" : "Zobraziť viac") { visionPromptExpanded.toggle() }
+                            .buttonStyle(.plain).pointingHandCursor().font(Theme.body(11)).foregroundStyle(accent)
+                        Spacer()
+                        Text("Vymazaním sa vráti predvolený.").font(Theme.body(11)).foregroundStyle(Theme.textSecondary)
+                    }
+                }
+                .padding(.horizontal, 16).padding(.vertical, 12)
+                .nestedRow()
+            }
+            rowDivider
+            toggleRow(title: "Ukladať screenshoty do histórie",
+                      subtitle: "Na ladenie. Môže obsahovať citlivý obsah obrazovky.",
+                      isOn: $rewriteEngine.saveScreenshotsToHistory)
+            rowDivider
+            HStack(alignment: .top, spacing: 16) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Profily podľa aplikácie").font(Theme.body(13))
+                    Text("Vlastné inštrukcie a kľúčové slová pre konkrétnu appku.")
+                        .font(Theme.body(11)).foregroundStyle(Theme.textSecondary)
+                }
+                Spacer()
+                Menu("Pridať profil") {
+                    Button("Aktuálna appka") { addProfileFromFrontmostApp() }
+                    Button("Vybrať appku…") { addProfileFromFilePicker() }
+                    Button("Prázdny profil") { profileStore.addBlank() }
+                }
+                .buttonStyle(.bordered).font(Theme.body(11)).fixedSize()
+            }
+            .padding(.horizontal, 16).padding(.vertical, 12)
+            ForEach($profileStore.profiles) { $profile in
+                rowDivider
+                profileRow($profile).nestedRow()
+            }
+        }
+    }
+
+    var profilesStatus: String? {
+        switch profileStore.profiles.count {
+        case 0:     return nil
+        case 1:     return "1 profil"
+        case 2...4: return "\(profileStore.profiles.count) profily"
+        default:    return "\(profileStore.profiles.count) profilov"
+        }
+    }
+
+    func profileRow(_ profile: Binding<AppProfile>) -> some View {
+        DisclosureGroup {
+            VStack(alignment: .leading, spacing: 8) {
+                TextField("Názov", text: profile.displayName)
+                TextField("Bundle ID (napr. com.tinyspeck.slackmacgap)", text: profile.bundleID)
+                TextField("Kľúčové slovo v titulku (voliteľné)", text: profile.titleKeyword)
+                HStack {
+                    Text("Typ cieľa").font(Theme.body(12))
+                    Picker("", selection: profile.category) {
+                        ForEach(AppCategory.allCases, id: \.self) { Text($0.label).tag($0) }
+                    }
+                    .labelsHidden()
+                }
+                Text("Rubrika v Kvalite a kontext pre model.")
+                    .font(Theme.body(11)).foregroundStyle(Theme.textSecondary)
+                Text("Inštrukcie").font(Theme.body(12))
+                MultilineField(text: profile.instructions, collapsedLines: 4, accent: accent)
+                Text("Kľúčové slová").font(Theme.body(12))
+                Text("Navyše k predvoleným, len pre túto appku. Jedno na riadok.")
+                    .font(Theme.body(11)).foregroundStyle(Theme.textSecondary)
+                MultilineField(text: profile.keywords, accent: accent) { keywordSuggestButton() }
+                HStack {
+                    Spacer()
+                    Button("Odstrániť", role: .destructive) { profileStore.remove(profile.wrappedValue) }
+                        .font(Theme.body(11))
+                }
+            }
+            .padding(.vertical, 8)
+        } label: {
+            VStack(alignment: .leading, spacing: 1) {
+                Text(profile.wrappedValue.displayName.isEmpty ? "Bez názvu" : profile.wrappedValue.displayName)
+                if !profile.wrappedValue.bundleID.isEmpty {
+                    Text(profile.wrappedValue.bundleID).font(Theme.body(11)).foregroundStyle(Theme.textSecondary)
+                }
+            }
+        }
+        .padding(.horizontal, 16).padding(.vertical, 10)
+    }
+
+    // MARK: Kľúčové slová (both modes forward them as `prompt`)
+
+    var keywordsSection: some View {
+        sectionCard("Kľúčové slová", status: "oba režimy", isExpanded: $keywordsSectionExpanded) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Mená, klienti, termíny — jedno na riadok. Pomáhajú hlavne pri anglických slovách.")
+                    .font(Theme.body(11)).foregroundStyle(Theme.textSecondary)
+                MultilineField(text: $dictation.defaultKeywords, accent: accent) { keywordSuggestButton() }
+            }
+            .padding(.horizontal, 16).padding(.vertical, 12)
+        }
+    }
+
+    // MARK: Pilulka
+
+    var pillSection: some View {
+        sectionCard("Pilulka", isExpanded: $pillSectionExpanded) {
+            toggleRow(title: "Zobraziť nad aktívnym poľom", subtitle: "Inak v strede obrazovky.",
+                      isOn: Binding(get: { pillFollowsField },
+                                    set: { pillFollowsField = $0; PillPosition.followFocusedField = $0 }))
+            rowDivider
+            toggleRow(title: "Vysvetlivky v pilulke", subtitle: "Vypni, keď skratky poznáš — pilulka bude menšia.",
+                      isOn: Binding(get: { dictation.pillHintsEnabled }, set: { dictation.pillHintsEnabled = $0 }))
+            rowDivider
+            HStack(alignment: .top, spacing: 16) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Pozícia").font(Theme.body(13))
+                    Text("Presunieš ťahaním myšou.").font(Theme.body(11)).foregroundStyle(Theme.textSecondary)
+                }
+                Spacer()
+                Button("Resetovať") { PillPosition.reset() }.buttonStyle(.bordered)
+            }
+            .padding(.horizontal, 16).padding(.vertical, 12)
+        }
+    }
+
+    // MARK: Ostatné zvuky
+
+    var duckSection: some View {
+        let status: String = !duckAudio.enabled ? "vypnuté"
+            : duckAudio.mode == .duck ? "stíšiť na \(Int(duckAudio.duckLevel * 100)) %" : "pozastaviť"
+        return sectionCard("Ostatné zvuky", status: status, isExpanded: $duckSectionExpanded) {
+            toggleRow(title: "Stíšiť počas diktovania",
+                      subtitle: "Hudba a videá sa po skončení vrátia do pôvodného stavu.",
+                      isOn: $duckAudio.enabled)
+                .accessibilityHint("Zapne alebo vypne stíšenie ostatného zvuku počas diktovania")
+            if duckAudio.enabled {
+                rowDivider
+                HStack {
+                    Text("Spôsob").font(Theme.body(13))
+                    Spacer()
+                    Picker("", selection: $duckAudio.mode) {
+                        Text("Stíšiť").tag(AudioDucking.Mode.duck)
+                        Text("Pozastaviť").tag(AudioDucking.Mode.pause)
+                    }
+                    .pickerStyle(.segmented).frame(width: 200).labelsHidden()
+                }
+                .padding(.horizontal, 16).padding(.vertical, 12)
+                .nestedRow()
+                rowDivider
+                if duckAudio.mode == .duck {
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack {
+                            Text("Hlasitosť").font(Theme.body(13))
+                            Spacer()
+                            Text("\(Int(duckAudio.duckLevel * 100)) %")
+                                .font(Theme.body(12).monospacedDigit()).foregroundStyle(Theme.textSecondary)
+                        }
+                        Slider(value: $duckAudio.duckLevel, in: 0...1)
+                            .accessibilityLabel("Hlasitosť počas diktovania")
+                            .accessibilityValue("\(Int(duckAudio.duckLevel * 100)) percent")
+                        Text("0 % = úplné stlmenie.").font(Theme.body(11)).foregroundStyle(Theme.textSecondary)
+                    }
+                    .padding(.horizontal, 16).padding(.vertical, 12)
+                    .nestedRow()
+                } else {
+                    captionRow("Funguje pre appky, ktoré reagujú na klávesu Prehrať/Pozastaviť (Hudba, Spotify, YouTube).")
+                        .nestedRow()
+                }
+            }
+        }
+    }
+
+    /// Floats in the corner of a keywords field (global or a profile's). Both open the same
+    /// analysis; it groups suggestions by profile.
+    func keywordSuggestButton() -> some View {
+        Button {
+            showKeywordSuggestions = true
+        } label: {
+            Label("Navrhnúť z histórie", systemImage: "sparkles").font(Theme.body(11))
+        }
+        .buttonStyle(.borderedProminent).controlSize(.small).tint(accent)
+        .disabled(!dictation.hasOpenAIKey)
+        .help(dictation.hasOpenAIKey
+              ? "Zanalyzuje históriu diktovaní za posledných 30 dní (OpenAI, gpt-4o-mini) a navrhne nové kľúčové slová na schválenie."
+              : "Chýba OpenAI API kľúč (Nastavenia → Všeobecné).")
+        .accessibilityHint("Zanalyzuje históriu diktovaní a navrhne nové kľúčové slová na schválenie")
     }
 
     /// First shortcut mapped to the action, for inline mentions in explanations.
     func scLabel(_ action: ShortcutStore.Action) -> String {
         ShortcutStore.shared.shortcuts(for: action).first?.displayString ?? "?"
-    }
-
-    var vadSubtitle: String {
-        switch dictation.transcriptionDelay {
-        case "low":    return "Rýchla reakcia"
-        case "medium": return "Vyvážená reakcia"
-        default:       return "Pomalá reakcia"
-        }
     }
 }

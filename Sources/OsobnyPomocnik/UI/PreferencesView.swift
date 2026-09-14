@@ -9,8 +9,8 @@ struct PreferencesView: View {
     enum Tab: CaseIterable, Hashable {
         case general, dictation, reading, microphone, usage, history, quality, shortcuts, about
 
-        // Sidebar row order for the flat (top-level) items — .history and .quality are
-        // rendered separately, nested under .dictation, so they're excluded here.
+        // .history and .quality are rendered nested under .dictation (see `sidebar`), so
+        // they're excluded from this flat top-level list.
         static let topLevel: [Tab] = [.general, .dictation, .reading, .microphone, .usage, .shortcuts, .about]
         var label: String {
             switch self {
@@ -76,12 +76,36 @@ struct PreferencesView: View {
     }
 
     @State var selectedTab: Tab = .dictation
-    // Collapsed by default — expanded on demand, or automatically if the current tab is
-    // one of its children (so History/Kvalita never end up hidden behind a chevron).
+    // Collapsed by default — fewer rows at first glance. Clicking "Diktovanie" opens it AND
+    // toggles this, so there's exactly one hit target, not a separate arrow to miss.
     @State var dictationExpanded = false
+    @State var showKeywordSuggestions = false
+    @State var dictationIntroExpanded = false
+    // Opened automatically in onAppear when Smart spracovanie is already configured.
+    @State var smartSectionExpanded = false
+    @State var realtimeSectionExpanded = true
+    @State var batchSectionExpanded = true
+    @State var keywordsSectionExpanded = true
+    @State var pillSectionExpanded = false
+    @State var duckSectionExpanded = false
+    @State var keysSectionExpanded = true
+    @State var editingKey: String?
+    @State var voiceSectionExpanded = true
+    @State var readingSectionExpanded = true
+    @State var shortcutsIntroExpanded = false
+    @State var micOrderExpanded = true
+    @State var micTestExpanded = false
+    @State var qualityModesExpanded = false
+    @State var qualityModelsExpanded = false
+    @State var qualityShadowExpanded = false
+    @State var qualityFillersExpanded = false
+    @State var qualityAppsExpanded = false
+    @State var qualityRecentExpanded = true
+    @State var diagnosticsExpanded = false
     @State var tts          = TTSEngine.shared
     @State var google       = GoogleCloudTTSEngine.shared
     @State var dictation    = DictationEngine.shared
+    @State var duckAudio    = AudioDucking.shared
     @State var profileStore = AppProfileStore.shared
     @State var rewriteEngine = SmartRewriteEngine.shared
     @State var visionPromptExpanded = false
@@ -101,6 +125,8 @@ struct PreferencesView: View {
     @State var pillFollowsField = PillPosition.followFocusedField
     @State var showResetShortcutsConfirm = false
     @State var shortcutsResetToken = 0
+    @State var showClearHistoryConfirm = false
+    @State var showClearShadowsConfirm = false
     @State var qualityStats = QualityStats(entries: [])
     @State var usagePeriod: UsagePeriod = .today
     @State var chartMetric: ChartMetric = .timeSaved
@@ -111,28 +137,30 @@ struct PreferencesView: View {
     @State var smartModelInput = ""
     @State var inputDevices: [AudioInputDevice] = []
     @State var apiKeyTestRunning = false
-    @State var apiKeyTestResult: String?
+    @State var apiKeyTestResult: Theme.KeyCheck?
     @State var apiKeyInput    = ""
     @State var apiKeySaved    = false
     @State var openAIKeyInput = ""
     @State var openAIKeySaved = false
     @State var geminiKeyInput = ""
     @State var geminiKeySaved = false
-    @State var geminiKeyTestResult: String?
+    @State var geminiKeyTestResult: Theme.KeyCheck?
     @State var geminiKeyTestRunning = false
+    @State var googleKeyTestResult: Theme.KeyCheck?
+    @State var googleKeyTestRunning = false
     @State var availableGoogleVoices: [GoogleVoice] = []
     @State var loadingVoices = false
     @State var voiceError: String?
-    @State var rateInput = ""
     @State var testText  = "Toto je krátky test hlasu a rýchlosti čítania."
 
     // MARK: - Palette
 
-    let accent  = Color(red: 0.357, green: 0.498, blue: 0.651)   // #5B7FA6
-    let pageBG  = Color(red: 0.937, green: 0.918, blue: 0.898)   // warm cream
-    let warnBG  = Color(red: 1.00,  green: 0.955, blue: 0.820)
-    let warnFG  = Color(red: 0.76,  green: 0.45,  blue: 0.02)
-    let greenDot = Color(red: 0.298, green: 0.686, blue: 0.490)
+    // Aliases kept so the tab files read unchanged; the values live in Theme.swift.
+    let accent   = Theme.brandBlueSafe
+    let pageBG   = Theme.surfaceBase
+    let warnBG   = Theme.brandAmber.opacity(0.14)
+    let warnFG   = Theme.brandAmberSafe
+    let greenDot = Theme.success
 
     // MARK: - Root
 
@@ -166,9 +194,11 @@ struct PreferencesView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .frame(width: 720, height: 520)
+        .frame(minWidth: 680, idealWidth: 720, minHeight: 480, idealHeight: 520)
+        .font(Theme.body(13))
+        .foregroundStyle(Theme.textPrimary)
+        .tint(Theme.brandBlueSafe)
         .toolbar(.hidden, for: .windowToolbar)
-        .preferredColorScheme(.light)
         .sheet(isPresented: $showOnboarding) { OnboardingView() }
         .onAppear {
             apiKeyInput      = google.apiKey
@@ -177,17 +207,18 @@ struct PreferencesView: View {
             openAIKeySaved   = dictation.hasOpenAIKey
             geminiKeyInput   = dictation.geminiKey
             geminiKeySaved   = dictation.hasGeminiKey
-            rateInput        = rateString(tts.rate)
             smartModelInput  = rewriteEngine.model
             inputDevices     = AudioDeviceManager.inputDevices()
             accessCodeInput  = remoteConfig.accessCode
             accessCodeSaved  = true
             loggingEnabled   = AppLogger.isEnabled
             refreshLogSize()
-            if selectedTab == .history || selectedTab == .quality { dictationExpanded = true }
             // Normalise legacy "minimal" → "low" (removed from new segmented control)
             if dictation.transcriptionDelay == "minimal" { dictation.transcriptionDelay = "low" }
             if google.hasAPIKey { Task { await loadGoogleVoices() } }
+            if rewriteEngine.visionPromptEnabled || !profileStore.profiles.isEmpty || dictation.liveInsertEnabled {
+                smartSectionExpanded = true
+            }
         }
         .onChange(of: apiKeyInput)    { _, _ in apiKeySaved    = false }
         .onChange(of: openAIKeyInput) { _, _ in openAIKeySaved = false }
@@ -200,10 +231,14 @@ struct PreferencesView: View {
     var sidebar: some View {
         VStack(alignment: .leading, spacing: 2) {
             ForEach(Tab.topLevel, id: \.self) { tab in
-                sidebarRow(tab, showsDisclosure: tab == .dictation)
-                if tab == .dictation && dictationExpanded {
-                    sidebarRow(.history, indent: true)
-                    sidebarRow(.quality, indent: true)
+                if tab == .dictation {
+                    dictationDisclosureRow
+                    if dictationExpanded {
+                        sidebarRow(.history, indent: true)
+                        sidebarRow(.quality, indent: true)
+                    }
+                } else {
+                    sidebarRow(tab)
                 }
             }
             Spacer()
@@ -213,60 +248,81 @@ struct PreferencesView: View {
         .frame(width: 190)
     }
 
-    /// `showsDisclosure` adds a chevron after the label that toggles `dictationExpanded`
-    /// independently of selecting the row — it's a separate button, a sibling of the
-    /// navigation button rather than nested inside it, so clicking "Diktovanie" itself still
-    /// just navigates there, same as every other row.
-    /// `indent` renders History/Kvalita one step in, so they read as belonging to Diktovanie.
-    func sidebarRow(_ tab: Tab, indent: Bool = false, showsDisclosure: Bool = false) -> some View {
-        HStack(spacing: 4) {
-            if indent { Spacer().frame(width: 14) }
-
-            Button { selectedTab = tab } label: {
-                HStack(spacing: 10) {
-                    Image(systemName: tab.icon)
-                        .font(.system(size: indent ? 12 : 13.5))
-                        .foregroundStyle(selectedTab == tab ? accent : Color.secondary)
-                        .frame(width: indent ? 15 : 18)
-                    Text(tab.label)
-                        .font(.system(size: indent ? 12.5 : 13.5))
-                        .foregroundStyle(selectedTab == tab ? accent : Color.primary)
-                    Spacer()
-                }
-                .padding(.horizontal, 10)
-                .padding(.vertical, indent ? 6 : 7)
-                // ponytail: `accent` stands in as the one accent color across the whole UI
-                // until the app has real branding — this highlight is meant to move with it,
-                // not be its own one-off color.
-                .background(
-                    RoundedRectangle(cornerRadius: 7)
-                        .fill(selectedTab == tab ? accent.opacity(0.12) : .clear)
-                )
-                // Without this, .buttonStyle(.plain).pointingHandCursor() only hit-tests the actual rendered
-                // content (the icon + text), not the transparent space the Spacer() fills
-                // out to the row's edge — so clicking the highlighted-looking area next to
-                // the label silently did nothing. This is what made the sidebar feel like
-                // it needed two or three clicks: most clicks were landing on "empty" pixels
-                // that were never part of the hit region.
-                .contentShape(Rectangle())
+    /// Diktovanie's row both opens it AND toggles whether História/Kvalita show below it —
+    /// one click target, not a separate arrow next to it. A prior version had a standalone
+    /// chevron button beside the row; two adjacent, similar-looking hit targets doing
+    /// different things was an easy way to click the wrong one, especially with imprecise
+    /// pointer control. The chevron here is decoration inside this same button, not its own.
+    var dictationDisclosureRow: some View {
+        Button {
+            selectedTab = .dictation
+            withAnimation(.easeInOut(duration: 0.15)) { dictationExpanded.toggle() }
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: Tab.dictation.icon)
+                    .font(.system(size: 13.5))
+                    .foregroundStyle(selectedTab == .dictation ? accent : Theme.textSecondary)
+                    .frame(width: 18)
+                Text(Tab.dictation.label)
+                    .font(Theme.body(13.5))
+                    .foregroundStyle(selectedTab == .dictation ? accent : Theme.textPrimary)
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(Theme.textSecondary)
+                    .rotationEffect(.degrees(dictationExpanded ? 90 : 0))
             }
-            .buttonStyle(.plain).pointingHandCursor()
-            .focusEffectDisabled()
-
-            if showsDisclosure {
-                Button {
-                    withAnimation(.easeInOut(duration: 0.15)) { dictationExpanded.toggle() }
-                } label: {
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 9, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                        .rotationEffect(.degrees(dictationExpanded ? 90 : 0))
-                        .frame(width: 20, height: 20)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain).pointingHandCursor()
-            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .background(
+                RoundedRectangle(cornerRadius: 7)
+                    .fill(selectedTab == .dictation ? accent.opacity(0.12) : .clear)
+            )
+            .contentShape(Rectangle())
         }
+        .buttonStyle(.plain).pointingHandCursor()
+        .focusEffectDisabled()
+        .accessibilityAddTraits(selectedTab == .dictation ? .isSelected : [])
+        .accessibilityHint(dictationExpanded ? "Rozbalené, obsahuje Históriu a Kvalitu" : "Zbalené, obsahuje Históriu a Kvalitu")
+    }
+
+    /// `indent` renders História/Kvalita one step in, with a smaller icon/font, while they're
+    /// shown under the expanded Diktovanie row.
+    func sidebarRow(_ tab: Tab, indent: Bool = false) -> some View {
+        Button { selectedTab = tab } label: {
+            HStack(spacing: 10) {
+                if indent { Spacer().frame(width: 15) }
+                Image(systemName: tab.icon)
+                    .font(.system(size: indent ? 12 : 13.5))
+                    .foregroundStyle(selectedTab == tab ? accent : Theme.textSecondary)
+                    .frame(width: indent ? 15 : 18)
+                Text(tab.label)
+                    .font(Theme.body(indent ? 12.5 : 13.5))
+                    .foregroundStyle(selectedTab == tab ? accent : Theme.textPrimary)
+                Spacer()
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, indent ? 6 : 7)
+            // ponytail: `accent` stands in as the one accent color across the whole UI
+            // until the app has real branding — this highlight is meant to move with it,
+            // not be its own one-off color.
+            .background(
+                RoundedRectangle(cornerRadius: 7)
+                    .fill(selectedTab == tab ? accent.opacity(0.12) : .clear)
+            )
+            // Without this, .buttonStyle(.plain).pointingHandCursor() only hit-tests the actual rendered
+            // content (the icon + text), not the transparent space the Spacer() fills
+            // out to the row's edge — so clicking the highlighted-looking area next to
+            // the label silently did nothing. This is what made the sidebar feel like
+            // it needed two or three clicks: most clicks were landing on "empty" pixels
+            // that were never part of the hit region.
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain).pointingHandCursor()
+        .focusEffectDisabled()
+        // Color alone doesn't reach VoiceOver — without this trait, a screen-reader user
+        // tabbing through the sidebar has no way to tell which tab is currently open.
+        .accessibilityAddTraits(selectedTab == tab ? .isSelected : [])
     }
 
     // MARK: - Shared components
@@ -280,22 +336,24 @@ struct PreferencesView: View {
     /// Collapsing matters because these lists grow: a 30-line keyword list rendered in full
     /// pushes everything below it off the screen. Collapsed rows are still scrollable and
     /// editable inside the editor, so nothing becomes unreachable — only quieter.
-    struct MultilineField: View {
+    struct MultilineField<Accessory: View>: View {
         @Binding var text: String
         var collapsedLines = 5
         var minLines = 3
-        var accent = Color(red: 0.357, green: 0.498, blue: 0.651)
+        var accent = Theme.brandBlueSafe
+        /// Floats in the field's bottom-right corner (e.g. an "AI suggest" button) — pinned to
+        /// the TextEditor itself, not the whole VStack, so it stays in the corner of the box
+        /// even when "Zobraziť viac" adds the expand link below.
+        var accessory: Accessory
 
         @State private var expanded = false
 
-        // .body is the 13pt system font — ~17pt per rendered line, plus the 6pt inset above
-        // and below. Approximate on purpose: a wrong guess costs a few points of whitespace,
-        // not a broken layout, and measuring real text metrics here isn't worth the code.
-        private static let lineHeight: CGFloat = 17
-        private static let inset: CGFloat = 12
-        /// Expanded still needs a ceiling — the Settings window is only 520pt tall, so a long
-        /// list would otherwise push every control below it out of reach.
-        private static let maxExpandedLines = 18
+        init(text: Binding<String>, collapsedLines: Int = 5, minLines: Int = 3,
+             accent: Color = Theme.brandBlueSafe,
+             @ViewBuilder accessory: () -> Accessory) {
+            self._text = text; self.collapsedLines = collapsedLines; self.minLines = minLines
+            self.accent = accent; self.accessory = accessory()
+        }
 
         private var lineCount: Int {
             max(text.split(separator: "\n", omittingEmptySubsequences: false).count, minLines)
@@ -303,29 +361,34 @@ struct PreferencesView: View {
         private var overflows: Bool { lineCount > collapsedLines }
         private var visibleLines: Int {
             guard overflows else { return lineCount }
-            return expanded ? min(lineCount, Self.maxExpandedLines) : collapsedLines
+            return expanded ? min(lineCount, MultilineFieldMetrics.maxExpandedLines) : collapsedLines
         }
 
         var body: some View {
             VStack(alignment: .leading, spacing: 4) {
                 TextEditor(text: $text)
-                    .font(.body)
+                    .font(Theme.body(13))
                     .scrollContentBackground(.hidden)
                     .padding(6)
-                    .frame(height: CGFloat(visibleLines) * Self.lineHeight + Self.inset)
+                    .frame(height: CGFloat(visibleLines) * MultilineFieldMetrics.lineHeight + MultilineFieldMetrics.inset)
                     // The card behind this is also white, so the border is the ONLY thing
                     // marking where the input starts — a hairline at 0.18 alpha read as
                     // "no box at all". Full pixel, darker than the card's own 0.07 outline.
-                    .background(RoundedRectangle(cornerRadius: 6).fill(.white))
+                    .background(RoundedRectangle(cornerRadius: 6).fill(Theme.surfaceCard))
                     .overlay(RoundedRectangle(cornerRadius: 6)
-                        .strokeBorder(Color.primary.opacity(0.28), lineWidth: 1))
+                        .strokeBorder(Theme.border, lineWidth: 1))
+                    // Inset from the corner so it never sits on top of the TextEditor's own
+                    // scrollbar (which claims the right edge) or the rounded border.
+                    .overlay(alignment: .bottomTrailing) {
+                        accessory.padding(.trailing, 18).padding(.bottom, 8)
+                    }
                 if overflows {
                     Button(expanded
                            ? "Zobraziť menej"
                            : "Zobraziť viac (\(lineCount - collapsedLines) \(Self.rowWord(lineCount - collapsedLines)))") {
                         expanded.toggle()
                     }
-                    .font(.caption)
+                    .font(Theme.body(11))
                     .buttonStyle(.plain).pointingHandCursor()
                     .foregroundStyle(accent)
                 }
@@ -342,40 +405,54 @@ struct PreferencesView: View {
         }
     }
 
+
+    // Static stored properties aren't allowed inside a generic type (MultilineField<Accessory>
+    // now that it carries an accessory view) — pulled out here instead of per-specialization.
+    private enum MultilineFieldMetrics {
+        // .body is the 13pt system font — ~17pt per rendered line, plus the 6pt inset above
+        // and below. Approximate on purpose: a wrong guess costs a few points of whitespace,
+        // not a broken layout, and measuring real text metrics here isn't worth the code.
+        static let lineHeight: CGFloat = 17
+        static let inset: CGFloat = 12
+        /// Expanded still needs a ceiling — the Settings window is only 520pt tall, so a long
+        /// list would otherwise push every control below it out of reach.
+        static let maxExpandedLines = 18
+    }
+
     @ViewBuilder
     func card<Content: View>(@ViewBuilder _ body: () -> Content) -> some View {
         VStack(spacing: 0) { body() }
-            .background(.white)
+            .background(Theme.surfaceCard)
             .clipShape(RoundedRectangle(cornerRadius: 12))
             .overlay(RoundedRectangle(cornerRadius: 12)
-                .strokeBorder(Color.primary.opacity(0.07), lineWidth: 0.5))
+                .strokeBorder(Theme.border, lineWidth: 1))
     }
 
     func warningBanner(_ message: String, action: (String, () -> Void)? = nil) -> some View {
         HStack(spacing: 8) {
             Circle().fill(warnFG).frame(width: 6, height: 6)
             Text(message)
-                .font(.callout)
+                .font(Theme.body(12))
                 .foregroundStyle(warnFG)
             Spacer()
             if let action {
                 Button(action.0, action: action.1)
-                    .font(.caption).buttonStyle(.bordered)
+                    .font(Theme.body(11)).buttonStyle(.bordered)
             }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
         .background(RoundedRectangle(cornerRadius: 8).fill(warnBG))
         .overlay(RoundedRectangle(cornerRadius: 8)
-            .strokeBorder(Color(red: 0.85, green: 0.70, blue: 0.35).opacity(0.35), lineWidth: 0.5))
+            .strokeBorder(Theme.brandAmber.opacity(0.35), lineWidth: 1))
     }
 
     func toggleRow(title: String, subtitle: String? = nil, isOn: Binding<Bool>) -> some View {
         HStack(alignment: subtitle != nil ? .top : .center, spacing: 16) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(.body)
+                Text(title).font(Theme.body(13))
                 if let sub = subtitle {
-                    Text(sub).font(.caption).foregroundStyle(.secondary)
+                    Text(sub).font(Theme.body(11)).foregroundStyle(Theme.textSecondary)
                 }
             }
             Spacer()
@@ -385,29 +462,111 @@ struct PreferencesView: View {
         .padding(.vertical, subtitle != nil ? 12 : 11)
     }
 
+    /// `subtitle` is the one-sentence caption under the label (visible text, never a
+    /// tooltip — see Notion decision 2026-08-24). Model explanations and prices live here.
     func pickerRow<T: Hashable, L: View>(
         title: String,
+        subtitle: String? = nil,
         selection: Binding<T>,
         @ViewBuilder content: () -> L
     ) -> some View {
-        HStack {
-            Text(title).font(.body)
+        HStack(alignment: subtitle != nil ? .top : .center, spacing: 16) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(Theme.body(13))
+                if let subtitle {
+                    Text(subtitle).font(Theme.body(11)).foregroundStyle(Theme.textSecondary)
+                }
+            }
             Spacer()
             Picker("", selection: selection) { content() }
                 .labelsHidden()
                 .frame(maxWidth: 260)
         }
         .padding(.horizontal, 16)
-        .padding(.vertical, 12)
+        .padding(.vertical, subtitle != nil ? 12 : 11)
     }
 
     var rowDivider: some View {
         Divider().padding(.leading, 16)
     }
 
+    /// Text-only row (a one-line note that belongs inside the card, under a divider).
+    func captionRow(_ text: String, color: Color = Theme.textSecondary) -> some View {
+        Text(text).font(Theme.body(11)).foregroundStyle(color)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 16).padding(.vertical, 10)
+    }
+
+    /// Keyboard shortcut as a small pill next to a section title.
+    func shortcutChip(_ shortcut: String) -> some View {
+        Text(shortcut).font(Theme.body(11)).foregroundStyle(Theme.brandBlue)
+            .padding(.horizontal, 8).padding(.vertical, 2)
+            .background(Capsule().fill(Theme.brandBlue.opacity(0.14)))
+    }
+
+    /// Small state pill ("nastavený", "aktívny").
+    func statusChip(_ text: String, color: Color) -> some View {
+        Text(text).font(Theme.body(11)).foregroundStyle(color)
+            .padding(.horizontal, 8).padding(.vertical, 2)
+            .background(Capsule().fill(color.opacity(0.14)))
+    }
+
+    /// Slovak plural: plural(3, "zariadenie", "zariadenia", "zariadení") → "3 zariadenia".
+    static func plural(_ n: Int, _ one: String, _ few: String, _ many: String) -> String {
+        switch n {
+        case 1:     "1 \(one)"
+        case 2...4: "\(n) \(few)"
+        default:    "\(n) \(many)"
+        }
+    }
+
+    static let sectionAnim: Animation? =
+        NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? nil : .easeInOut(duration: 0.18)
+
+    /// Collapsible card. The WHOLE header is the click target (44pt, hover tint) — not just a
+    /// chevron. `status` is a short state summary on the right ("2 profily", "vypnuté").
+    func sectionCard<Content: View>(
+        _ title: String,
+        shortcut: String? = nil,
+        status: String? = nil,
+        isExpanded: Binding<Bool>,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        card {
+            Button {
+                withAnimation(Self.sectionAnim) { isExpanded.wrappedValue.toggle() }
+            } label: {
+                HStack(spacing: 10) {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(Theme.textSecondary)
+                        .rotationEffect(.degrees(isExpanded.wrappedValue ? 90 : 0))
+                        .frame(width: 14)
+                    Text(title).font(Theme.bodyBold(13)).foregroundStyle(Theme.textPrimary)
+                    if let shortcut { shortcutChip(shortcut) }
+                    Spacer()
+                    if let status {
+                        Text(status).font(Theme.body(11)).foregroundStyle(Theme.textSecondary)
+                    }
+                }
+                .padding(.horizontal, 16)
+                .frame(minHeight: 44)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(SectionHeaderStyle())
+            .pointingHandCursor()
+            .focusEffectDisabled()
+            .accessibilityAddTraits(.isHeader)
+            .accessibilityValue(isExpanded.wrappedValue ? "rozbalené" : "zbalené")
+            if isExpanded.wrappedValue {
+                Divider()
+                content()
+            }
+        }
+    }
+
     // MARK: - Helpers
 
-    func rateString(_ r: Float) -> String { String(format: "×%.1f", r * 2) }
 
     func addProfileFromFrontmostApp() {
         let app = NSWorkspace.shared.frontmostApplication
@@ -483,5 +642,36 @@ enum DeveloperMode {
             #endif
         }
         set { UserDefaults.standard.set(newValue, forKey: key) }
+    }
+}
+
+// Plain fields (no floating button) keep the old three-argument call shape — this is the
+// only place accessory is fixed to EmptyView, so existing call sites don't need to change.
+extension PreferencesView.MultilineField where Accessory == EmptyView {
+    init(text: Binding<String>, collapsedLines: Int = 5, minLines: Int = 3,
+         accent: Color = Theme.brandBlueSafe) {
+        self.init(text: text, collapsedLines: collapsedLines, minLines: minLines, accent: accent) { EmptyView() }
+    }
+}
+
+// MARK: - Section header button style (hover tint on the full-width header)
+
+struct SectionHeaderStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View { HeaderLabel(configuration: configuration) }
+    private struct HeaderLabel: View {
+        let configuration: Configuration
+        @State private var hover = false
+        var body: some View {
+            configuration.label
+                .background(hover || configuration.isPressed ? Theme.textPrimary.opacity(0.05) : .clear)
+                .onHover { hover = $0 }
+        }
+    }
+}
+
+extension View {
+    /// Child setting of the row above it: indented + faintly tinted so the dependency reads.
+    func nestedRow() -> some View {
+        self.padding(.leading, 16).background(Theme.textPrimary.opacity(0.03))
     }
 }

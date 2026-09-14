@@ -14,7 +14,7 @@ let package = Package(
                 .product(name: "Sparkle", package: "Sparkle")
             ],
             path: "Sources/OsobnyPomocnik",
-            exclude: ["Resources/Info.plist"],
+            exclude: ["Resources"],  // bundluje build-app.sh, nie SPM
             swiftSettings: [
                 .enableUpcomingFeature("StrictConcurrency")
             ]

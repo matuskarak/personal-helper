@@ -55,6 +55,8 @@ final class DictationIndicatorController: NSWindowController, NSWindowDelegate {
         window.hasShadow = false // shadow is drawn inside SwiftUI; the native window shadow was a rectangular halo around our rounded card
         window.isReleasedWhenClosed = false
         window.isMovableByWindowBackground = true // drag anywhere on the pill to reposition
+        // Floating pills are always dark, whatever the system appearance (client decision 2026-09-11).
+        window.appearance = NSAppearance(named: .darkAqua)
         let hostingView = NSHostingView(rootView: DictationIndicatorView())
         hostingView.sizingOptions = [.preferredContentSize]
         window.contentView = hostingView
@@ -73,6 +75,7 @@ final class DictationIndicatorController: NSWindowController, NSWindowDelegate {
 
     func show(from caller: String = #function) {
         AppLogger.log("[Indicator] show() ← \(caller) | window visible: \(window?.isVisible == true)")
+        if let hv = window?.contentView as? NSHostingView<DictationIndicatorView> { fit(to: hv.fittingSize) }
         reposition()
         window?.orderFront(nil)
         externalAppPIDOverride = nil // one-shot: don't leak into the next, normally-triggered show()
@@ -82,6 +85,20 @@ final class DictationIndicatorController: NSWindowController, NSWindowDelegate {
         let e = DictationEngine.shared
         AppLogger.log("[Indicator] hide() ← \(caller) | isRecording=\(e.isRecording) isMicReady=\(e.isMicReady) btNeg=\(e.btNegotiating) err=\(e.connectionError ?? "nil")")
         window?.orderOut(nil)
+    }
+
+    /// Window = the content's ideal size. NSHostingView's own sizingOptions never resized this
+    /// borderless panel, so the card was silently clipped to the 300 pt init width. Keeps the
+    /// pill's horizontal centre and top edge where they were.
+    func fit(to size: CGSize) {
+        guard let window, size.width > 0, window.frame.size != size else { return }
+        var f = window.frame
+        f.origin.x += (f.width - size.width) / 2
+        f.origin.y += f.height - size.height
+        f.size = size
+        isProgrammaticMove = true
+        window.setFrame(f, display: true)
+        isProgrammaticMove = false
     }
 
     // MARK: - Positioning
@@ -160,6 +177,8 @@ struct MicEqualizerView: View {
     // Callers with their own audio pipeline (e.g. the mic test, which records
     // independently of DictationEngine) pass their own level so the bars actually move.
     var level: Float? = nil
+    /// The dictation pill draws its own 34 pt badge behind the bars; the mic-test card keeps the ring.
+    var showsRing = true
 
     private static let barCount = 4
     private static let maxBarHeight: CGFloat = 15
@@ -172,12 +191,14 @@ struct MicEqualizerView: View {
 
     var body: some View {
         ZStack {
-            Circle()
-                .fill(tint.opacity(0.14))
-                .frame(width: 30, height: 30)
-            Circle()
-                .strokeBorder(tint.opacity(0.35), lineWidth: 1)
-                .frame(width: 30, height: 30)
+            if showsRing {
+                Circle()
+                    .fill(tint.opacity(0.14))
+                    .frame(width: 30, height: 30)
+                Circle()
+                    .strokeBorder(tint.opacity(0.35), lineWidth: 1)
+                    .frame(width: 30, height: 30)
+            }
             HStack(spacing: 2.5) {
                 ForEach(0..<Self.barCount, id: \.self) { i in
                     RoundedRectangle(cornerRadius: 1.2)
@@ -188,7 +209,7 @@ struct MicEqualizerView: View {
             }
         }
         .frame(width: 30, height: 30)
-        .animation(.easeInOut(duration: 0.25), value: tint == .blue)
+        .animation(.easeInOut(duration: 0.25), value: tint)
         .onReceive(Self.ticker) { _ in
             guard isActive else {
                 // ponytail: only write when it would actually change. The ticker is a
@@ -210,32 +231,89 @@ struct MicEqualizerView: View {
 
 // MARK: - Main view
 
+/// Visual spec: Vyvoj/Komponenty/diktovanie-pilulka.md — dark HUD card, 34 pt badge whose
+/// colour carries the state (blue = working, amber = warning/data kept, red = failed),
+/// title + meta line. The state machine below is unchanged from before the redesign.
 struct DictationIndicatorView: View {
     @State private var engine = DictationEngine.shared
 
     private static let lineHeight: CGFloat = 18
     private static let maxLines = 4
+    private static let maxColumnWidth: CGFloat = 300
 
-    // Rolling noise floor: min level over ~2s window (28 ticks × 70ms). Color turns blue
+    // Rolling noise floor: min level over ~2s window (28 ticks × 70ms). Bars go full white
     // only when current level is clearly above the ambient baseline — not just any sound.
     @State private var levelHistory: [Float] = Array(repeating: 0, count: 28)
     @State private var historyIndex = 0
 
-    private var equalizerTint: Color {
+    private var voiceTint: Color { voiceDetected ? .white : .white.opacity(0.45) }
+
+    /// Batch/transcribe mode: once the user is clearly talking, the pill folds down to badge +
+    /// timer after this delay — the "Nahrávam…" line has done its job by then. Live-insert
+    /// reuses the same delay for the same reason (see `liveInsertCompact` below) — one collapse
+    /// timing for the whole pill, not two.
+    private static let autoCompactAfter: Duration = .seconds(5)
+    private static let anim: Animation? = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? nil : .easeInOut(duration: 0.25)
+    @State private var autoCompact = false
+    @State private var autoCompactTask: Task<Void, Never>?
+    // Mirrors engine.liveInsertActive, but flipped through an explicit withAnimation, on the
+    // same autoCompactAfter delay as the batch fold above, instead of isCompact reading the
+    // engine property directly and collapsing the instant it flips. liveInsertActive turns true
+    // on the FIRST delta — the same instant "Čakám na server…" is also swapping out — so an
+    // immediate collapse stacked two layout changes in the same tick (visible as the pill
+    // shearing/clipping mid-collapse). Giving it the same delay-then-withAnimation shape as
+    // autoCompact means the collapse always starts from an already-settled, unchanging state.
+    @State private var liveInsertCompact = false
+    @State private var liveInsertCompactTask: Task<Void, Never>?
+
+    private var voiceDetected: Bool {
         let floor = levelHistory.min() ?? 0
-        return engine.audioLevel > max(0.12, floor * 3.0) ? .blue : .red
+        return engine.audioLevel > max(0.12, floor * 3.0)
     }
 
-    /// Compact mode: live-insert active → no transcript needed in popup (it's already in the field).
+    /// Compact mode: live-insert active (transcript is already in the field), or the batch
+    /// auto-fold above. Anything that needs reading — notice, error, live text — unfolds it.
     private var isCompact: Bool {
-        engine.liveInsertEnabled && engine.liveInsertActive
+        guard engine.isRecording, engine.isMicReady, engine.notice == nil, engine.connectionError == nil,
+              engine.liveText.isEmpty else { return false }
+        return (engine.liveInsertEnabled && liveInsertCompact) || autoCompact
     }
 
-    /// Rough line-wrap estimate (chars-per-line at this pill's width/font) so the
-    /// scroll box grows 1→4 lines with the text instead of jumping straight to the cap.
-    private static func visibleLines(for text: String) -> Int {
-        let charsPerLine = 45
-        return min(maxLines, max(1, Int(ceil(Double(text.count) / Double(charsPerLine)))))
+    private var isProcessing: Bool { engine.isRewriting || engine.isTranscribing }
+    private var showsError: Bool { engine.connectionError != nil }
+    private var showsNotice: Bool { engine.notice != nil }
+    private var badgeColor: Color {
+        showsError ? Theme.HUD.badgeError : showsNotice ? Theme.HUD.badgeWarning : Theme.HUD.badgeActive
+    }
+
+    private static func font(bold: Bool, _ size: CGFloat) -> NSFont {
+        NSFont(name: bold ? "AtkinsonHyperlegible-Bold" : "AtkinsonHyperlegible-Regular", size: size) ?? .systemFont(ofSize: size)
+    }
+    private static func width(_ s: String, bold: Bool, _ size: CGFloat) -> CGFloat {
+        ceil((s as NSString).size(withAttributes: [.font: font(bold: bold, size)]).width)
+    }
+    /// Height the live transcript needs at the column width — grows 1→`maxLines` lines, then scrolls.
+    private static func liveTextHeight(_ s: String) -> CGFloat {
+        let h = (s as NSString).boundingRect(
+            with: CGSize(width: maxColumnWidth, height: .greatestFiniteMagnitude),
+            options: [.usesLineFragmentOrigin, .usesFontLeading],
+            attributes: [.font: font(bold: false, 13)]).height
+        return min(CGFloat(maxLines) * lineHeight, max(lineHeight, ceil(h) + 2))
+    }
+    /// Text column = widest string the current state shows (measured with the real font),
+    /// capped at `maxColumnWidth` — so the pill hugs short states and wraps long ones.
+    private var columnWidth: CGFloat {
+        let strings: [(String, Bool, CGFloat)]
+        if engine.isRewriting        { strings = [("Spracovávam s kontextom…", true, 13.5), ("Smart diktovanie", false, 11.5)] }
+        else if engine.isTranscribing { strings = [("Prepisujem nahrávku…", true, 13.5), ("Zvyčajne pár sekúnd", false, 11.5)] }
+        else if let err = engine.connectionError { strings = [(err, true, 12.5)] }
+        else if showsNotice, let n = engine.notice { strings = [(n, true, 12.5)] }
+        else if !engine.isMicReady   { strings = [("Inicializujem Bluetooth…", true, 13.5)] }
+        else if engine.liveText.isEmpty {
+            strings = [("Čakám na server…", true, 13.5), ("0:00 · prepis až po zastavení", false, 11.5)]
+        } else { return Self.maxColumnWidth }
+        let widest = strings.map { Self.width($0.0, bold: $0.1, $0.2) }.max() ?? 0
+        return min(Self.maxColumnWidth, widest + 8)
     }
 
     private static let levelTicker = Timer.publish(every: 0.07, on: .main, in: .common).autoconnect()
@@ -249,9 +327,10 @@ struct DictationIndicatorView: View {
         Button {
             DictationIndicatorController.shared.hide(from: "tap")
         } label: {
-            pillContent
+            coreContent
         }
         .buttonStyle(.plain).pointingHandCursor()
+        .accessibilityLabel("Diktovanie, kliknutím zavrieš")
             .onReceive(Self.levelTicker) { _ in
                 // ponytail: the pill's NSHostingView is built once and never torn down —
                 // hide() only orderOut's the window — so without this guard the noise-floor
@@ -260,13 +339,36 @@ struct DictationIndicatorView: View {
                 guard engine.isRecording else { return }
                 levelHistory[historyIndex] = engine.audioLevel
                 historyIndex = (historyIndex + 1) % levelHistory.count
+                // First clear voice in a batch session arms the auto-fold; realtime keeps its live text.
+                if engine.transcriptionMode != .realtime, !autoCompact, autoCompactTask == nil, engine.isMicReady, voiceDetected {
+                    autoCompactTask = Task {
+                        try? await Task.sleep(for: Self.autoCompactAfter)
+                        guard !Task.isCancelled, engine.isRecording else { return }
+                        withAnimation(Self.anim) { autoCompact = true }
+                    }
+                }
             }
-            .background(RoundedRectangle(cornerRadius: 20).fill(.regularMaterial))
-            .clipShape(RoundedRectangle(cornerRadius: 20))
-            .overlay(RoundedRectangle(cornerRadius: 20).strokeBorder(Color.primary.opacity(0.10), lineWidth: 0.5))
-            .shadow(color: .black.opacity(0.22), radius: 12, y: 5)
+            .background {
+                ZStack {
+                    Rectangle().fill(.regularMaterial)
+                    Theme.HUD.background
+                }
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 16))
+            .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(Theme.HUD.border, lineWidth: 1))
+            .shadow(color: Theme.HUD.shadow, radius: 14, y: 12)
             .padding(10)
-            .animation(.easeInOut(duration: 0.2), value: isCompact)
+            // Ideal size regardless of the window, then the window follows (see `fit(to:)`).
+            .fixedSize()
+            .background(GeometryReader { g in
+                Color.clear
+                    .onAppear { DictationIndicatorController.shared.fit(to: g.size) }
+                    .onChange(of: g.size) { _, size in DictationIndicatorController.shared.fit(to: size) }
+            })
+            // Both the fold and text-driven width changes animate; GeometryReader above reports
+            // the interpolated size every frame, so the window follows the content smoothly.
+            .animation(Self.anim, value: isCompact)
+            .animation(Self.anim, value: columnWidth)
             // Errors no longer auto-dismiss. A 3 s window meant a failure the user wasn't
             // looking at (pill centred on another screen, attention on the text field) vanished
             // before it was ever read. It stays until the pill is clicked away.
@@ -308,6 +410,24 @@ struct DictationIndicatorView: View {
                     levelHistory = Array(repeating: 0, count: levelHistory.count)
                     historyIndex = 0
                 }
+                autoCompactTask?.cancel()
+                autoCompactTask = nil
+                withAnimation(Self.anim) { autoCompact = false }
+                liveInsertCompactTask?.cancel()
+                liveInsertCompactTask = nil
+                withAnimation(Self.anim) { liveInsertCompact = false }
+            }
+            .onChange(of: engine.liveInsertActive) { _, active in
+                liveInsertCompactTask?.cancel()
+                guard active else {
+                    withAnimation(Self.anim) { liveInsertCompact = false }
+                    return
+                }
+                liveInsertCompactTask = Task {
+                    try? await Task.sleep(for: Self.autoCompactAfter)
+                    guard !Task.isCancelled else { return }
+                    withAnimation(Self.anim) { liveInsertCompact = true }
+                }
             }
             .onChange(of: engine.isMicReady) { _, ready in
                 AppLogger.log("[Indicator] isMicReady → \(ready) | btNeg=\(engine.btNegotiating) compact=\(engine.liveInsertEnabled && engine.liveInsertActive)")
@@ -317,15 +437,25 @@ struct DictationIndicatorView: View {
             }
     }
 
+    // MARK: - Pieces
+
+    private func title(_ s: String) -> some View {
+        Text(s).font(Theme.bodyBold(13.5)).foregroundStyle(Theme.HUD.text)
+    }
+    private func meta(_ s: String) -> some View {
+        Text(s).font(Theme.body(11.5)).foregroundStyle(Theme.HUD.textMeta)
+    }
+    /// Longer, wrapping message (errors, notices).
+    private func message(_ s: String) -> some View {
+        Text(s).font(Theme.bodyBold(12.5)).foregroundStyle(Theme.HUD.text).lineLimit(3)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
     /// Shown under any message that waits for acknowledgement — without it a pill that
     /// no longer disappears on its own just reads as stuck.
     @ViewBuilder
     private var dismissHint: some View {
-        if engine.pillHintsEnabled {
-            Text("Klikni na zatvorenie")
-                .font(.system(size: 9))
-                .foregroundStyle(.tertiary)
-        }
+        if engine.pillHintsEnabled { meta("Klikni na zatvorenie") }
     }
 
     /// Elapsed recording time — SwiftUI's built-in timer-style Text ticks on its own,
@@ -334,135 +464,103 @@ struct DictationIndicatorView: View {
     private var elapsedTimeLabel: some View {
         if let start = engine.recordingStartDate {
             Text(start, style: .timer)
-                .font(.system(size: 9).monospacedDigit())
-                .foregroundStyle(.secondary)
+                .font(Theme.body(11.5).monospacedDigit())
+                .foregroundStyle(Theme.HUD.textMeta)
         }
     }
 
-    private var pillContent: some View {
-        VStack(spacing: 0) {
-            // An advisory raised mid-session (mic-quality hint) rides above the live view
-            // instead of covering it — the recording is still running and the equalizer/timer
-            // is what the user is actually watching.
-            if let notice = engine.notice, !engine.noticeIsSticky, engine.isRecording {
-                HStack(spacing: 6) {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .foregroundStyle(.orange)
-                    Text(notice)
-                        .lineLimit(2)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .font(.system(size: 10))
-                .padding(.horizontal, 16)
-                .padding(.top, 8)
-                .frame(maxWidth: 300)
+    /// 34 pt state badge: colour = state, glyph = what is happening.
+    private var badge: some View {
+        ZStack {
+            Circle().fill(badgeColor)
+            if showsError {
+                Image(systemName: "exclamationmark")
+                    .font(.system(size: 15, weight: .bold)).foregroundStyle(.white)
+            } else if showsNotice {
+                Image(systemName: "tray.and.arrow.down.fill")
+                    .font(.system(size: 13, weight: .semibold)).foregroundStyle(.white)
+            } else if isProcessing || !engine.isMicReady {
+                ProgressView().controlSize(.small)
+            } else {
+                MicEqualizerView(isActive: engine.isRecording, tint: voiceTint, showsRing: false)
             }
-            coreContent
         }
+        .frame(width: 34, height: 34)
+        .animation(.easeInOut(duration: 0.2), value: badgeColor)
+    }
+
+    /// One layout for both folded and full states so the badge keeps its identity (no
+    /// cross-fade) and only the text column slides away.
+    private var coreContent: some View {
+        HStack(spacing: 12) {
+            // frame(maxHeight: .infinity, alignment: .center) pins this block to the
+            // vertical middle of the row regardless of the sibling's height (e.g. the
+            // multi-line liveText box) — HStack's default centering isn't enough once
+            // this stack isn't the tallest child anymore.
+            VStack(spacing: 4) {
+                badge
+                if isCompact || !engine.liveText.isEmpty { elapsedTimeLabel }
+            }
+            .frame(maxHeight: .infinity, alignment: .center)
+
+            if !isCompact {
+                VStack(alignment: .leading, spacing: 2) { textColumn }
+                    .frame(width: columnWidth, alignment: .leading)
+                    .transition(.opacity.combined(with: .move(edge: .leading)))
+            }
+        }
+        .padding(.horizontal, isCompact ? 12 : 16)
+        .padding(.vertical, isCompact ? 10 : 11)
+        .animation(.easeInOut(duration: 0.15), value: engine.liveText)
     }
 
     @ViewBuilder
-    private var coreContent: some View {
-        if isCompact {
-            // Live-insert mode: just the equalizer bubble — transcript is in the field
-            VStack(spacing: 3) {
-                MicEqualizerView(isActive: engine.isRecording, tint: equalizerTint)
+    private var textColumn: some View {
+        if engine.isRewriting {
+            title("Spracovávam s kontextom…")
+            meta("Smart diktovanie")
+        } else if engine.isTranscribing {
+            title("Prepisujem nahrávku…")
+            meta("Zvyčajne pár sekúnd")
+        } else if let err = engine.connectionError {
+            message(err)
+            dismissHint
+        } else if showsNotice, let notice = engine.notice {
+            message(notice)
+            if engine.noticeIsSticky { dismissHint }
+        } else if !engine.isMicReady {
+            title(engine.btNegotiating ? "Inicializujem Bluetooth…" : "Pripájam mikrofón…")
+        } else if engine.liveText.isEmpty {
+            if engine.isWaitingForServer {
+                title("Čakám na server…")
+                elapsedTimeLabel
+            } else if engine.transcriptionMode != .realtime {
+                // Batch/local modes only get a transcript after recording stops —
+                // no interim words to show, unlike realtime's live deltas. Naming
+                // that explicitly avoids reading as a stuck/laggy live view.
+                title("Nahrávam…")
+                HStack(spacing: 4) {
+                    elapsedTimeLabel
+                    if engine.pillHintsEnabled { meta("· prepis až po zastavení") }
+                }
+            } else {
+                title("Počúvam…")
                 elapsedTimeLabel
             }
-            .frame(maxHeight: .infinity, alignment: .center)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
         } else {
-            HStack(spacing: 12) {
-                if engine.isRewriting {
-                    ProgressView().controlSize(.small)
-                    Text("Spracovávam s kontextom…")
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                } else if engine.isTranscribing {
-                    ProgressView().controlSize(.small)
-                    Text("Vkladám…")
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                } else if let err = engine.connectionError {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .foregroundStyle(.orange)
-                        .frame(width: 18)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(err)
-                            .font(.caption)
-                            .foregroundStyle(.red)
-                            .lineLimit(3)
-                        dismissHint
-                    }
+            // ponytail: real ScrollView, full text (no truncation). The earlier
+            // break was `.fixedSize` overriding the parent's height constraint —
+            // an explicit `.frame(height:)` instead grows 1→4 lines with the text
+            // and only scrolls (smoothly, bottom-anchored) past the cap.
+            ScrollView {
+                Text(engine.liveText)
+                    .font(Theme.body(13)).foregroundStyle(Theme.HUD.text)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                } else if let notice = engine.notice, engine.noticeIsSticky || !engine.isRecording {
-                    Image(systemName: "tray.and.arrow.down.fill")
-                        .foregroundStyle(.orange)
-                        .frame(width: 18)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(notice)
-                            .font(.caption)
-                            .foregroundStyle(.primary)
-                            .lineLimit(3)
-                        if engine.noticeIsSticky { dismissHint }
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                } else if !engine.isMicReady {
-                    ProgressView().controlSize(.small)
-                    Text(engine.btNegotiating ? "Inicializujem Bluetooth…" : "Pripájam mikrofón…")
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                } else {
-                    // frame(maxHeight: .infinity, alignment: .center) pins this block to the
-                    // vertical middle of the row regardless of the sibling's height (e.g. the
-                    // multi-line liveText box) — HStack's default centering isn't enough once
-                    // this stack (equalizer + timer) isn't the tallest child anymore.
-                    VStack(spacing: 2) {
-                        MicEqualizerView(isActive: engine.isRecording, tint: equalizerTint)
-                        elapsedTimeLabel
-                    }
-                    .frame(maxHeight: .infinity, alignment: .center)
-
-                    if engine.liveText.isEmpty {
-                        if engine.isWaitingForServer {
-                            ProgressView().controlSize(.small)
-                            Text("Čakám na server…")
-                                .foregroundStyle(.secondary)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        } else if engine.transcriptionMode != .realtime {
-                            // Batch/local modes only get a transcript after recording stops —
-                            // no interim words to show, unlike realtime's live deltas. Naming
-                            // that explicitly avoids reading as a stuck/laggy live view.
-                            Text(engine.pillHintsEnabled ? "Nahrávam… (prepis až po zastavení)" : "Nahrávam…")
-                                .foregroundStyle(.secondary)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        } else {
-                            Text("Počúvam…")
-                                .foregroundStyle(.secondary)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        }
-                    } else {
-                        // ponytail: real ScrollView, full text (no truncation). The earlier
-                        // break was `.fixedSize` overriding the parent's height constraint —
-                        // an explicit `.frame(height:)` instead grows 1→4 lines with the text
-                        // and only scrolls (smoothly, bottom-anchored) past the cap.
-                        ScrollView {
-                            Text(engine.liveText)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        }
-                        .defaultScrollAnchor(.bottom)
-                        .scrollIndicators(.hidden)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .frame(height: CGFloat(Self.visibleLines(for: engine.liveText)) * Self.lineHeight)
-                    }
-                }
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
-            .frame(width: 300)
-            .frame(maxHeight: 90)
-            .animation(.easeInOut(duration: 0.15), value: engine.liveText)
+            .defaultScrollAnchor(.bottom)
+            .scrollIndicators(.hidden)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(height: Self.liveTextHeight(engine.liveText))
         }
     }
 }

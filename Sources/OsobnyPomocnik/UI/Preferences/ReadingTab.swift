@@ -8,65 +8,40 @@ extension PreferencesView {
     // MARK: - Čítanie
 
     var readingTab: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("Čítanie").font(.title2.bold())
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Čítanie").font(Theme.title(22))
 
-            card {
-                pickerRow(title: "Engine", selection: $tts.mode) {
-                    ForEach(TTSMode.allCases, id: \.self) { mode in
-                        Text(mode.displayName).tag(mode)
-                    }
+            sectionCard("Hlas", status: tts.mode.displayName, isExpanded: $voiceSectionExpanded) {
+                pickerRow(title: "Engine",
+                          subtitle: tts.mode == .googleCloud ? "Kvalitnejší hlas, platí sa za znaky." : "Systémový hlas, zadarmo.",
+                          selection: $tts.mode) {
+                    ForEach(TTSMode.allCases, id: \.self) { Text($0.displayName).tag($0) }
                 }
-
                 if tts.mode == .googleCloud {
                     if !google.hasAPIKey {
                         rowDivider
-                        Text("⚠️ Chýba Google Cloud API kľúč — nastavíš ho v záložke Všeobecné.")
-                            .font(.caption).foregroundStyle(.orange)
-                            .padding(.horizontal, 16).padding(.vertical, 8)
+                        captionRow("Chýba Google Cloud API kľúč — nastavíš ho vo Všeobecné.", color: Theme.brandAmberSafe)
                     }
                     rowDivider
                     if !availableGoogleVoices.isEmpty {
                         pickerRow(title: "Hlas", selection: $google.selectedVoiceName) {
-                            ForEach(availableGoogleVoices) { voice in
-                                Text(voice.displayName).tag(voice.name)
-                            }
+                            ForEach(availableGoogleVoices) { Text($0.displayName).tag($0.name) }
                         }
                     } else {
                         HStack {
-                            Text("Hlas").font(.body)
+                            Text("Hlas").font(Theme.body(13))
                             Spacer()
                             if loadingVoices {
                                 ProgressView().controlSize(.small)
-                                Text("Načítavam…").foregroundStyle(.secondary).font(.caption)
+                                Text("Načítavam…").foregroundStyle(Theme.textSecondary).font(Theme.body(11))
                             } else {
                                 Button("Načítať hlasy") { Task { await loadGoogleVoices() } }
                                     .buttonStyle(.bordered).disabled(!google.hasAPIKey)
                             }
                         }
-                        .padding(.horizontal, 16).padding(.vertical, 12)
+                        .padding(.horizontal, 16).padding(.vertical, 11)
                     }
-
-                    rowDivider
-                    HStack {
-                        Button("Otestovať hlas") {
-                            TTSEngine.shared.stop()
-                            TTSEngine.shared.speak(testText, trackUsage: false)
-                        }
-                        .buttonStyle(.borderedProminent).tint(accent)
-                        if tts.isSpeaking {
-                            Button("Stop") { TTSEngine.shared.stop() }
-                                .buttonStyle(.bordered).foregroundStyle(.red)
-                        }
-                        Spacer()
-                        Link("Získať API kľúč →",
-                             destination: URL(string: "https://console.cloud.google.com/apis/credentials")!)
-                            .font(.caption)
-                    }
-                    .padding(.horizontal, 16).padding(.vertical, 12)
-                }
-
-                if tts.mode == .system {
+                } else {
                     rowDivider
                     pickerRow(title: "macOS hlas", selection: Binding(
                         get: { tts.selectedVoiceIdentifier ?? "" },
@@ -78,25 +53,27 @@ extension PreferencesView {
                                 .tag(voice.identifier)
                         }
                     }
-                    rowDivider
-                    HStack {
-                        TextField("Testovací text…", text: $testText).textFieldStyle(.roundedBorder)
-                        Button("Prehrať") {
-                            TTSEngine.shared.stop()
-                            TTSEngine.shared.speak(testText, trackUsage: false)
-                        }
-                        .buttonStyle(.borderedProminent).tint(accent).disabled(testText.isEmpty)
-                        if tts.isSpeaking {
-                            Button("Stop") { TTSEngine.shared.stop() }
-                                .buttonStyle(.bordered).foregroundStyle(.red)
-                        }
-                    }
-                    .padding(.horizontal, 16).padding(.vertical, 12)
                 }
+                rowDivider
+                // One test row for both engines.
+                HStack {
+                    TextField("Testovací text…", text: $testText).textFieldStyle(.roundedBorder)
+                    Button("Prehrať") {
+                        TTSEngine.shared.stop()
+                        TTSEngine.shared.speak(testText, trackUsage: false)
+                    }
+                    .buttonStyle(.borderedProminent).tint(accent)
+                    .disabled(testText.isEmpty || (tts.mode == .googleCloud && !google.hasAPIKey))
+                    if tts.isSpeaking {
+                        Button("Stop") { TTSEngine.shared.stop() }
+                            .buttonStyle(.bordered).foregroundStyle(Theme.error)
+                    }
+                }
+                .padding(.horizontal, 16).padding(.vertical, 12)
+                .nestedRow()
             }
 
-            // Jazyk + rýchlosť + pilulka
-            card {
+            sectionCard("Jazyk a rýchlosť", isExpanded: $readingSectionExpanded) {
                 pickerRow(title: "Jazyk čítania", selection: $tts.languageMode) {
                     Text("Automaticky").tag("auto")
                     Text("Slovenčina").tag("sk-SK")
@@ -104,27 +81,30 @@ extension PreferencesView {
                 }
                 rowDivider
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("Rýchlosť čítania").font(.body)
-                    HStack(spacing: 8) {
-                        Text("Pomaly").font(.caption).foregroundStyle(.secondary)
-                        Slider(
-                            value: Binding(
-                                get: { Double(tts.rate) },
-                                set: { tts.rate = Float($0); rateInput = rateString(Float($0)) }
-                            ),
-                            in: 0.1...1.0
-                        ).tint(accent)
-                        Text("Rýchlo").font(.caption).foregroundStyle(.secondary)
-                        Text(rateInput).font(.caption).monospacedDigit().frame(width: 32)
+                    Text("Rýchlosť").font(Theme.body(13))
+                    Text("Tlačidlo v pilulke prepína v tomto poradí. 1× sa nedá vypnúť.")
+                        .font(Theme.body(11)).foregroundStyle(Theme.textSecondary)
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 64), alignment: .leading)], alignment: .leading, spacing: 6) {
+                        ForEach(TTSEngine.allSpeeds, id: \.self) { s in
+                            Toggle(TTSEngine.format(s), isOn: Binding(
+                                get: { tts.enabledSpeeds.contains(s) },
+                                set: { on in tts.enabledSpeeds = on ? tts.enabledSpeeds + [s] : tts.enabledSpeeds.filter { $0 != s } }
+                            ))
+                            .toggleStyle(.checkbox).disabled(s == 1)
+                        }
+                    }
+                    speedPreview
+                    if tts.mode == .system, tts.orderedSpeeds.contains(where: { $0 > 2 }) {
+                        Text("macOS hlas zvládne najviac 2×, vyššie prehrá ako 2×.")
+                            .font(Theme.body(11)).foregroundStyle(warnFG)
                     }
                 }
                 .padding(.horizontal, 16).padding(.vertical, 12)
                 rowDivider
-                HStack {
+                HStack(alignment: .top, spacing: 16) {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("Automaticky skryť pilulku").font(.body)
-                        Text("Pilulka čítania sa skryje po nečinnosti")
-                            .font(.caption).foregroundStyle(.secondary)
+                        Text("Automaticky skryť pilulku").font(Theme.body(13))
+                        Text("Po nečinnosti.").font(Theme.body(11)).foregroundStyle(Theme.textSecondary)
                     }
                     Spacer()
                     Picker("", selection: Binding(
@@ -141,23 +121,33 @@ extension PreferencesView {
                 .padding(.horizontal, 16).padding(.vertical, 12)
             }
 
-            // Google usage
             if tts.mode == .googleCloud {
                 let chars = Double(google.totalCharactersUsed)
-                let voice = google.selectedVoiceName
-                let rate: Double = voice.contains("Chirp3-HD") || voice.contains("Chirp-HD") ? 0.00016
-                                 : (voice.contains("WaveNet") || voice.contains("Neural2"))  ? 0.000016
-                                 : 0.000004
-                HStack {
-                    Text(String(format: "Znaky od posledného resetu: %d (~%@)",
+                let rate = Pricing.googleTTSUSDPerChar(voice: google.selectedVoiceName)
+                HStack(spacing: 6) {
+                    Text(String(format: "Google: %d znakov od resetu · ~%@",
                                 google.totalCharactersUsed, currency.format(usd: chars * rate)))
-                        .font(.caption).foregroundStyle(.secondary)
-                    Spacer()
+                        .font(Theme.body(11).monospacedDigit()).foregroundStyle(Theme.textSecondary)
                     Button("Resetovať") { google.resetCharacterCount() }
-                        .font(.caption).foregroundStyle(.red).buttonStyle(.plain).pointingHandCursor()
+                        .font(Theme.body(11)).foregroundStyle(accent).buttonStyle(.plain).pointingHandCursor()
+                    Spacer()
                 }
                 .padding(.horizontal, 4)
             }
         }
+    }
+
+    private var speedPreview: some View {
+        HStack(spacing: 6) {
+            Text("V pilulke:").font(Theme.body(11)).foregroundStyle(Theme.HUD.textMeta)
+            ForEach(Array(tts.orderedSpeeds.enumerated()), id: \.element) { i, s in
+                if i > 0 { Text("→").font(Theme.body(11)).foregroundStyle(Theme.HUD.textMeta) }
+                Text(TTSEngine.format(s)).font(Theme.bodyBold(12))
+                    .foregroundStyle(s == tts.speed ? Theme.HUD.blue : Theme.HUD.icon)
+            }
+            Spacer()
+        }
+        .padding(.horizontal, 12).padding(.vertical, 8)
+        .background(RoundedRectangle(cornerRadius: 10).fill(Theme.HUD.background))
     }
 }

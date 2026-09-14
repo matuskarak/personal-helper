@@ -110,24 +110,24 @@ extension PreferencesView {
         switch rating {
         case .good: greenDot
         case .fair: warnFG
-        case .poor: .red
+        case .poor: Theme.error
         }
     }
 
     var qualityTab: some View {
         let stats = qualityStats
         let analyzed = stats.analyzed
-        return VStack(alignment: .leading, spacing: 16) {
-            Text("Kvalita diktovania").font(.title2.bold())
-            Text("Vyhodnotené lokálne z tvojej histórie diktovania — nič sa neposiela nikam von a nič to nestojí. Ukazuje, ako naozaj diktuješ, aby si sa v tom mohol zlepšovať.")
-                .font(.caption).foregroundStyle(.secondary)
+        return VStack(alignment: .leading, spacing: 14) {
+            Text("Kvalita diktovania").font(Theme.title(22))
+            Text("Počíta sa lokálne z histórie, nič sa neposiela.")
+                .font(Theme.body(11)).foregroundStyle(Theme.textSecondary).padding(.horizontal, 4)
 
             if analyzed.isEmpty {
                 card {
                     VStack(spacing: 6) {
-                        Text("Zatiaľ nemáme dosť dát.").font(.callout)
-                        Text("Metriky sa počítajú až pri nových diktovaniach — staršie záznamy v histórii ich neobsahujú.")
-                            .font(.caption).foregroundStyle(.secondary)
+                        Text("Zatiaľ nemáme dosť dát.").font(Theme.body(12))
+                        Text("Metriky sa počítajú až pri nových diktovaniach.")
+                            .font(Theme.body(11)).foregroundStyle(Theme.textSecondary)
                             .multilineTextAlignment(.center)
                     }
                     .frame(maxWidth: .infinity)
@@ -169,14 +169,11 @@ extension PreferencesView {
     @ViewBuilder
     func shadowCompareCard(_ stats: QualityStats) -> some View {
         if !stats.shadowPairs.isEmpty {
-            card {
+            sectionCard("Porovnanie modelov",
+                        status: "zhoda \(Int((stats.shadowAgreement * 100).rounded())) % · \(Self.plural(stats.shadowPairs.count, "porovnanie", "porovnania", "porovnaní"))",
+                        isExpanded: $qualityShadowExpanded) {
                 VStack(alignment: .leading, spacing: 0) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Porovnanie modelov na tej istej nahrávke").font(.body)
-                        Text("Zhoda \(Int((stats.shadowAgreement * 100).rounded())) % na \(stats.shadowPairs.count) porovnaniach · \(stats.shadowIdentical)× úplne zhodné")
-                            .font(.caption).foregroundStyle(.secondary)
-                    }
-                    .padding(.horizontal, 16).padding(.vertical, 12)
+                    captionRow("Tá istá nahrávka, dva modely. \(stats.shadowIdentical)× úplne zhodné.")
                     rowDivider
                     ForEach(Array(stats.shadowPairs.prefix(25).enumerated()), id: \.offset) { index, pair in
                         if index > 0 { rowDivider }
@@ -184,12 +181,24 @@ extension PreferencesView {
                     }
                     rowDivider
                     HStack {
-                        Text("Porovnania sa ukladajú k diktovaniam. Vymazanie nechá diktovania nedotknuté.")
-                            .font(.caption).foregroundStyle(.secondary)
+                        Text("Vymazanie nechá diktovania nedotknuté.")
+                            .font(Theme.body(11)).foregroundStyle(Theme.textSecondary)
                         Spacer()
-                        Button("Vymazať porovnania") { historyStore.clearShadows()
-                            qualityStats = QualityStats(entries: historyStore.entries) }
-                            .buttonStyle(.bordered)
+                        Button("Vymazať porovnania") { showClearShadowsConfirm = true }
+                            .buttonStyle(.bordered).controlSize(.small)
+                            .confirmationDialog(
+                                "Vymazať všetky porovnania modelov?",
+                                isPresented: $showClearShadowsConfirm,
+                                titleVisibility: .visible
+                            ) {
+                                Button("Vymazať", role: .destructive) {
+                                    historyStore.clearShadows()
+                                    qualityStats = QualityStats(entries: historyStore.entries)
+                                }
+                                Button("Zrušiť", role: .cancel) {}
+                            } message: {
+                                Text("Diktovania ostanú nedotknuté, mažú sa len uložené porovnania.")
+                            }
                     }
                     .padding(.horizontal, 16).padding(.vertical, 10)
                 }
@@ -202,18 +211,18 @@ extension PreferencesView {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
                 Text(pair.entry.date.formatted(date: .omitted, time: .shortened))
-                    .font(.callout.monospacedDigit())
+                    .font(Theme.body(12).monospacedDigit())
                 Text(pair.entry.appName.isEmpty ? "—" : pair.entry.appName)
-                    .font(.caption).foregroundStyle(.secondary)
+                    .font(Theme.body(11)).foregroundStyle(Theme.textSecondary)
                 Spacer()
                 Text("\(Int((pair.agreement * 100).rounded())) %")
-                    .font(.callout.monospacedDigit())
+                    .font(Theme.body(12).monospacedDigit())
                     // Below ~90 % the two providers genuinely heard different words; above it
                     // they mostly differ on a filler or two, which isn't worth flagging.
-                    .foregroundStyle(pair.agreement >= 0.9 ? .secondary : Color.orange)
+                    .foregroundStyle(pair.agreement >= 0.9 ? Theme.textSecondary : Theme.brandAmberSafe)
             }
             if pair.primary.isEmpty && pair.shadow.isEmpty {
-                Text("zhodné").font(.caption).foregroundStyle(.secondary)
+                Text("zhodné").font(Theme.body(11)).foregroundStyle(Theme.textSecondary)
             } else {
                 diffLine(pair.entry.model ?? "zvolený", pair.primary, .primary)
                 diffLine(pair.entry.shadowModel ?? "tieňový", pair.shadow, .secondary)
@@ -224,42 +233,40 @@ extension PreferencesView {
 
     func diffLine(_ model: String, _ words: [String], _ style: HierarchicalShapeStyle) -> some View {
         HStack(alignment: .top, spacing: 6) {
-            Text(model).font(.caption.monospaced()).foregroundStyle(.secondary)
+            Text(model).font(Theme.body(11).monospaced()).foregroundStyle(Theme.textSecondary)
                 .frame(width: 150, alignment: .leading)
             Text(words.isEmpty ? "—" : words.prefix(12).joined(separator: ", "))
-                .font(.caption).foregroundStyle(style)
+                .font(Theme.body(11)).foregroundStyle(style)
                 .textSelection(.enabled)
         }
     }
 
     func modelUsageCard(_ stats: QualityStats) -> some View {
-        card {
+        sectionCard("Použité modely", status: stats.modelUsage.first.map { "\($0.name) \(Int((Double($0.count) / Double(max(stats.modelTotal, 1)) * 100).rounded())) %" },
+                    isExpanded: $qualityModelsExpanded) {
             VStack(alignment: .leading, spacing: 0) {
-                Text("Použité modely").font(.body)
-                    .padding(.horizontal, 16).padding(.vertical, 12)
-                rowDivider
                 if stats.modelTotal == 0 {
-                    Text("Zatiaľ žiadne dáta — model sa zaznamenáva pri nových diktovaniach.")
-                        .font(.callout).foregroundStyle(.secondary)
+                    Text("Zatiaľ žiadne dáta.")
+                        .font(Theme.body(12)).foregroundStyle(Theme.textSecondary)
                         .padding(.horizontal, 16).padding(.vertical, 12)
                 } else {
                     ForEach(Array(stats.modelUsage.enumerated()), id: \.offset) { index, model in
                         if index > 0 { rowDivider }
                         HStack {
                             VStack(alignment: .leading, spacing: 2) {
-                                Text(model.name).font(.callout)
+                                Text(model.name).font(Theme.body(12))
                                 Text("priemerne \(model.avgSeconds) s na diktovanie")
-                                    .font(.caption).foregroundStyle(.secondary)
+                                    .font(Theme.body(11)).foregroundStyle(Theme.textSecondary)
                             }
                             Spacer()
                             Text("\(model.count)× (\(Int((Double(model.count) / Double(stats.modelTotal) * 100).rounded())) %)")
-                                .font(.callout.monospacedDigit()).foregroundStyle(.secondary)
+                                .font(Theme.body(12).monospacedDigit()).foregroundStyle(Theme.textSecondary)
                         }
                         .padding(.horizontal, 16).padding(.vertical, 10)
                     }
                     rowDivider
-                    Text("Spolu \(stats.modelTotal) diktovaní so zaznamenaným modelom. Staršie záznamy model nemajú a nepočítajú sa.")
-                        .font(.caption).foregroundStyle(.secondary)
+                    Text("Spolu \(stats.modelTotal). Staršie záznamy bez modelu sa nepočítajú.")
+                        .font(Theme.body(11)).foregroundStyle(Theme.textSecondary)
                         .padding(.horizontal, 16).padding(.vertical, 10)
                 }
             }
@@ -267,29 +274,27 @@ extension PreferencesView {
     }
 
     func modeUsageCard(_ stats: QualityStats) -> some View {
-        card {
+        sectionCard("Využitie režimov", status: stats.modeCombos.max(by: { $0.count < $1.count }).flatMap { $0.count == 0 ? nil : "\($0.label) \(Int((Double($0.count) / Double(max(stats.modeTotal, 1)) * 100).rounded())) %" },
+                    isExpanded: $qualityModesExpanded) {
             VStack(alignment: .leading, spacing: 0) {
-                Text("Využitie režimov").font(.body)
-                    .padding(.horizontal, 16).padding(.vertical, 12)
-                rowDivider
                 if stats.modeTotal == 0 {
-                    Text("Zatiaľ žiadne dáta — režim sa zaznamenáva pri nových diktovaniach.")
-                        .font(.callout).foregroundStyle(.secondary)
+                    Text("Zatiaľ žiadne dáta.")
+                        .font(Theme.body(12)).foregroundStyle(Theme.textSecondary)
                         .padding(.horizontal, 16).padding(.vertical, 12)
                 } else {
                     ForEach(Array(stats.modeCombos.enumerated()), id: \.offset) { index, combo in
                         if index > 0 { rowDivider }
                         HStack {
-                            Text(combo.label).font(.callout)
+                            Text(combo.label).font(Theme.body(12))
                             Spacer()
                             Text("\(combo.count)× (\(Int((Double(combo.count) / Double(stats.modeTotal) * 100).rounded())) %)")
-                                .font(.callout.monospacedDigit()).foregroundStyle(.secondary)
+                                .font(Theme.body(12).monospacedDigit()).foregroundStyle(Theme.textSecondary)
                         }
                         .padding(.horizontal, 16).padding(.vertical, 10)
                     }
                     rowDivider
-                    Text("Spolu \(stats.modeTotal) diktovaní so zaznamenaným režimom. Staršie záznamy režim nemajú a nepočítajú sa.")
-                        .font(.caption).foregroundStyle(.secondary)
+                    Text("Spolu \(stats.modeTotal). Staršie záznamy bez režimu sa nepočítajú.")
+                        .font(Theme.body(11)).foregroundStyle(Theme.textSecondary)
                         .padding(.horizontal, 16).padding(.vertical, 10)
                 }
             }
@@ -298,31 +303,29 @@ extension PreferencesView {
 
     func statTile(value: String, label: String, color: Color) -> some View {
         VStack(spacing: 3) {
-            Text(value).font(.system(size: 24, weight: .semibold)).foregroundStyle(color)
-            Text(label).font(.caption2).foregroundStyle(.secondary)
+            Text(value).font(Theme.title(24)).foregroundStyle(color)
+            Text(label).font(Theme.body(10)).foregroundStyle(Theme.textSecondary)
                 .multilineTextAlignment(.center)
         }
         .frame(maxWidth: .infinity)
     }
 
     func topFillersCard(_ stats: QualityStats) -> some View {
-        card {
+        sectionCard("Výplňové slová", status: stats.topFillers.first.map { "„\($0.word)“ \($0.count)×" } ?? "žiadne",
+                    isExpanded: $qualityFillersExpanded) {
             VStack(alignment: .leading, spacing: 0) {
-                Text("Najčastejšie výplňové slová")
-                    .font(.body).padding(.horizontal, 16).padding(.vertical, 12)
-                rowDivider
                 if stats.topFillers.isEmpty {
                     Text("Žiadne — čisté diktovanie.")
-                        .font(.callout).foregroundStyle(.secondary)
+                        .font(Theme.body(12)).foregroundStyle(Theme.textSecondary)
                         .padding(.horizontal, 16).padding(.vertical, 12)
                 } else {
                     ForEach(Array(stats.topFillers.enumerated()), id: \.element.word) { index, pair in
                         if index > 0 { rowDivider }
                         HStack {
-                            Text("„\(pair.word)”").font(.callout)
+                            Text("„\(pair.word)”").font(Theme.body(12))
                             Spacer()
-                            Text("\(pair.count)×").font(.callout.monospacedDigit())
-                                .foregroundStyle(.secondary)
+                            Text("\(pair.count)×").font(Theme.body(12).monospacedDigit())
+                                .foregroundStyle(Theme.textSecondary)
                         }
                         .padding(.horizontal, 16).padding(.vertical, 10)
                     }
@@ -334,25 +337,23 @@ extension PreferencesView {
     /// Grouped by the app dictated into — the whole point is seeing that you speak
     /// differently to ChatGPT than to Slack.
     func perAppCard(_ stats: QualityStats) -> some View {
-        card {
+        sectionCard("Podľa aplikácie", status: Self.plural(stats.perApp.count, "appka", "appky", "appiek"),
+                    isExpanded: $qualityAppsExpanded) {
             VStack(alignment: .leading, spacing: 0) {
-                Text("Podľa aplikácie")
-                    .font(.body).padding(.horizontal, 16).padding(.vertical, 12)
-                rowDivider
                 ForEach(Array(stats.perApp.enumerated()), id: \.element.name) { index, row in
                     if index > 0 { rowDivider }
                     HStack(spacing: 12) {
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(row.name).font(.callout)
+                            Text(row.name).font(Theme.body(12))
                             Text(row.category.label)
-                                .font(.caption2).foregroundStyle(.tertiary)
+                                .font(Theme.body(10)).foregroundStyle(Theme.textSecondary)
                         }
                         Spacer()
                         Text("\(row.count)× diktovanie")
-                            .font(.caption).foregroundStyle(.secondary)
+                            .font(Theme.body(11)).foregroundStyle(Theme.textSecondary)
                         if row.paced > 0 {
                             Text(String(format: "%.1f fill./min", row.avgFillers))
-                                .font(.caption.monospacedDigit())
+                                .font(Theme.body(11).monospacedDigit())
                                 .foregroundStyle(ratingColor(DictationQualityEngine.fillerRating(perMinute: row.avgFillers)))
                         }
                     }
@@ -366,11 +367,8 @@ extension PreferencesView {
         _ analyzed: [(entry: DictationHistoryEntry, metrics: DictationMetrics)]
     ) -> some View {
         let recent = Array(analyzed.reversed().prefix(15))
-        return card {
+        return sectionCard("Posledné diktovania", isExpanded: $qualityRecentExpanded) {
             VStack(alignment: .leading, spacing: 0) {
-                Text("Posledné diktovania")
-                    .font(.body).padding(.horizontal, 16).padding(.vertical, 12)
-                rowDivider
                 ForEach(Array(recent.enumerated()), id: \.element.entry.id) { index, item in
                     if index > 0 { rowDivider }
                     qualityDetailRow(item.entry, item.metrics)
@@ -403,14 +401,14 @@ extension PreferencesView {
                 }
 
                 Divider()
-                Text("Nadiktované").font(.caption2).foregroundStyle(.tertiary)
-                Text(entry.text).font(.callout).textSelection(.enabled)
+                Text("Nadiktované").font(Theme.body(10)).foregroundStyle(Theme.textSecondary)
+                Text(entry.text).font(Theme.body(12)).textSelection(.enabled)
                 if let rewritten = entry.rewrittenText, !rewritten.isEmpty {
-                    Text("Po Smart prepise").font(.caption2).foregroundStyle(.tertiary)
-                    Text(rewritten).font(.callout).textSelection(.enabled)
+                    Text("Po Smart prepise").font(Theme.body(10)).foregroundStyle(Theme.textSecondary)
+                    Text(rewritten).font(Theme.body(12)).textSelection(.enabled)
                 }
                 if entry.hasScreenshot {
-                    Text("Screenshot pri diktovaní").font(.caption2).foregroundStyle(.tertiary)
+                    Text("Screenshot pri diktovaní").font(Theme.body(10)).foregroundStyle(Theme.textSecondary)
                     let url = DictationHistoryStore.shared.screenshotURL(for: entry.id)
                     if let image = NSImage(contentsOf: url) {
                         Image(nsImage: image)
@@ -427,19 +425,19 @@ extension PreferencesView {
         } label: {
             HStack(spacing: 8) {
                 Text(Self.historyDateFormatter.string(from: entry.date))
-                    .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                    .font(Theme.body(11).monospacedDigit()).foregroundStyle(Theme.textSecondary)
                 if !entry.appName.isEmpty {
-                    Text(entry.appName).font(.caption).foregroundStyle(.tertiary)
+                    Text(entry.appName).font(Theme.body(11)).foregroundStyle(Theme.textSecondary)
                 }
                 Spacer()
                 if m.fillerCount > 0 {
                     Text("\(m.fillerCount) fill.")
-                        .font(.caption.monospacedDigit())
+                        .font(Theme.body(11).monospacedDigit())
                         .foregroundStyle(ratingColor(DictationQualityEngine.fillerRating(perMinute: m.fillersPerMinute)))
                 }
                 if m.wordsPerMinute > 0 {
                     Text("\(m.wordsPerMinute) wpm")
-                        .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                        .font(Theme.body(11).monospacedDigit()).foregroundStyle(Theme.textSecondary)
                 }
             }
         }
@@ -448,9 +446,9 @@ extension PreferencesView {
 
     func metricLine(_ label: String, _ value: String, color: Color? = nil) -> some View {
         HStack(alignment: .top) {
-            Text(label).font(.caption).foregroundStyle(.secondary)
+            Text(label).font(Theme.body(11)).foregroundStyle(Theme.textSecondary)
             Spacer()
-            Text(value).font(.caption).foregroundStyle(color ?? .primary)
+            Text(value).font(Theme.body(11)).foregroundStyle(color ?? .primary)
                 .multilineTextAlignment(.trailing)
         }
     }

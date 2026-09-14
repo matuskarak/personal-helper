@@ -25,18 +25,27 @@ struct DictationHistoryEntry: Codable, Identifiable {
     // fields are wiped together by clearShadows().
     var shadowText: String?
     var shadowModel: String?
+    // Silence-trim A/B test: the SAME provider/model, but on the untrimmed audio — isolates
+    // whether SilenceTrimmer itself lost anything, instead of conflating it with a model
+    // difference the way shadowText above does. Only present while dictation.silenceTrimABTest
+    // is on and something was actually trimmed (nothing to compare otherwise). Temporary
+    // testing aid, not a shipped feature — see CLAUDE.md.
+    var trimTestText: String?
+    var trimTestSecondsRemoved: Int?
 
     init(id: UUID = UUID(), date: Date, text: String, appName: String = "", bundleID: String = "",
          category: AppCategory = .generic, seconds: Int = 0,
          rewrittenText: String? = nil, metrics: DictationMetrics? = nil, hasScreenshot: Bool = false,
          mode: String? = nil, smart: Bool? = nil, model: String? = nil,
-         shadowText: String? = nil, shadowModel: String? = nil) {
+         shadowText: String? = nil, shadowModel: String? = nil,
+         trimTestText: String? = nil, trimTestSecondsRemoved: Int? = nil) {
         self.id = id; self.date = date; self.text = text
         self.appName = appName; self.bundleID = bundleID; self.category = category
         self.seconds = seconds; self.rewrittenText = rewrittenText; self.metrics = metrics
         self.hasScreenshot = hasScreenshot
         self.mode = mode; self.smart = smart; self.model = model
         self.shadowText = shadowText; self.shadowModel = shadowModel
+        self.trimTestText = trimTestText; self.trimTestSecondsRemoved = trimTestSecondsRemoved
     }
 
     // ponytail: hand-written decode so the added fields don't destroy existing history.
@@ -59,6 +68,8 @@ struct DictationHistoryEntry: Codable, Identifiable {
         model         = try c.decodeIfPresent(String.self, forKey: .model)
         shadowText    = try c.decodeIfPresent(String.self, forKey: .shadowText)
         shadowModel   = try c.decodeIfPresent(String.self, forKey: .shadowModel)
+        trimTestText           = try c.decodeIfPresent(String.self, forKey: .trimTestText)
+        trimTestSecondsRemoved = try c.decodeIfPresent(Int.self, forKey: .trimTestSecondsRemoved)
     }
 }
 
@@ -70,6 +81,8 @@ final class DictationHistoryStore {
     private(set) var entries: [DictationHistoryEntry] = []  // oldest first
     /// Shadow transcripts that beat their own history entry to the punch — see attachShadow.
     private var parkedShadows: [UUID: (text: String, model: String)] = [:]
+    /// Same race, for the silence-trim A/B test — see attachTrimTest.
+    private var parkedTrimTests: [UUID: (text: String, secondsRemoved: Int)] = [:]
 
     // ponytail: measured ~755 bytes/entry (150KB / 200 entries) before this change.
     // Uncapped storage was requested to build up a real dataset for the quality-analysis
@@ -107,7 +120,7 @@ final class DictationHistoryStore {
     func log(_ text: String, id: UUID = UUID(), appName: String = "", bundleID: String = "",
              category: AppCategory = .generic, seconds: Int = 0, rewrittenText: String? = nil,
              screenshotJPEG: Data? = nil, mode: String? = nil, smart: Bool? = nil,
-             model: String? = nil) {
+             model: String? = nil, silentSeconds: Int = 0, longestSilenceSeconds: Int = 0) {
         guard !text.isEmpty else { return }
         if let screenshotJPEG {
             try? screenshotJPEG.write(to: screenshotURL(for: id), options: .atomic)
@@ -118,13 +131,16 @@ final class DictationHistoryStore {
             metrics: DictationQualityEngine.analyze(text: text, rewritten: rewrittenText, seconds: seconds),
             hasScreenshot: screenshotJPEG != nil, mode: mode, smart: smart, model: model,
             // A shadow that finished before the primary did is parked here waiting for us.
-            shadowText: parkedShadows[id]?.text, shadowModel: parkedShadows[id]?.model
+            shadowText: parkedShadows[id]?.text, shadowModel: parkedShadows[id]?.model,
+            trimTestText: parkedTrimTests[id]?.text, trimTestSecondsRemoved: parkedTrimTests[id]?.secondsRemoved
         ))
         parkedShadows[id] = nil
+        parkedTrimTests[id] = nil
         if let entry = entries.last {
             Telemetry.shared.dictation(seconds: seconds, metrics: entry.metrics, model: model, mode: mode,
                                        outcome: "ok", latencyMs: DictationEngine.shared.lastTranscriptionLatencyMs,
-                                       category: category)
+                                       category: category, silentSeconds: silentSeconds,
+                                       longestSilenceSeconds: longestSilenceSeconds)
         }
         if entries.count > safetyCeiling {
             let overflow = entries.prefix(entries.count - safetyCeiling)
@@ -143,6 +159,17 @@ final class DictationHistoryStore {
         }
         entries[index].shadowText = text
         entries[index].shadowModel = model
+        save()
+    }
+
+    /// Same race as attachShadow, for the silence-trim A/B test's untrimmed-audio transcript.
+    func attachTrimTest(to id: UUID, text: String, secondsRemoved: Int) {
+        guard let index = entries.firstIndex(where: { $0.id == id }) else {
+            parkedTrimTests[id] = (text, secondsRemoved)
+            return
+        }
+        entries[index].trimTestText = text
+        entries[index].trimTestSecondsRemoved = secondsRemoved
         save()
     }
 

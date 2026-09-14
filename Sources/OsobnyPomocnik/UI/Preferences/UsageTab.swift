@@ -41,8 +41,8 @@ extension PreferencesView {
         let range = currentUsageRange()
         let summary = usageStore.summary(from: range.from, to: range.to)
 
-        return VStack(alignment: .leading, spacing: 16) {
-            Text("Prehľad využitia").font(.title2.bold())
+        return VStack(alignment: .leading, spacing: 14) {
+            Text("Prehľad").font(Theme.title(22))
 
             HStack(spacing: 10) {
                 Picker("", selection: $usagePeriod) {
@@ -62,51 +62,23 @@ extension PreferencesView {
                 }
                 Spacer()
             }
-            .font(.caption)
+            .font(Theme.body(11))
 
+            // One card, three tiles — the figures are the point of this tab.
             card {
-                HStack(spacing: 18) {
-                    Image(systemName: "clock.badge.checkmark")
-                        .font(.system(size: 26))
-                        .foregroundStyle(accent)
-                        .frame(width: 32)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Ušetrený čas").font(.caption).foregroundStyle(.secondary)
-                        Text(timeSavedString(summary)).font(.title2.bold())
-                    }
-                    Spacer()
+                HStack(spacing: 0) {
+                    usageTile(timeSavedString(summary), "ušetrený čas")
+                    Divider().frame(height: 44)
+                    usageTile(minutesString(summary.dictationSeconds),
+                              "diktovanie · \(summary.dictationWords) slov · \(dictationCostString(summary.dictationSeconds))")
+                    Divider().frame(height: 44)
+                    usageTile("\(summary.readingWords)",
+                              "prečítaných slov" + (tts.mode == .googleCloud ? " · \(readingCostString(summary.readingChars))" : ""))
                 }
-                .padding(18)
+                .padding(.vertical, 14)
             }
-
-            HStack(alignment: .top, spacing: 16) {
-                card {
-                    VStack(alignment: .leading, spacing: 10) {
-                        Label("Diktovanie", systemImage: "mic.fill")
-                            .font(.headline).foregroundStyle(accent)
-                        usageStatRow("Čas diktovania", minutesString(summary.dictationSeconds))
-                        usageStatRow("Nadiktované slová", "\(summary.dictationWords)")
-                        usageStatRow("Cena", dictationCostString(summary.dictationSeconds))
-                    }
-                    .padding(16)
-                }
-                card {
-                    VStack(alignment: .leading, spacing: 10) {
-                        Label("Čítanie", systemImage: "speaker.wave.2.fill")
-                            .font(.headline).foregroundStyle(accent)
-                        usageStatRow("Prečítané slová", "\(summary.readingWords)")
-                        usageStatRow("Znakov", "\(summary.readingChars)")
-                        if tts.mode == .googleCloud {
-                            usageStatRow("Cena", readingCostString(summary.readingChars))
-                        }
-                    }
-                    .padding(16)
-                }
-            }
-
-            Text("Ušetrený čas je odhad: diktovanie sa porovnáva s písaním na klávesnici (~40 slov/min), čítanie s manuálnym čítaním (~120 slov/min) oproti počúvaniu (~180 slov/min).")
-                .font(.caption2).foregroundStyle(.tertiary)
-
+            Text("Odhad: písanie ~40 slov/min, čítanie ~120, počúvanie ~180 slov/min.")
+                .font(Theme.body(11)).foregroundStyle(Theme.textSecondary).padding(.horizontal, 4)
             usageChart(range: range)
         }
     }
@@ -122,7 +94,7 @@ extension PreferencesView {
         return card {
             VStack(alignment: .leading, spacing: 12) {
                 HStack {
-                    Text("Vývoj diktovania").font(.headline)
+                    Text("Vývoj diktovania").font(Theme.bodyBold(13))
                     Spacer()
                     Picker("", selection: $chartKind) {
                         ForEach(ChartKind.allCases, id: \.self) { k in Text(k.label).tag(k) }
@@ -136,7 +108,7 @@ extension PreferencesView {
 
                 if buckets.isEmpty {
                     Text("Zatiaľ žiadne dáta za toto obdobie.")
-                        .font(.caption).foregroundStyle(.secondary)
+                        .font(Theme.body(11)).foregroundStyle(Theme.textSecondary)
                         .frame(maxWidth: .infinity, minHeight: 140, alignment: .center)
                 } else {
                     Chart(buckets) { b in
@@ -184,11 +156,20 @@ extension PreferencesView {
         }
     }
 
+    func usageTile(_ value: String, _ label: String) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(value).font(Theme.title(22).monospacedDigit())
+            Text(label).font(Theme.body(11)).foregroundStyle(Theme.textSecondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 16)
+    }
+
     func usageStatRow(_ label: String, _ value: String) -> some View {
         HStack {
-            Text(label).font(.caption).foregroundStyle(.secondary)
+            Text(label).font(Theme.body(11)).foregroundStyle(Theme.textSecondary)
             Spacer()
-            Text(value).font(.callout.monospacedDigit())
+            Text(value).font(Theme.body(12).monospacedDigit())
         }
     }
 

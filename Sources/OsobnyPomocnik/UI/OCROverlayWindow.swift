@@ -88,14 +88,14 @@ struct OCROverlayView: View {
 
                     // Blue border
                     Rectangle()
-                        .stroke(Color.blue, lineWidth: 2)
+                        .stroke(Theme.brandBlue, lineWidth: 2)
                         .frame(width: rect.width, height: rect.height)
                         .position(x: rect.midX, y: rect.midY)
                 }
 
                 // Instruction label
                 Text("Vyber oblasť pre OCR  •  ESC = zrušiť")
-                    .font(.callout.bold())
+                    .font(Theme.bodyBold(12))
                     .foregroundStyle(.white)
                     .padding(.horizontal, 12).padding(.vertical, 6)
                     .background(.black.opacity(0.7), in: RoundedRectangle(cornerRadius: 8))

@@ -33,7 +33,7 @@ struct ShortcutRecorderView: View {
                 .monospacedDigit()
         }
         .fixedSize()
-        .foregroundStyle(isRecording ? .red : .primary)
+        .foregroundStyle(isRecording ? Theme.error : Theme.textPrimary)
         .onDisappear { stopRecording() }
     }
 
@@ -82,7 +82,7 @@ struct ShortcutMappingRow: View {
             ForEach(Array(list.enumerated()), id: \.offset) { index, _ in
                 HStack(spacing: 4) {
                     if index == 0 {
-                        Text(label).font(.body)
+                        Text(label).font(Theme.body(13))
                     }
                     Spacer()
                     if index == list.count - 1 && list.count < ShortcutStore.maxPerAction {
@@ -93,7 +93,7 @@ struct ShortcutMappingRow: View {
                             Image(systemName: "plus.circle")
                         }
                         .buttonStyle(.plain).pointingHandCursor()
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Theme.textSecondary)
                         .help("Pridať ďalšiu skratku pre túto akciu")
                     }
                     ShortcutRecorderView(shortcut: Binding(
@@ -108,7 +108,7 @@ struct ShortcutMappingRow: View {
                             Image(systemName: "xmark.circle.fill")
                         }
                         .buttonStyle(.plain).pointingHandCursor()
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Theme.textSecondary)
                         .help("Odstrániť túto skratku")
                     } else {
                         // Invisible placeholder the same size as the x-button above/below, so the

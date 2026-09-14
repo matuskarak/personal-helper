@@ -26,12 +26,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         #if DEBUG
         DictationQualityEngine.selfCheck()
         AppProfile.selfCheck()
+        KeywordSuggestionEngine.selfCheck()
+        SilenceTrimmer.selfCheck()
         #endif
+        // Assets are bundled by build-app.sh, not SPM — one line tells a tester's log whether they arrived.
+        let fontsOK = ["AtkinsonHyperlegible-Regular", "BricolageGrotesque-SemiBold"].allSatisfy { NSFont(name: $0, size: 12) != nil }
+        AppLogger.log("[Theme] fonty \(fontsOK ? "OK" : "CHÝBAJÚ"), menu bar ikona \(NSImage(named: "MenuBarIcon") == nil ? "CHÝBA" : "OK")")
         // First thing that touches anything slow: it runs on its own thread and the rest of
         // launch overlaps with it, so starting it later only delays the window in which an
         // early dictation still waits.
         AudioDeviceManager.warmUp()
         AudioHealth.startWatchingDevices()
+        AudioDucking.recoverStaleDuckIfNeeded()
         // Touch the key-owning singletons now so the UserDefaults→Keychain migration runs
         // at launch, not at the first dictation — both are lazy and nothing else forces them.
         _ = DictationEngine.shared
@@ -195,7 +201,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         Telemetry.shared.feature("read")
         guard let text = await TextExtractor.shared.extractSelected(), !text.isEmpty else {
             AppLogger.log("[AppDelegate] handleReadText — žiadny text na pasteboarde")
-            menuBarController?.showError("⚠️ Nie je označený žiadny text.")
+            menuBarController?.showError("Nie je označený žiadny text.")
             return
         }
         AppLogger.log("[AppDelegate] handleReadText — text získaný (\(text.count) znakov), spúšťam TTS")
@@ -256,7 +262,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     .shortcuts(for: running == .realtime ? .dictateRealtime : .dictateBatch)
                     .first?.displayString ?? "?"
                 let cancelKey = ShortcutStore.shared.shortcuts(for: .cancelDictation).first?.displayString ?? "?"
-                engine.showNotice("⚠️ Beží \(running == .realtime ? "realtime" : "nahrávacie") diktovanie — ukonči ho \(stopKey), alebo \(cancelKey) ho zruší.", sticky: false)
+                engine.showNotice("Beží \(running == .realtime ? "realtime" : "nahrávacie") diktovanie — ukonči ho \(stopKey), alebo \(cancelKey) ho zruší.", sticky: false)
                 DictationIndicatorController.shared.show()
                 return
             }
@@ -275,7 +281,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     AppLogger.log("[AppDelegate] handleDictate(\(mode.rawValue)) — startRecording zlyhalo: \(error.localizedDescription)")
                     // Pill is already showing (from show() above) — just surface the reason in it.
                     if engine.connectionError == nil {
-                        menuBarController?.showError("⚠️ \(error.localizedDescription)")
+                        menuBarController?.showError("\(error.localizedDescription)")
                     }
                 }
             }
@@ -322,7 +328,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 DictationIndicatorController.shared.hide()
             } else if !engine.lastRecordingCapturedAudio {
                 AppLogger.log("[AppDelegate] \(label) — žiadne audio sa nezaznamenalo")
-                engine.showNotice("⚠️ Audio sa nezaznamenalo. Skontroluj mikrofón.")
+                engine.showNotice("Audio sa nezaznamenalo. Skontroluj mikrofón.")
             } else if engine.notice != nil {
                 // transcribeLocal() already raised a sticky notice explaining an empty
                 // result (e.g. no-speech-detected on real audio) — leave the pill up so
@@ -354,7 +360,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // the instant the paste succeeds.
         case .savedToMemory:
             AppLogger.log("[AppDelegate] \(label) — žiadne pole nebolo zvolené, uložené do pamäte (\(text.count) znakov)")
-            engine.showNotice("⚠️ Nebolo zvolené pole na vloženie. Text uložený do pamäte (⌃⌥V).")
+            engine.showNotice("Nebolo zvolené pole na vloženie. Text uložený do pamäte (⌃⌥V).")
         }
     }
 
@@ -367,7 +373,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // there (same dismissal path as clicking the pill away).
         DictationIndicatorController.shared.hide(from: "handleInsertFromMemory")
         guard let text = DictationMemoryStore.shared.consume() else {
-            menuBarController?.showError("⚠️ Pamäť diktovania je prázdna.")
+            menuBarController?.showError("Pamäť diktovania je prázdna.")
             return
         }
         TextInserter.shared.insert(text)

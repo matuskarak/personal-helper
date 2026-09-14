@@ -41,7 +41,7 @@ private struct LogViewerView: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                Text("Log aplikácie").font(.headline)
+                Text("Log aplikácie").font(Theme.bodyBold(13))
                 Spacer()
                 Toggle("Auto-obnova", isOn: $autoRefresh)
                     .toggleStyle(.switch)
