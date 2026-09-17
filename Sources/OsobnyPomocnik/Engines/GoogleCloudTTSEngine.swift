@@ -53,6 +53,11 @@ final class GoogleCloudTTSEngine: NSObject {
 
     private var player: AVAudioPlayer?
     private var playbackContinuation: CheckedContinuation<Void, Error>?
+    // Bumped by every speak() and stop(). A pipeline loop only keeps going while its own
+    // number is still current — `isSpeaking` alone can't tell "my read" from "a newer read":
+    // speak() flips it false→true synchronously, so an older loop waking up afterwards saw
+    // `true` and carried on playing ITS next sentence over the new one.
+    private var generation = 0
 
     var apiKey: String {
         didSet { KeychainStore.set(apiKey, for: "google.api.key") }
@@ -90,8 +95,10 @@ final class GoogleCloudTTSEngine: NSObject {
         guard hasAPIKey else { throw GoogleTTSError.noAPIKey }
 
         stop()
+        let gen = generation
         isSpeaking = true
         isPaused   = false
+        AppLogger.log("[GoogleTTS] speak #\(gen) — \(text.count) znakov")
 
         let sentences = text.sentences()
         guard !sentences.isEmpty else { isSpeaking = false; return }
@@ -103,9 +110,12 @@ final class GoogleCloudTTSEngine: NSObject {
         }
 
         for i in sentences.indices {
-            guard isSpeaking else { break }
+            guard gen == generation else { break }
 
             let data = try await nextFetch.value
+            // stop() or a newer speak() may have fired while the fetch above was in flight —
+            // without this re-check, a sentence that finished downloading afterwards still played.
+            guard gen == generation else { break }
 
             // Kick off next sentence fetch in parallel while current plays
             if i + 1 < sentences.endIndex {
@@ -121,7 +131,11 @@ final class GoogleCloudTTSEngine: NSObject {
             try await playAndWait(data)
         }
 
-        if isSpeaking { isSpeaking = false; isPaused = false }
+        guard gen == generation else { nextFetch.cancel(); return }
+        AppLogger.log("[GoogleTTS] speak #\(gen) — dočítané")
+        // Release the finished player: a kept one replays its sentence from 0 on any play().
+        player = nil
+        isSpeaking = false; isPaused = false
     }
 
     func pause() {
@@ -130,12 +144,24 @@ final class GoogleCloudTTSEngine: NSObject {
     }
 
     func resume() {
+        guard isSpeaking, isPaused else { return }
         player?.play()
         isPaused = false
     }
 
     func stop() {
-        player?.stop()
+        generation += 1
+        if let p = player {
+            AppLogger.log("[GoogleTTS] stop — prehrávač beží=\(p.isPlaying)")
+            // Don't cut the queue dead mid-speech: whatever is already buffered below the
+            // player then sits there and comes out as a short burst of the OLD reading the next
+            // time this app makes any sound (the dictation start/stop tones, after the output
+            // device has gone idle). Muted, it drains as silence; then it's really stopped.
+            p.delegate = nil
+            p.volume = 0
+            if !p.isPlaying { p.play() }   // paused → also needs to drain, not just be dropped
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { p.stop() }
+        }
         player = nil
         // Resume continuation so the pipeline loop can exit cleanly
         playbackContinuation?.resume(returning: ())
@@ -227,6 +253,7 @@ final class GoogleCloudTTSEngine: NSObject {
 extension GoogleCloudTTSEngine: AVAudioPlayerDelegate {
     nonisolated func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
         Task { @MainActor in
+            guard player === self.player else { return }   // a stopped/replaced player's callback
             if flag {
                 self.playbackContinuation?.resume(returning: ())
             } else {

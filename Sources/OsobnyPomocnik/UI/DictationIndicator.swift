@@ -2,35 +2,27 @@ import AppKit
 import SwiftUI
 
 /// Persisted pill placement — a manually dragged position takes over from the
-/// "always centered" default until the user resets it in Preferences.
+/// "always centered" default until the user resets it in Preferences. Kept per physical
+/// display (see `DisplayPosition`), so dragging the pill on the external monitor doesn't
+/// affect where it shows up on the laptop screen, and vice versa.
 enum PillPosition {
     private static let followKey = "indicator.followFocusedField"
-    private static let xKey = "indicator.customX"
-    private static let yKey = "indicator.customY"
+    private static let positionsKey = "indicator.customPositions"
 
     static var followFocusedField: Bool {
         get { UserDefaults.standard.bool(forKey: followKey) }
         set { UserDefaults.standard.set(newValue, forKey: followKey) }
     }
 
-    static var custom: CGPoint? {
-        get {
-            guard UserDefaults.standard.object(forKey: xKey) != nil else { return nil }
-            return CGPoint(x: UserDefaults.standard.double(forKey: xKey),
-                            y: UserDefaults.standard.double(forKey: yKey))
-        }
-        set {
-            if let p = newValue {
-                UserDefaults.standard.set(p.x, forKey: xKey)
-                UserDefaults.standard.set(p.y, forKey: yKey)
-            } else {
-                UserDefaults.standard.removeObject(forKey: xKey)
-                UserDefaults.standard.removeObject(forKey: yKey)
-            }
-        }
+    static func custom(on screen: NSScreen?) -> CGPoint? {
+        DisplayPosition.load(positionsKey, screen: screen)
     }
 
-    static func reset() { custom = nil }
+    static func setCustom(_ point: CGPoint, on screen: NSScreen?) {
+        DisplayPosition.save(positionsKey, screen: screen, point: point)
+    }
+
+    static func reset() { UserDefaults.standard.removeObject(forKey: positionsKey) }
 }
 
 /// Small floating window shown during active dictation.
@@ -103,12 +95,6 @@ final class DictationIndicatorController: NSWindowController, NSWindowDelegate {
 
     // MARK: - Positioning
 
-    /// The monitor the user is actually looking at — the screen under the mouse
-    /// cursor, since this menu-bar app has no key window to derive it from.
-    private func activeScreen() -> NSScreen? {
-        NSScreen.screens.first(where: { $0.frame.contains(NSEvent.mouseLocation) }) ?? NSScreen.main ?? NSScreen.screens.first
-    }
-
     private func centeredOrigin(on screen: NSScreen, size: NSSize) -> NSPoint {
         NSPoint(x: screen.frame.midX - size.width / 2, y: screen.frame.minY + 80)
     }
@@ -131,7 +117,7 @@ final class DictationIndicatorController: NSWindowController, NSWindowDelegate {
             let fieldFrame = CGRect(x: axFrame.origin.x,
                                      y: primaryHeight - axFrame.origin.y - axFrame.height,
                                      width: axFrame.width, height: axFrame.height)
-            let screen = NSScreen.screens.first(where: { $0.frame.contains(CGPoint(x: fieldFrame.midX, y: fieldFrame.midY)) }) ?? activeScreen()
+            let screen = NSScreen.screens.first(where: { $0.frame.contains(CGPoint(x: fieldFrame.midX, y: fieldFrame.midY)) }) ?? DisplayPosition.activeScreen()
             var x = fieldFrame.midX - size.width / 2
             var y = fieldFrame.maxY + 10
             if let screen {
@@ -144,16 +130,13 @@ final class DictationIndicatorController: NSWindowController, NSWindowDelegate {
             AppLogger.log("[Indicator] reposition() — focusedElementFrame() returned nil, falling back")
         }
 
-        if let custom = PillPosition.custom {
-            // Saved position may belong to a monitor that's since been unplugged.
-            if NSScreen.screens.contains(where: { $0.frame.insetBy(dx: -50, dy: -50).contains(custom) }) {
-                applyPosition(custom)
-                return
-            }
-            PillPosition.reset()
+        let screen = DisplayPosition.activeScreen()
+        if let custom = PillPosition.custom(on: screen) {
+            applyPosition(custom)
+            return
         }
 
-        if let screen = activeScreen() {
+        if let screen {
             applyPosition(centeredOrigin(on: screen, size: size))
         }
     }
@@ -163,7 +146,10 @@ final class DictationIndicatorController: NSWindowController, NSWindowDelegate {
     nonisolated func windowDidMove(_ notification: Notification) {
         Task { @MainActor in
             guard !isProgrammaticMove, let window else { return }
-            PillPosition.custom = window.frame.origin
+            // Key by the screen the window actually ended up on (a drag can cross monitors),
+            // not the mouse's screen — the two can briefly differ mid-drag.
+            let screen = window.screen ?? DisplayPosition.activeScreen()
+            PillPosition.setCustom(window.frame.origin, on: screen)
         }
     }
 }
@@ -357,7 +343,9 @@ struct DictationIndicatorView: View {
             .clipShape(RoundedRectangle(cornerRadius: 16))
             .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(Theme.HUD.border, lineWidth: 1))
             .shadow(color: Theme.HUD.shadow, radius: 14, y: 12)
-            .padding(10)
+            // Room for the blur to fade out on every side — the window is sized to fit
+            // exactly this padded box, so anything less clips the shadow into a hard edge.
+            .padding(.horizontal, 18).padding(.top, 18).padding(.bottom, 30)
             // Ideal size regardless of the window, then the window follows (see `fit(to:)`).
             .fixedSize()
             .background(GeometryReader { g in
