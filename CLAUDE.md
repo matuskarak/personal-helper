@@ -92,10 +92,28 @@ ostatné entitlements). Platný kľúč sa cachuje lokálne (`UserDefaults`), ta
 offline **po** prvom úspešnom overení — nikdy predtým (žiadny fail-open na prvé spustenie).
 
 **Entitlements** (`RemoteConfig.Entitlements`) — čo konkrétna licencia navyše odomkne: Smart ⌘⇧A,
-realtime ⌘⇧S + live vkladanie, OCR ⌘⇧O, tieňový prepis, ostatné modely katalógu. Predvolene všetko
-vypnuté (základná úroveň appky = batch diktovanie ⌘⇧D, zrušenie ⌘⇧X, čítanie ⌘⇧R, vloženie
-z pamäte, história, Kvalita, Prehľad, 2 modely). Pridanie/úprava licencie: `.../Ozvena-licencie/admin/`
-(prihlásenie heslom, presné URL a heslo nepatria do tohto súboru ani nikam do gitu appky).
+realtime ⌘⇧S + live vkladanie, OCR ⌘⇧O, ostatné modely katalógu. Predvolene všetko vypnuté
+(základná úroveň appky = batch diktovanie ⌘⇧D, zrušenie ⌘⇧X, čítanie ⌘⇧R, vloženie z pamäte,
+história, Kvalita, Prehľad, 2 modely). Pridanie/úprava licencie: `.../Ozvena-licencie/admin/`
+(prihlásenie heslom, presné URL a heslo nepatria do tohto súboru ani nikam do gitu appky) —
+zoznam licencií tam má pri každej rozbaľovacie "Funkcie" s checkboxami, žiadne ručné SQL.
+
+**Developer mode vs. Diagnostika (od 2026-09-14) — dve rozdielne veci, nezamieňať:**
+- **Diagnostika** (O aplikácii, `AppLogger`/`AudioHealth`) je pre KAŽDÉHO testera predvolene
+  zapnutá — len log súbor, nič nestojí, nič neodomyká.
+- **Developer mode** (`entitlements.developerModeEnabled`, checkbox v admin dashboarde,
+  oddelený a zvýraznený od bežných entitlements, appka: `RemoteConfig.developerModeGranted`)
+  je pre KONKRÉTNU licenciu, nikdy predvolene. Automaticky odomkne všetky štyri entitlements
+  vyššie a naviac odhalí v appke testovacie UI v O aplikácii (dnes: A/B test strihania ticha,
+  tieňový prepis druhým modelom — obe prepíšu každé diktovanie ešte raz navyše, dvojnásobná
+  cena), ktoré bežný tester nesmie mať zapnuté náhodou. **Tieňový prepis** (porovnanie dvoch
+  modelov, `dictation.shadowCompareEnabled`, výsledky v Kvalite) bol pôvodne (do 2026-09-14)
+  vlastná entitlements ako Smart/Realtime/OCR — user sa rozhodol, že to má byť čisto dev-only
+  funkcia, nie niečo, čo dostane bežný tester zvlášť; `RemoteConfig.shadowCompareAllowed` je
+  teraz `developerModeGranted` priamo, bez vlastného entitlements poľa. Lokálny `#if DEBUG`
+  `DeveloperMode.isEnabled` toggle (Xcode build) na to isté
+  zostáva bokom, len pre vlastný vývoj bez licencie. Zmena entitlements sa v appke prejaví po
+  reštarte (alebo do hodiny, auto-refresh) — netreba nový build.
 
 **Telemetria** (`Engines/Telemetry.swift`): anonymné udalosti (metriky z DictationQualityEngine,
 trvanie, model, výsledok, latencia, kategória appky, feature tapy) → n8n webhook
@@ -159,6 +177,54 @@ bežať ďalej. Zdanlivá nezhoda v diagnostickom logu (`trimmer vystrihol` niek
 takže pauzu prerušenú krátkym zvukovým záškubom vidí ako viac kratších úsekov, kým `SilenceTrimmer`
 ich vďaka debounce zlepí do jednej dlhšej. Log riadok bol kvôli tomu prepísaný, aby čísla nepôsobili
 ako "malo by sa zhodovať".
+
+## Pilulky — pozícia per displej + TTS race fix (2026-09-17)
+
+**Bug 1 — čítanie sa nakrátko spustilo aj bez toho, aby ho niekto spustil.** Príčina:
+`GoogleCloudTTSEngine.speak()` (sentence-pipeline, prehráva vetu po vete) kontrolovalo
+`isSpeaking` len na začiatku každej iterácie, nie hneď po `await nextFetch.value`. Keď
+`stop()` (tlačidlo Stop na pilulke čítania, `ControlPanelWindow.swift`) prišlo práve vo chvíli,
+keď sieťové stiahnutie ďalšej vety bežalo, tá veta sa aj tak prehrala — inak nesúvisiaci moment
+(napr. začiatok diktovania krátko nato) len zhodou okolností pôsobil, akoby ho spustilo
+diktovanie. Oprava: druhá `guard isSpeaking else { break }` hneď po `await` (`GoogleCloudTTSEngine.swift`).
+Diktovanie samotné `TTSEngine`/Google engine vôbec nevolá — potvrdené grepom, žiadna priama
+príčinná väzba medzi štartom diktovania a čítaním neexistuje.
+
+**Bug 1b (ten istý deň, prvá oprava nestačila) — útržok starého čítania pri štarte/konci
+diktovania.** Log potvrdil, že v tom momente sa NEvolá `handleReadText` ani `speak()`, ducking je
+vypnutý — jediné, čo appka pri skratke diktovania zvukovo robí, sú tóny `DictationSounds`
+(NSSound). Pracovná hypotéza (neoverená meraním, overuje user naživo): `AVAudioPlayer.stop()`
+uprostred vety nechá už nabufferovaný zvuk "visieť" pod prehrávačom a ten vyjde ako krátky
+záblesk, keď appka po nečinnosti výstupného zariadenia znova vydá akýkoľvek zvuk. Oprava v
+`GoogleCloudTTSEngine.stop()`: prehrávač sa najprv stlmí na 0 a nechá 0,4 s dobehnúť (buffer
+odtečie ako ticho), až potom `stop()`. Popri tom opravené dve reálne diery: (1) `generation`
+token namiesto `isSpeaking` v pipeline slučke — nový `speak()` počas starého (druhé ⌘⇧R, zmena
+rýchlosti) nechával starú slučku žiť a prehrať svoju ďalšiu vetu cez novú; (2) `resume()` bez
+guardu vedel dočítaný prehrávač pustiť od nuly, dočítaný prehrávač sa teraz uvoľňuje. Pribudli
+log riadky `[GoogleTTS]` (len počty znakov) — ak sa to zopakuje, log ukáže, či pri tom beží
+náš kód, alebo ide o zvukové zariadenie.
+
+**Zamrznutie appky 2026-09-17 14:29 — nebola to chyba appky, ale zaseknutý `coreaudiod`.**
+Systémový log: 13:54:37 prišiel hovor cez iPhone (`callservicesd`/`Phone`) → prekonfigurovanie
+zvuku (Sonos Ace BT, mikrofón iPhonu) → `arkaudiod` (Rogue Amoeba ARK, SoundSource 6.1.3)
+si nanovo registroval tapy → posledný riadok `coreaudiod` 13:54:41.931, potom 25 min ticho,
+klientom timeouty (`0x10004003`) a od 13:55:41 `0x10000004`. Ozvena v tom čase nerobila nič.
+Zamrzla až o 14:29 pri štarte diktovania: HAL vrátil 0 vstupov, appka napriek tomu pokračovala
+do AVAudioEngine a `installTap` zostal visieť v mach_msg na hlavnom vlákne. Oprava
+(`DictationEngine.startRecording`): prázdny zoznam vstupov = okamžitá chyba s hláškou o
+`sudo killall coreaudiod`. Pozn.: obyčajný `killall` zaseknutý coreaudiod ignoruje, treba `-9`.
+
+**Bug 2 — pilulky si "nepamätali" pozíciu pri prechode na externý monitor.** Obe pilulky
+(`DictationIndicator.swift`, `ControlPanelWindow.swift`) ukladali pozíciu ako holý bod v
+súradniciach obrazovky, overený pri načítaní len geometrickým "patrí ešte niektorej aktuálnej
+`NSScreen`?" — čo pri zmene rozlíšenia/usporiadania displejov (aj bez odpojenia monitora) zhodí
+uložený bod mimo akejkoľvek aktuálnej obrazovky, appka to potichu vyhodnotí ako "monitor
+odpojený" a spadne na default pozíciu. Nový `DisplayPosition.swift` ukladá pozíciu do slovníka
+kľúčovaného `CGDirectDisplayID` (fyzický displej, stabilný cez zmeny rozlíšenia aj reštarty
+appky) namiesto jedného globálneho bodu — každý displej má svoju zapamätanú pozíciu. Platí pre
+obe pilulky; dictation pilulka mimo toho zachováva "sleduj zaostrené pole" (`followFocusedField`)
+ako predtým — len keď pole nie je zaostrené, spadá na túto per-displej zapamätanú (alebo
+default vycentrovanú) pozíciu namiesto jednej spoločnej pre celý stôl.
 
 ## Otvorené — realtime diktovanie s live vkladaním (2026-09-14)
 

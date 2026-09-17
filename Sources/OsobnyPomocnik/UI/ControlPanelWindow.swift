@@ -56,7 +56,9 @@ final class ControlPanelWindowController: NSWindowController, NSWindowDelegate {
     static let pillWidth: CGFloat = 52
     static let collapsedHeight: CGFloat = 52
     static let expandedHeight: CGFloat = 52 + 9 + 5 * 40 + 5 * 2 + 6   // 277
-    static let shadowPad: CGFloat = 12
+    // Must cover the shadow's actual bleed (radius 15, y 7 → up to 22pt below the shape),
+    // or the window clips it into a hard-edged square — same bug as the dictation pill.
+    static let shadowPad: CGFloat = 22
     /// Slowed from the citanie-pilulka.md spec's 0.28s (client felt it too snappy/jumpy,
     /// 2026-09-14) — kept as one constant so the window (`resize`) and content
     /// (`ControlPanelView.expandAnim`) never drift apart again.
@@ -232,7 +234,7 @@ final class ControlPanelWindowController: NSWindowController, NSWindowDelegate {
     // MARK: Snap
 
     func snap(to position: PanelSnapPosition) {
-        guard let w = window, let screen = NSScreen.main else { return }
+        guard let w = window, let screen = DisplayPosition.activeScreen() else { return }
         let pt = computeOrigin(position, window: w, screen: screen)
         w.setFrameOrigin(pt)
         saveTopLeft()
@@ -247,20 +249,20 @@ final class ControlPanelWindowController: NSWindowController, NSWindowDelegate {
     // MARK: Helpers
 
     private func restoreOrDefaultPosition() {
-        guard let w = window, let screen = NSScreen.main else { return }
-        if let arr = UserDefaults.standard.array(forKey: Self.topLeftKey) as? [Double], arr.count == 2 {
-            let pt = NSPoint(x: arr[0], y: arr[1] - w.frame.height)
-            if screen.frame.contains(pt) {
-                w.setFrameOrigin(pt)
-                return
-            }
+        guard let w = window, let screen = DisplayPosition.activeScreen() else { return }
+        if let topLeft = DisplayPosition.load(Self.topLeftKey, screen: screen) {
+            w.setFrameOrigin(NSPoint(x: topLeft.x, y: topLeft.y - w.frame.height))
+            return
         }
         w.setFrameOrigin(computeOrigin(.centerRight, window: w, screen: screen))
     }
 
     private func saveTopLeft() {
         guard let f = window?.frame else { return }
-        UserDefaults.standard.set([f.minX, f.maxY], forKey: Self.topLeftKey)
+        // Key by the screen the window actually ended up on (a drag can cross monitors),
+        // not the mouse's screen — the two can briefly differ mid-drag.
+        let screen = window?.screen ?? DisplayPosition.activeScreen()
+        DisplayPosition.save(Self.topLeftKey, screen: screen, point: CGPoint(x: f.minX, y: f.maxY))
     }
 
     private func computeOrigin(_ pos: PanelSnapPosition,

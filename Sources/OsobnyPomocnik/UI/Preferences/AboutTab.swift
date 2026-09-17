@@ -93,22 +93,38 @@ extension PreferencesView {
                 }
             }
 
-            #if DEBUG
-            card {
-                toggleRow(title: "Developer mode",
-                          subtitle: "Reštart z menu bar ikonky (⌥) a funkcie vo vývoji.",
-                          isOn: Binding(
-                    get: { developerMode },
-                    set: { developerMode = $0; DeveloperMode.isEnabled = $0 }
-                ))
-                if developerMode {
+            // Testovacie funkcie, ktoré môžu zdvojiť náklady na API (napr. A/B test nižšie
+            // prepisuje každé diktovanie aj druhýkrát navyše) — nesmú sa dať zapnúť náhodou
+            // bežnému testerovi. Karta sa zobrazí len keď licencia má developerModeEnabled
+            // (Ozvena-licencie/admin), nie za `#if DEBUG` — nech to funguje aj v release
+            // builde, ktorý si sťahujú testeri, bez potreby rebuildu z Xcode.
+            if remoteConfig.developerModeGranted {
+                card {
+                    captionRow("Developer mode aktívny (z licencie) — testovacie funkcie, ktoré nemá bežný tester.", color: Theme.brandAmberSafe)
                     rowDivider
                     toggleRow(title: "A/B test strihania ticha",
                               subtitle: dictation.silenceTrimABTestEnabled
                                 ? "Každé diktovanie so strihom ticha sa prepíše aj netrimované — dvojnásobná cena."
                                 : "Overí, či strih ticha niekde neorezal reč.",
                               isOn: $dictation.silenceTrimABTestEnabled)
+                    rowDivider
+                    toggleRow(title: "Tieňový prepis (2. model)",
+                              subtitle: dictation.canShadowCompare
+                                ? "Prepíše aj cez \(dictation.shadowModelName), porovnanie v Kvalite. Platíš oba prepisy."
+                                : "Vyžaduje OpenAI aj Gemini kľúč.",
+                              isOn: $dictation.shadowCompareEnabled)
+                        .disabled(!dictation.canShadowCompare)
                 }
+            }
+
+            #if DEBUG
+            card {
+                toggleRow(title: "Developer mode (lokálne)",
+                          subtitle: "Reštart z menu bar ikonky (⌥) a funkcie vo vývoji.",
+                          isOn: Binding(
+                    get: { developerMode },
+                    set: { developerMode = $0; DeveloperMode.isEnabled = $0 }
+                ))
             }
             #endif
 

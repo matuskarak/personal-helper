@@ -128,15 +128,8 @@ extension PreferencesView {
                 captionRow("Chýba \(DictationEngine.isGemini(dictation.batchModel) ? "Gemini" : "OpenAI") API kľúč — nastavíš ho vo Všeobecné.",
                            color: Theme.brandAmberSafe)
             }
-            if remoteConfig.shadowCompareAllowed {
-                rowDivider
-                toggleRow(title: "Porovnať s druhým modelom",
-                          subtitle: dictation.canShadowCompare
-                            ? "Prepíše aj cez \(dictation.shadowModelName), porovnanie v Kvalite. Platíš oba prepisy."
-                            : "Vyžaduje OpenAI aj Gemini kľúč.",
-                          isOn: $dictation.shadowCompareEnabled)
-                    .disabled(!dictation.canShadowCompare)
-            }
+            // Tieňový prepis je len pre Developer mode (druhý model naviac dvojnásobí cenu) —
+            // prepínač je v O aplikácii, nie tu, viď AboutTab.
         }
     }
 

@@ -609,6 +609,12 @@ final class DictationEngine {
         }
         if devices.isEmpty {
             AudioHealth.record("⚠️ HAL nevrátil ŽIADNE vstupné zariadenie — ani zabudovaný mikrofón")
+            // On a MacBook (built-in mic always present) an empty list means coreaudiod is
+            // wedged. Going on into AVAudioEngine from here blocks the main thread forever in
+            // installTap (measured 2026-09-17: app frozen until force-quit). On a mic-less Mac
+            // there's nothing to record from either, so stopping is right in both cases.
+            connectionError = "Nenašiel sa žiadny mikrofón. Ak je pripojený, audio subsystém je zaseknutý — v Termináli spusti: sudo killall coreaudiod"
+            throw DictationError.audioSetupFailed
         }
 
         if let uid = resolvedInputDeviceUID(devices: devices) {

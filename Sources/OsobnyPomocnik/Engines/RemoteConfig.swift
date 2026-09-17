@@ -29,8 +29,15 @@ final class RemoteConfig {
         var smartDictationEnabled = false
         var realtimeEnabled       = false   // ⌘⇧S realtime + live insert (4× the price)
         var ocrEnabled            = false   // ⌘⇧O screen-region OCR
-        var shadowCompareEnabled  = false   // second-provider A/B transcription
         var allModelsEnabled      = false   // show catalog models marked available:false
+        // Remote equivalent of the local (#if DEBUG-only) DeveloperMode toggle — lets a
+        // specific license auto-unlock every feature flag below AND surface dev-only/
+        // testing UI (e.g. AboutTab's silence-trim A/B test) in a RELEASE build, without a
+        // rebuild. Deliberately separate from "Diagnostika" logging, which stays on for
+        // everyone by default and costs nothing — this one gates things that can double a
+        // tester's OpenAI bill (A/B re-transcribes every dictation), so it must default
+        // false and only ever be flipped per-license from the admin dashboard.
+        var developerModeEnabled = false
 
         init() {}
         init(from decoder: Decoder) throws {
@@ -38,8 +45,8 @@ final class RemoteConfig {
             smartDictationEnabled = try c.decodeIfPresent(Bool.self, forKey: .smartDictationEnabled) ?? false
             realtimeEnabled       = try c.decodeIfPresent(Bool.self, forKey: .realtimeEnabled) ?? false
             ocrEnabled            = try c.decodeIfPresent(Bool.self, forKey: .ocrEnabled) ?? false
-            shadowCompareEnabled  = try c.decodeIfPresent(Bool.self, forKey: .shadowCompareEnabled) ?? false
             allModelsEnabled      = try c.decodeIfPresent(Bool.self, forKey: .allModelsEnabled) ?? false
+            developerModeEnabled  = try c.decodeIfPresent(Bool.self, forKey: .developerModeEnabled) ?? false
         }
     }
 
@@ -71,11 +78,18 @@ final class RemoteConfig {
     /// OpenAI transcriptions or Gemini interactions) reaches users without a new build.
     private(set) var catalog = ModelCatalog.builtin
 
-    var smartDictationAllowed: Bool { entitlements.smartDictationEnabled || DeveloperMode.isEnabled }
-    var realtimeAllowed:       Bool { entitlements.realtimeEnabled       || DeveloperMode.isEnabled }
-    var ocrAllowed:            Bool { entitlements.ocrEnabled            || DeveloperMode.isEnabled }
-    var shadowCompareAllowed:  Bool { entitlements.shadowCompareEnabled  || DeveloperMode.isEnabled }
-    var allModelsAllowed:      Bool { entitlements.allModelsEnabled      || DeveloperMode.isEnabled }
+    /// True when EITHER the license's own `developerModeEnabled` entitlement is set, or the
+    /// local Xcode-debug-only `DeveloperMode` toggle is on. Drives both "unlock everything
+    /// below" and visibility of dev-only/testing UI (see `Entitlements.developerModeEnabled`).
+    var developerModeGranted: Bool { entitlements.developerModeEnabled || DeveloperMode.isEnabled }
+
+    var smartDictationAllowed: Bool { entitlements.smartDictationEnabled || developerModeGranted }
+    var realtimeAllowed:       Bool { entitlements.realtimeEnabled       || developerModeGranted }
+    var ocrAllowed:            Bool { entitlements.ocrEnabled            || developerModeGranted }
+    var allModelsAllowed:      Bool { entitlements.allModelsEnabled      || developerModeGranted }
+    /// Dev-only, not a grantable entitlement — doubles transcription cost (2. model naviac),
+    /// only ever meant for internal quality comparison. See `AboutTab`'s Developer mode card.
+    var shadowCompareAllowed:  Bool { developerModeGranted }
 
     private init() {
         licenseKey = UserDefaults.standard.string(forKey: Self.keyKey) ?? ""
@@ -137,7 +151,7 @@ final class RemoteConfig {
         if let encoded = try? JSONEncoder().encode(entitlements) {
             UserDefaults.standard.set(encoded, forKey: Self.entitlementsCacheKey)
         }
-        AppLogger.log("[RemoteConfig] licencia platná → smart=\(entitlements.smartDictationEnabled) realtime=\(entitlements.realtimeEnabled) ocr=\(entitlements.ocrEnabled) shadow=\(entitlements.shadowCompareEnabled) allModels=\(entitlements.allModelsEnabled)")
+        AppLogger.log("[RemoteConfig] licencia platná → smart=\(entitlements.smartDictationEnabled) realtime=\(entitlements.realtimeEnabled) ocr=\(entitlements.ocrEnabled) allModels=\(entitlements.allModelsEnabled) dev=\(entitlements.developerModeEnabled)")
 
         // Modely (ceny) idú nezávisle, rovnakým behom — bez ohľadu na výsledok vyššie.
         if let (mData, mResp) = try? await URLSession.shared.data(from: Self.modelsURL),
