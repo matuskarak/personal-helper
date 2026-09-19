@@ -1,0 +1,1 @@
+Nový názov Ozvena a inštalácia cez DMG s návodom. Sprievodca prvým nastavením po krokoch. Test mikrofónu s ukazovateľom úrovne, kontrolkou skreslenia a nastavením hlasitosti. Čitateľnejšie upozornenia v tmavom režime. Opravy zamŕzania pri zaseknutom zvukovom systéme a útržkov čítania pri diktovaní.
