@@ -219,7 +219,7 @@ extension PreferencesView {
                     .font(Theme.body(12).monospacedDigit())
                     // Below ~90 % the two providers genuinely heard different words; above it
                     // they mostly differ on a filler or two, which isn't worth flagging.
-                    .foregroundStyle(pair.agreement >= 0.9 ? Theme.textSecondary : Theme.brandAmberSafe)
+                    .foregroundStyle(pair.agreement >= 0.9 ? Theme.textSecondary : Theme.warning)
             }
             if pair.primary.isEmpty && pair.shadow.isEmpty {
                 Text("zhodné").font(Theme.body(11)).foregroundStyle(Theme.textSecondary)

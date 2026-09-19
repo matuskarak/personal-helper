@@ -1,6 +1,6 @@
 #!/bin/bash
 # ---------------------------------------------------------------------
-# build-app.sh — Zostaví OsobnyPomocnik.app z SPM projektu
+# build-app.sh — Zostaví Ozvena.app z SPM projektu
 #
 # Použitie:
 #   ./build-app.sh          # debug build (rýchlejší, pre vývoj)
@@ -12,8 +12,12 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
 
 CONFIG="${1:-debug}"
+# APP_NAME = interný SwiftPM názov (produkt/target/zdrojový priečinok, binárka v .build/) —
+# premenovanie 2026-09-19 (CLAUDE.md) sa ho zámerne netýka, len zmenilo by veľký diff bez
+# úžitku pre usera. BUNDLE_NAME = to, čo vidí user (Gatekeeper, Aplikácie, Monitor aktivity).
 APP_NAME="OsobnyPomocnik"
-BUNDLE="$APP_NAME.app"
+BUNDLE_NAME="Ozvena"
+BUNDLE="$BUNDLE_NAME.app"
 INFO_PLIST="Sources/$APP_NAME/Resources/Info.plist"
 ENTITLEMENTS="$APP_NAME.entitlements"
 
@@ -37,7 +41,9 @@ mkdir -p "$BUNDLE/Contents/Resources"
 
 # Skopíruj binárku, Info.plist a assety (ikona, menu bar ikona, fonty — Package.swift ich
 # vylučuje zo SPM, bundlujú sa tu ručne; fonty registruje ATSApplicationFontsPath v Info.plist)
-cp "$BINARY" "$BUNDLE/Contents/MacOS/$APP_NAME"
+# Binárka vo vnútri sa volá $BUNDLE_NAME (Monitor aktivity/Force Quit ju tak ukážu), nie
+# $APP_NAME — CFBundleExecutable v Info.plist musí sedieť s týmto súborovým názvom.
+cp "$BINARY" "$BUNDLE/Contents/MacOS/$BUNDLE_NAME"
 cp "$INFO_PLIST" "$BUNDLE/Contents/Info.plist"
 RES_SRC="Sources/$APP_NAME/Resources"
 cp "$RES_SRC/AppIcon.icns" "$RES_SRC"/MenuBarIcon*.png "$BUNDLE/Contents/Resources/"
@@ -50,7 +56,7 @@ if [ -n "$SPARKLE_FRAMEWORK" ]; then
     mkdir -p "$BUNDLE/Contents/Frameworks"
     rm -rf "$BUNDLE/Contents/Frameworks/Sparkle.framework"
     cp -R "$SPARKLE_FRAMEWORK" "$BUNDLE/Contents/Frameworks/"
-    install_name_tool -add_rpath "@executable_path/../Frameworks" "$BUNDLE/Contents/MacOS/$APP_NAME" 2>/dev/null || true
+    install_name_tool -add_rpath "@executable_path/../Frameworks" "$BUNDLE/Contents/MacOS/$BUNDLE_NAME" 2>/dev/null || true
 fi
 
 # Podpis: debug = lokálny self-signed cert (rýchla iterácia, TCC povolenia prežijú

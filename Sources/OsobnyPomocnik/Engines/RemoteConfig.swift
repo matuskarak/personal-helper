@@ -73,6 +73,17 @@ final class RemoteConfig {
     /// Drives a spinner in the UI while a `validate()` call is in flight — otherwise clicking
     /// "Uložiť a overiť" gives no feedback until the network round-trip finishes.
     private(set) var isValidating = false
+    /// Result of the last finished check, for the UI's message — nil while one is running.
+    /// Kept apart from `hasValidLicense`: "offline" must not look like "invalid", nor pass silently.
+    enum ValidationOutcome { case valid, invalid, offline }
+    private(set) var lastOutcome: ValidationOutcome?
+
+    /// Save-and-verify from the UI. Re-submitting the same key used to do nothing at all
+    /// (`licenseKey`'s didSet ignores an unchanged value), so the button gave no feedback.
+    func submitLicenseKey(_ input: String) {
+        let key = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        if key == licenseKey { Task { await validate() } } else { licenseKey = key }
+    }
     private(set) var entitlements = Entitlements()
     /// Transcription models on offer — served remotely so a new model (same API shape as
     /// OpenAI transcriptions or Gemini interactions) reaches users without a new build.
@@ -115,6 +126,7 @@ final class RemoteConfig {
             return
         }
         isValidating = true
+        lastOutcome = nil
         defer { isValidating = false }
         var req = URLRequest(url: Self.licenseValidationURL)
         req.httpMethod = "POST"
@@ -128,12 +140,14 @@ final class RemoteConfig {
             (data, response) = try await URLSession.shared.data(for: req)
         } catch {
             AppLogger.log("[RemoteConfig] overenie licencie zlyhalo (sieť): \(error) — ponechávam predchádzajúci stav")
+            lastOutcome = .offline
             return
         }
         guard (response as? HTTPURLResponse)?.statusCode == 200,
               let decoded = try? JSONDecoder().decode(ValidateResponse.self, from: data)
         else {
             AppLogger.log("[RemoteConfig] overenie licencie zlyhalo (neplatná odpoveď) — ponechávam predchádzajúci stav")
+            lastOutcome = .offline
             return
         }
 
@@ -142,10 +156,12 @@ final class RemoteConfig {
             UserDefaults.standard.set(false, forKey: Self.validatedKey)
             entitlements = Entitlements()
             AppLogger.log("[RemoteConfig] licencia: kľúč neplatný")
+            lastOutcome = .invalid
             return
         }
 
         hasValidLicense = true
+        lastOutcome = .valid
         entitlements = decoded.entitlements ?? Entitlements()
         UserDefaults.standard.set(true, forKey: Self.validatedKey)
         if let encoded = try? JSONEncoder().encode(entitlements) {

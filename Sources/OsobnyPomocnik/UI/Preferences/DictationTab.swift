@@ -78,9 +78,9 @@ extension PreferencesView {
                 }
                 Spacer()
                 Picker("", selection: $dictation.transcriptionDelay) {
-                    Text("Rýchla").tag("low")
-                    Text("Stredná").tag("medium")
-                    Text("Pomalá").tag("high")
+                    Text("Krátko").tag("low")
+                    Text("Stredne").tag("medium")
+                    Text("Dlho").tag("high")
                 }
                 .pickerStyle(.segmented).frame(width: 210).labelsHidden()
             }
@@ -126,7 +126,7 @@ extension PreferencesView {
             if DictationEngine.isGemini(dictation.batchModel) ? !dictation.hasGeminiKey : !dictation.hasOpenAIKey {
                 rowDivider
                 captionRow("Chýba \(DictationEngine.isGemini(dictation.batchModel) ? "Gemini" : "OpenAI") API kľúč — nastavíš ho vo Všeobecné.",
-                           color: Theme.brandAmberSafe)
+                           color: Theme.warning)
             }
             // Tieňový prepis je len pre Developer mode (druhý model naviac dvojnásobí cenu) —
             // prepínač je v O aplikácii, nie tu, viď AboutTab.
@@ -148,10 +148,10 @@ extension PreferencesView {
     var smartSection: some View {
         sectionCard("Smart ukončenie", shortcut: scLabel(.smartStop),
                     status: profilesStatus, isExpanded: $smartSectionExpanded) {
-            captionRow("Ukončí bežiace diktovanie a AI upraví prepis podľa obrazovky pred vložením.")
+            captionRow("Ukončí bežiace diktovanie a AI pred vložením upraví prepis podľa kontextu — appky, v ktorej píšeš, obsahu okna a tvojich profilov.")
             if !CGPreflightScreenCaptureAccess() {
                 warningBanner(
-                    "Bez povolenia Nahrávanie obrazovky Smart nevidí obsah obrazovky — opraví len gramatiku.",
+                    "Bez povolenia Nahrávanie obrazovky Smart nevidí obsah okna — opraví prepis len podľa appky a profilu.",
                     action: ("Otvoriť nastavenia", { PermissionsChecker.shared.openScreenRecordingSettings() })
                 )
                 .padding(.horizontal, 16).padding(.bottom, 10)
@@ -264,7 +264,7 @@ extension PreferencesView {
     // MARK: Kľúčové slová (both modes forward them as `prompt`)
 
     var keywordsSection: some View {
-        sectionCard("Kľúčové slová", status: "oba režimy", isExpanded: $keywordsSectionExpanded) {
+        sectionCard("Kľúčové slová", status: remoteConfig.realtimeAllowed ? "oba režimy" : nil, isExpanded: $keywordsSectionExpanded) {
             VStack(alignment: .leading, spacing: 6) {
                 Text("Mená, klienti, termíny — jedno na riadok. Pomáhajú hlavne pri anglických slovách.")
                     .font(Theme.body(11)).foregroundStyle(Theme.textSecondary)

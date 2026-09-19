@@ -25,6 +25,19 @@ final class SmartContextCapture {
         let appName  = app?.localizedName
         AppLogger.log("[SmartContextCapture] start — app=\(appName ?? "?") bundleID=\(bundleID ?? "?") wantsScreenshot=\(captureScreenshot)")
 
+        // Base-tier app identity (bundleID/appName above) comes straight from NSWorkspace and
+        // needs no permission at all. Everything below this point — even just enumerating
+        // SCShareableContent to read a window TITLE, with no pixel ever requested — needs
+        // Screen Recording permission and is what pops the system "wants to record your
+        // screen" prompt. The window title is only used for the fine-grained Smart profile
+        // match (bundleID+titleKeyword, see AppProfile.matchingProfile) and the screenshot
+        // itself, both Smart-only, so skip ScreenCaptureKit entirely outside Smart — a plain
+        // ⌘⇧D dictation must never touch it.
+        guard captureScreenshot else {
+            AppLogger.log("[SmartContextCapture] done (identity only, ScreenCaptureKit skipped) — \(Int(Date().timeIntervalSince(t0) * 1000))ms")
+            return Context(image: nil, bundleID: bundleID, appName: appName, windowTitle: nil)
+        }
+
         guard let pid = app?.processIdentifier else {
             AppLogger.log("[SmartContextCapture] ⚠️ no frontmost app pid — aborting")
             return Context(image: nil, bundleID: bundleID, appName: appName, windowTitle: nil)
@@ -48,11 +61,6 @@ final class SmartContextCapture {
             return Context(image: nil, bundleID: bundleID, appName: appName, windowTitle: nil)
         }
         AppLogger.log("[SmartContextCapture] window found — title=\"\(window.title ?? "")\" frame=\(Int(window.frame.width))x\(Int(window.frame.height))")
-
-        guard captureScreenshot else {
-            AppLogger.log("[SmartContextCapture] done (identity only) — \(Int(Date().timeIntervalSince(t0) * 1000))ms")
-            return Context(image: nil, bundleID: bundleID, appName: appName, windowTitle: window.title)
-        }
 
         let filter = SCContentFilter(desktopIndependentWindow: window)
         let cfg = SCStreamConfiguration()

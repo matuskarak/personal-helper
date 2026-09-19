@@ -7,7 +7,7 @@
 	<key>CFBundleDisplayName</key>
 	<string>Ozvena</string>
 	<key>CFBundleExecutable</key>
-	<string>OsobnyPomocnik</string>
+	<string>Ozvena</string>
 	<key>CFBundleIconFile</key>
 	<string>AppIcon</string>
 	<key>CFBundleIdentifier</key>
@@ -26,6 +26,7 @@
 			<key>CFBundleURLSchemes</key>
 			<array>
 				<string>osobnypomocnik</string>
+				<string>ozvena</string>
 			</array>
 		</dict>
 	</array>

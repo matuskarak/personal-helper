@@ -89,13 +89,14 @@ extension PreferencesView {
                     HStack {
                         SecureField("licenčný kľúč", text: $licenseKeyInput).textFieldStyle(.roundedBorder)
                         Button(remoteConfig.isValidating ? "Overujem…" : "Uložiť a overiť") {
-                            remoteConfig.licenseKey = licenseKeyInput
+                            remoteConfig.submitLicenseKey(licenseKeyInput)
                             licenseKeySaved = true
                         }
                         .buttonStyle(.borderedProminent).tint(accent)
                         .disabled(licenseKeyInput.isEmpty || remoteConfig.isValidating)
                         if remoteConfig.isValidating { ProgressView().controlSize(.small) }
                     }
+                    LicenseValidationMessage(remoteConfig: remoteConfig)
                 }
                 .padding(.horizontal, 16).padding(.vertical, 12)
             }
@@ -127,7 +128,7 @@ extension PreferencesView {
                     }
                 }
                 Spacer()
-                statusChip(hasKey ? "nastavený" : "chýba", color: hasKey ? Theme.success : Theme.brandAmberSafe)
+                statusChip(hasKey ? "nastavený" : "chýba", color: hasKey ? Theme.success : Theme.warning)
                 Button(editing ? "Hotovo" : (hasKey ? "Upraviť" : "Nastaviť")) {
                     withAnimation(Self.sectionAnim) { editingKey = editing ? nil : id }
                 }

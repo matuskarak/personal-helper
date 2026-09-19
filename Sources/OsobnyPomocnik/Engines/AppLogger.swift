@@ -72,7 +72,7 @@ enum AppLogger {
     static func exportCopy(to directory: URL) -> URL? {
         let stamp = ISO8601DateFormatter().string(from: Date())
             .replacingOccurrences(of: ":", with: "-")
-        let dest = directory.appendingPathComponent("OsobnyPomocnik-log-\(stamp).txt")
+        let dest = directory.appendingPathComponent("Ozvena-log-\(stamp).txt")
         // Flush anything still queued so the copy isn't missing the last few lines.
         logQ.sync { try? handle?.synchronize() }
         do {

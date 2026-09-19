@@ -4,6 +4,11 @@ import Observation
 
 @MainActor
 final class MenuBarController: NSObject, NSMenuDelegate {
+    /// Set in `init` — lets the standalone first-launch onboarding window (which has no
+    /// other reference to AppDelegate's private `menuBarController`) reuse the existing
+    /// "open Settings" code path instead of building its own window.
+    private(set) static weak var shared: MenuBarController?
+
     private var statusItem: NSStatusItem
     private var preferencesWindowController: NSWindowController?
     private var accessibilityWarningActive = false
@@ -20,6 +25,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     override init() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         super.init()
+        Self.shared = self
         updateStatusIcon()
         buildMenu()
         observeRecording()

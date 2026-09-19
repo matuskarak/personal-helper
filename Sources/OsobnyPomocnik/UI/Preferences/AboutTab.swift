@@ -19,7 +19,7 @@ extension PreferencesView {
                         Text("Ozvena").font(Theme.title(17))
                         Text("alfa")
                             .font(Theme.bodyBold(10))
-                            .foregroundStyle(Theme.brandAmberSafe)
+                            .foregroundStyle(Theme.warning)
                             .padding(.horizontal, 6).padding(.vertical, 2)
                             .background(Theme.brandAmber.opacity(0.16), in: Capsule())
                     }
@@ -100,7 +100,10 @@ extension PreferencesView {
             // builde, ktorý si sťahujú testeri, bez potreby rebuildu z Xcode.
             if remoteConfig.developerModeGranted {
                 card {
-                    captionRow("Developer mode aktívny (z licencie) — testovacie funkcie, ktoré nemá bežný tester.", color: Theme.brandAmberSafe)
+                    captionRow(remoteConfig.entitlements.developerModeEnabled
+                        ? "Developer mode aktívny (z licencie) — testovacie funkcie, ktoré nemá bežný tester."
+                        : "Developer mode aktívny lokálne (vývojový build) — licencia ho nepovoľuje, bežný tester ho nemá.",
+                        color: Theme.warning)
                     rowDivider
                     toggleRow(title: "A/B test strihania ticha",
                               subtitle: dictation.silenceTrimABTestEnabled

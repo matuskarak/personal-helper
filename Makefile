@@ -6,7 +6,7 @@
 # make clean    → vymaž .app bundle
 # make purge    → vymaž .app + swift build cache
 
-APP = OsobnyPomocnik.app
+APP = Ozvena.app
 SCRIPT = build-app.sh
 
 .PHONY: all build run release clean purge
@@ -18,7 +18,7 @@ build:
 
 run: build
 	@echo "🚀 Spúšťam $(APP)…"
-	@pkill -x OsobnyPomocnik 2>/dev/null || true
+	@pkill -x Ozvena 2>/dev/null || true
 	@sleep 0.3
 	@open "$(APP)"
 

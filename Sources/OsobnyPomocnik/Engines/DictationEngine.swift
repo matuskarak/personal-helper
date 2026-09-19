@@ -160,6 +160,9 @@ final class DictationEngine {
     // must not be treated (or labelled) as a link that needs warming up.
     private var captureNeedsWarmup = false
     private var captureIsBluetooth = false
+    // The mic actually recording this session — named in the quality notice and log, whose
+    // volume is read there (a bare "zvuk je skreslený" left no way to tell which mic it was).
+    private var captureDevice: AudioInputDevice?
     // AVAudioEngine path only — restart guard for ConfigChange / tap invalidation.
     private var tapRestartCount = 0
     private var tapNeedsReinstall = false
@@ -373,12 +376,14 @@ final class DictationEngine {
     /// Same thresholds as MicTestEngine's verdict, minus the transcript-accuracy part —
     /// nil when everything looks fine (we only want to interrupt with a notice on a
     /// real problem, not congratulate a working mic mid-dictation).
-    private static func qualityWarning(from s: (peakDBFS: Double, clippingPercent: Double, snrDB: Double?)) -> String? {
+    private static func qualityWarning(from s: (peakDBFS: Double, clippingPercent: Double, snrDB: Double?),
+                                       deviceName: String?) -> String? {
+        let mic = deviceName.map { "Mikrofón „\($0)“" } ?? "Mikrofón"
         if s.clippingPercent > 0.5 {
-            return "Zvuk je skreslený — zníž vstupnú hlasitosť mikrofónu v Nastaveniach zvuku."
+            return "\(mic) je nastavený príliš nahlas, zvuk je skreslený — zníž mu hlasitosť v Nastaveniach → Mikrofón → Test mikrofónu."
         }
         if s.peakDBFS < -35 {
-            return "Mikrofón je veľmi potichu — priblíž sa k nemu alebo zvýš vstupnú hlasitosť."
+            return "\(mic) je veľmi potichu — priblíž sa alebo zvýš hlasitosť v Nastaveniach → Mikrofón → Test mikrofónu."
         }
         if let snr = s.snrDB, snr < 15 {
             return "V pozadí je výrazný šum — skús tichšie prostredie."
@@ -440,6 +445,8 @@ final class DictationEngine {
     // contextCaptureTask, which awaits ScreenCaptureKit and lands long after the socket opens.
     // NSWorkspace.frontmostApplication is a plain synchronous read, so bundleID alone is free —
     // the async capture then only refines the match by window title, for Smart rewrite.
+    // nil whenever Smart isn't entitled — see the RemoteConfig.smartDictationAllowed check
+    // where this is assigned.
     private var sessionProfile: AppProfile?
 
     // Bumped on every startRecording(). Stale WS callbacks from an abandoned
@@ -633,6 +640,7 @@ final class DictationEngine {
             }
             captureNeedsWarmup = device.needsLinkWarmup
             captureIsBluetooth = device.isBluetooth
+            captureDevice = device
             AppLogger.log("[DictationEngine] DeviceCapture path: '\(device.name)' \(capture.format.sampleRate)Hz \(capture.format.channelCount)ch transport=\(device.transportFourCC) warmup=\(captureNeedsWarmup)")
             guard let conv = AVAudioConverter(from: capture.format, to: pcm16Format) else {
                 AppLogger.log("[DictationEngine] ⚠️ AVAudioConverter failed for DeviceCapture format")
@@ -648,6 +656,7 @@ final class DictationEngine {
             deviceCapture = nil
             captureNeedsWarmup = false
             captureIsBluetooth = false
+            captureDevice = AudioDeviceManager.defaultInputDevice(in: devices)
             AppLogger.log("[DictationEngine] Using system default microphone")
             audioEngine.reset()
             let inputNode = audioEngine.inputNode
@@ -703,9 +712,16 @@ final class DictationEngine {
         // Awaited (with a timeout) in stopAndTranscribe, so short dictations don't lose it.
         // Resolved here, synchronously, because openRealtimeSocket() below needs the profile's
         // keywords in the first session.update — see the sessionProfile declaration.
-        sessionProfile = AppProfileStore.shared.matchingProfile(
-            bundleID: NSWorkspace.shared.frontmostApplication?.bundleIdentifier, windowTitle: nil
-        )
+        // App profiles (their instructions/keywords) are a Smart-ukončenie feature: the only
+        // editor for them lives inside the Smart section. Resolve to nil when Smart isn't
+        // entitled so a revoked license can't leave old profiles silently steering every
+        // transcription (batch/realtime keywords, session.update prompt) with no UI to see
+        // or turn them off.
+        sessionProfile = RemoteConfig.shared.smartDictationAllowed
+            ? AppProfileStore.shared.matchingProfile(
+                  bundleID: NSWorkspace.shared.frontmostApplication?.bundleIdentifier, windowTitle: nil
+              )
+            : nil
         if realtimeModel == .live, transcriptionMode == .realtime {
             AppLogger.log("[DictationEngine] Session profile: \(sessionProfile?.displayName ?? "—"), keywords: \(sessionProfile?.transcriptionKeywords.count ?? 0)")
         }
@@ -949,7 +965,14 @@ final class DictationEngine {
                     // Passive quality check — fires once, ~15s into the session. Advisory only:
                     // the dictation is still running, so this must not park itself over the pill.
                     if let snapshot = qualityMonitor.consumeIfReady() {
-                        if let warning = Self.qualityWarning(from: snapshot) {
+                        let device = self.captureDevice
+                        let volume = device.flatMap { AudioDeviceManager.inputVolume($0.id) }
+                        // Numbers only — logged every session so a notice can be traced to a mic and level.
+                        AppLogger.log(String(format: "[Kvalita] '%@' hlasitosť=%@ peak=%.1f dBFS skreslenie=%.2f%% SNR=%@",
+                                             device?.name ?? "?", volume.map { "\(Int($0 * 100))%" } ?? "–",
+                                             snapshot.peakDBFS, snapshot.clippingPercent,
+                                             snapshot.snrDB.map { String(format: "%.0f dB", $0) } ?? "–"))
+                        if let warning = Self.qualityWarning(from: snapshot, deviceName: device?.name) {
                             self.showNotice(warning, sticky: false)
                         }
                     }
@@ -1882,6 +1905,7 @@ final class DictationEngine {
         btNegotiating  = false
         captureNeedsWarmup = false
         captureIsBluetooth = false
+        captureDevice = nil
         levelPollTask?.cancel()
         levelPollTask = nil
         audioLevel = 0

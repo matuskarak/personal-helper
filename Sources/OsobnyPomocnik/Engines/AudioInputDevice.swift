@@ -189,6 +189,82 @@ enum AudioDeviceManager {
         return type
     }
 
+    // MARK: Input volume
+
+    /// Elements that carry the device's input volume. Most mics expose one main control
+    /// (element 0); some USB mics (HyperX SoloCast, measured 2026-09-18) only have per-channel
+    /// controls 1…n — macOS Sound settings then greys its slider out, although the volume
+    /// can still be set. Empty = no software volume at all (iPhone Continuity mic).
+    private static func inputVolumeElements(_ deviceID: AudioDeviceID) -> [UInt32] {
+        func settable(_ el: UInt32) -> Bool {
+            var address = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyVolumeScalar,
+                                                     mScope: kAudioDevicePropertyScopeInput, mElement: el)
+            guard AudioObjectHasProperty(deviceID, &address) else { return false }
+            var ok: DarwinBoolean = false
+            return AudioObjectIsPropertySettable(deviceID, &address, &ok) == noErr && ok.boolValue
+        }
+        if settable(kAudioObjectPropertyElementMain) { return [kAudioObjectPropertyElementMain] }
+        return (1...8).map(UInt32.init).filter(settable)
+    }
+
+    /// 0…1, nil when the device has no software input volume.
+    static func inputVolume(_ deviceID: AudioDeviceID) -> Float? {
+        guard let el = inputVolumeElements(deviceID).first else { return nil }
+        var address = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyVolumeScalar,
+                                                 mScope: kAudioDevicePropertyScopeInput, mElement: el)
+        var value: Float32 = 0
+        var size = UInt32(MemoryLayout<Float32>.size)
+        guard AudioObjectGetPropertyData(deviceID, &address, 0, nil, &size, &value) == noErr else { return nil }
+        return value
+    }
+
+    /// Sets the device's own input volume — system-wide, same thing macOS Sound settings changes.
+    static func setInputVolume(_ deviceID: AudioDeviceID, _ volume: Float) {
+        var value = Float32(min(1, max(0, volume)))
+        for el in inputVolumeElements(deviceID) {
+            var address = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyVolumeScalar,
+                                                     mScope: kAudioDevicePropertyScopeInput, mElement: el)
+            AudioObjectSetPropertyData(deviceID, &address, 0, nil, UInt32(MemoryLayout<Float32>.size), &value)
+        }
+    }
+
+    private static func defaultDeviceID(_ selector: AudioObjectPropertySelector) -> AudioDeviceID? {
+        var address = AudioObjectPropertyAddress(mSelector: selector, mScope: kAudioObjectPropertyScopeGlobal,
+                                                 mElement: kAudioObjectPropertyElementMain)
+        var id = AudioDeviceID(0)
+        var size = UInt32(MemoryLayout<AudioDeviceID>.size)
+        let status = AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &size, &id)
+        return status == noErr && id != 0 ? id : nil
+    }
+
+    /// The system default input, looked up in an already-enumerated list when one is at hand.
+    static func defaultInputDevice(in devices: [AudioInputDevice]? = nil) -> AudioInputDevice? {
+        guard let id = defaultDeviceID(kAudioHardwarePropertyDefaultInputDevice) else { return nil }
+        return (devices ?? inputDevices()).first { $0.id == id }
+    }
+
+    /// True when sound goes out of the Mac's own speakers — playing the mic back there
+    /// would feed back into it (howl). ponytail: only catches built-in speakers; an external
+    /// speaker over USB/HDMI isn't detectable as "not headphones", the UI says so instead.
+    static func outputIsBuiltInSpeaker() -> Bool {
+        guard let id = defaultDeviceID(kAudioHardwarePropertyDefaultOutputDevice),
+              transportType(id) == kAudioDeviceTransportTypeBuiltIn else { return false }
+        var address = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyDataSource,
+                                                 mScope: kAudioDevicePropertyScopeOutput,
+                                                 mElement: kAudioObjectPropertyElementMain)
+        var source: UInt32 = 0
+        var size = UInt32(MemoryLayout<UInt32>.size)
+        guard AudioObjectGetPropertyData(id, &address, 0, nil, &size, &source) == noErr else { return true }
+        return source == 0x6973_706B // 'ispk' — internal speaker; 'hdpn' = headphone jack
+    }
+
+    /// Bluetooth output adds ~0.15–0.3 s of its own delay — hearing yourself there is an echo.
+    static func outputIsBluetooth() -> Bool {
+        guard let id = defaultDeviceID(kAudioHardwarePropertyDefaultOutputDevice) else { return false }
+        let t = transportType(id)
+        return t == kAudioDeviceTransportTypeBluetooth || t == kAudioDeviceTransportTypeBluetoothLE
+    }
+
     private static func deviceUID(_ deviceID: AudioDeviceID) -> String? {
         var address = AudioObjectPropertyAddress(
             mSelector: kAudioDevicePropertyDeviceUID,

@@ -23,6 +23,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         AppLogger.markSection("Aplikácia spustená (PID \(ProcessInfo.processInfo.processIdentifier))")
+        // Before anything else starts: if we're not running from /Applications (Downloads, a
+        // mounted DMG, App Translocation…), offer to move there and relaunch. When the user
+        // agrees this instance is about to quit — bail out now so it doesn't start hotkeys,
+        // audio warmup, or onboarding just to tear them down again a moment later.
+        if MoveToApplications.promptIfNeeded() {
+            return
+        }
         #if DEBUG
         DictationQualityEngine.selfCheck()
         AppProfile.selfCheck()
@@ -152,17 +159,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    // MARK: - URL scheme (osobnypomocnik://<action>)
+    // MARK: - URL scheme (osobnypomocnik://<action> or ozvena://<action>)
 
     /// External trigger for tools whose synthesized keystrokes don't reach our global
     /// CGEventTap (e.g. Logi Options+ Smart Actions posted straight to the frontmost app —
     /// see HotkeyManager for why that's architecturally invisible to us). Point a Logi
     /// Smart Action / Shortcuts.app action at e.g. osobnypomocnik://dictate instead of a
     /// keyboard-shortcut action and it triggers the same handler as the real hotkey.
+    /// `ozvena://` is the same scheme under the app's current brand name (added 2026-09-19,
+    /// see CLAUDE.md) — `osobnypomocnik://` stays registered too so existing Logi/Shortcuts
+    /// automations set up before the rename keep working.
     @objc func handleGetURL(_ event: NSAppleEventDescriptor, withReplyEvent: NSAppleEventDescriptor) {
         guard
             let urlString = event.paramDescriptor(forKeyword: keyDirectObject)?.stringValue,
-            let url = URL(string: urlString), url.scheme == "osobnypomocnik",
+            let url = URL(string: urlString), url.scheme == "osobnypomocnik" || url.scheme == "ozvena",
             let action = url.host
         else { return }
         AppLogger.log("[AppDelegate] URL trigger: \(url)")
@@ -208,7 +218,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func requireLicense() -> Bool {
         guard RemoteConfig.shared.hasValidLicense || DeveloperMode.isEnabled else {
             DictationSounds.playRefused()
-            menuBarController?.showError("Appka vyžaduje platný licenčný kľúč — over ho v Nastavenia → Všeobecné.")
+            menuBarController?.showError("Appka vyžaduje platný licenčný kľúč — over ho v Nastaveniach → Všeobecné.")
             return false
         }
         return true
