@@ -253,6 +253,17 @@ kľúče v Kľúčenke pod novú service, premenovať priečinky dát, ponechať
 a vydať prechodnú verziu, ktorá SUFeedURL presmeruje na nové repo. TCC povolenia sa migrovať
 nedajú — používateľ ich povolí znova (onboarding to zvládne).
 
+## Nová úloha — formátovanie podľa cieľovej appky (zadané 2026-09-19, nezačaté)
+
+Prepis sa má formátovať podľa toho, kam sa vkladá: e-mail (oslovenie, odseky, formálny tón),
+chat/správy kamarátom (krátke, uvoľnené, bez zbytočnej štruktúry), poznámky/dokumenty (odrážky,
+nadpisy). Väčšina konkurentov to už má — je to očakávaná funkcia, nie bonus. Stavať na tom,
+čo už existuje: `AppCategory` (kategória appky, už sa zisťuje pri každom diktovaní aj bez
+Smart) a profily appiek (`AppProfile`, Smart-only). Treba rozhodnúť, či formátovanie pôjde cez
+LLM post-processing (stojí tokeny + latenciu — v rozpore s cieľom šetriť tokeny) alebo
+lacnejšie pravidlami podľa kategórie, a ako sa to bije so Smart ukončením. Zapísané aj
+v `ROADMAP.md` (verejné) pod „Ďalšia verzia“.
+
 ## Nová úloha — onboarding krok „Rola a appky“ (zadané 2026-09-19, nezačaté)
 
 Pridať do onboardingu (`OnboardingView.swift`, sprievodca po krokoch) ďalší krok, ktorý

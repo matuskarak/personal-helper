@@ -13,6 +13,10 @@ Prehľad toho, na čom pracujem a čo príde v ďalších verziách. Poradie sa 
   a appky, ktoré najviac používaš. Ozvena si podľa toho pripraví odborné slová, ktoré
   pri diktovaní často zaznejú, aby ich prepis nekomolil.
 
+- **Formátovanie podľa toho, kam píšeš** — e-mail dostane oslovenie, odseky a formálnejší
+  tón, správa kamarátovi zostane krátka a uvoľnená, poznámky a dokumenty budú mať odrážky
+  a nadpisy. Ozvena podľa appky sama spozná, aký štýl sa hodí.
+
 ## Neskôr
 
 - **Inštalácia bez blokovania od macOS** — podpísaná verzia, pri ktorej odpadne krok
