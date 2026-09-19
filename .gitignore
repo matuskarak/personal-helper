@@ -7,6 +7,7 @@ backup_*.zip
 .claude/settings.local.json
 .sparkle-tools/
 releases/
+releases-dmg/
 backup-pred-*/
 # Design/branding handoff (fonts, icons, design-system docs) — lives locally, not shipped to
 # whoever clones the repo to build/run the tool. Code comments referencing Vyvoj/*.md assume

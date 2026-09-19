@@ -14,7 +14,7 @@ APP_SUPPORT="$HOME/Library/Application Support/OsobnyPomocnik"
 [ -f "$SRC" ] || { echo "❌ Záloha $SRC neexistuje"; exit 1; }
 
 echo "🛑 Ukončujem appku, aby neprepísala obnovené hodnoty…"
-pkill -f OsobnyPomocnik.app 2>/dev/null || true
+pkill -f "OsobnyPomocnik.app|Ozvena.app" 2>/dev/null || true
 sleep 1
 
 python3 - "$SRC" "$BUNDLE_ID" "$APP_SUPPORT" <<'PY'
@@ -87,5 +87,5 @@ elif os.path.exists(json_path):
 PY
 
 echo ""
-echo "✅ Hotovo. Spusti appku:  open OsobnyPomocnik.app"
+echo "✅ Hotovo. Spusti appku:  open Ozvena.app  (staršia kópia sa volá OsobnyPomocnik.app)"
 echo "   Skontroluj Nastavenia → Všeobecné (kľúče) a Diktovanie (kľúčové slová)."

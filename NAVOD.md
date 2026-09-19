@@ -11,58 +11,52 @@ Budeš potrebovať: Mac s macOS 14 alebo novším, platobnú kartu na OpenAI (pl
 
 ## 1. Inštalácia
 
-1. Stiahni zip z odkazu, ktorý som ti poslal. Safari ho väčšinou rozbalí sama; ak nie,
-   dvojklik na `OsobnyPomocnik-0.4.1.zip` v priečinku **Stiahnuté**.
-2. V **Stiahnutých** (Finder → ⌥⌘L) nájdi položku **„OsobnyPomocnik"** s ikonou appky —
-   Finder príponu `.app` nezobrazuje, takže sa volá len takto. Potiahni ju do **Aplikácie**
-   (v bočnom paneli Findera).
-3. Spusti ju dvojklikom. **macOS ju odmietne otvoriť** — to je v poriadku, appka zatiaľ nie je
-   registrovaná u Apple (to príde s ostrou verziou). Klikni *Hotovo* / *Zrušiť*.
+1. Stiahni **`Ozvena-0.4.2.dmg`** z odkazu, ktorý som ti poslal, a otvor ho dvojklikom
+   (nájdeš ho v **Stiahnutých**).
+2. Otvorí sa okno s návodom — **potiahni ikonu Ozveny na priečinok Aplikácie** (šípka ukazuje kam).
+3. Otvor Ozvenu (Finder → Aplikácie → Ozvena). **macOS ju prvýkrát odmietne otvoriť** — to je
+   v poriadku, appka zatiaľ nie je registrovaná u Apple (to príde s ostrou verziou). Klikni *Hotovo*.
 4. Otvor **Systémové nastavenia → Súkromie a bezpečnosť**, zroluj úplne dole do sekcie
-   *Bezpečnosť*. Uvidíš hlásenie „Aplikácii OsobnyPomocnik bolo zablokované otvorenie…"
-   a vedľa tlačidlo **Otvoriť napriek tomu**. Klikni naň a potvrď heslom / Touch ID.
-5. Appka sa spustí — v hornej lište vpravo pribudne jej ikonka. Žiadne okno na ploche,
-   žiadna ikona v Docku — všetko sa ovláda z hornej lišty a klávesovými skratkami.
+   *Bezpečnosť* a pri hlásení o Ozvene klikni **Otvoriť aj tak / Otvoriť napriek tomu**.
+   Potvrď heslom alebo Touch ID.
+5. Appka sa spustí — v hornej lište vpravo pribudne jej ikonka a otvorí sa sprievodca nastavením.
+   Žiadna ikona v Docku — všetko sa ovláda z hornej lišty a klávesovými skratkami.
 
-Toto robíš **len raz**. Ďalšie aktualizácie si appka sťahuje a inštaluje sama.
+Ak by si ju omylom spustil priamo z okna inštalácie alebo zo Stiahnutých, sama sa presunie do
+Aplikácií a znova spustí. Toto celé robíš **len raz** — ďalšie aktualizácie si appka stiahne sama.
 
-## 2. Prvé spustenie — povolenia
+## 2. Sprievodca nastavením
 
-Pri prvom spustení sa otvorí okno *Vitaj v appke Ozvena*. Prejde ťa licenčným kľúčom a dvomi povoleniami:
+Pri prvom spustení ťa okno *Vitaj v appke Ozvena* prevedie štyrmi krokmi. Tlačidlo **Ďalej**
+sa odomkne, až keď je krok hotový.
 
-**Licenčný kľúč** — vlož kľúč, ktorý som ti poslal, do poľa hore v okne a klikni *Uložiť a overiť*.
-Bez platného kľúča appka nefunguje (tlačidlo *Zavrieť* dole zostane vypnuté) — ak ti kľúč nesedí,
-napíš mi.
+1. **Licenčný kľúč** — vlož kľúč, ktorý som ti poslal, a klikni *Overiť* (alebo Enter).
+   Musí sa objaviť zelené *Kľúč je platný*. Ak nie, napíš mi.
+2. **Povolenia** — pri každom klikni *Povoliť*; riadok sa po povolení sám zazelená.
 
-| Povolenie | Načo | Ako |
-|---|---|---|
-| **Prístupnosť (Accessibility)** | globálne skratky a vkladanie textu | Klikni *Povoliť* → v Systémových nastaveniach zapni prepínač pri OsobnyPomocnik |
-| **Mikrofón** | diktovanie | Klikni *Povoliť* → potvrď v dialógu |
+   | Povolenie | Načo |
+   |---|---|
+   | **Accessibility (Prístupnosť)** | globálne skratky a vkladanie textu — otvorí Systémové nastavenia, zapni prepínač pri Ozvene |
+   | **Mikrofón** | diktovanie — potvrď v dialógu |
+   | **Nahrávanie obrazovky** | len ak ti licencia odomkla Smart ukončenie — AI vidí okno, do ktorého píšeš |
 
-Po každom zapnutí sa vráť do appky — riadok sa sám zmení na zelenú fajku. Ak nie, klikni
-*Skontrolovať znova*.
+3. **OpenAI API kľúč** — appka nemá vlastný kľúč, diktovanie ide cez tvoj OpenAI účet:
+   1. Vytvor si účet na **platform.openai.com/signup** (stačí Google prihlásenie).
+   2. V **Billing** pridaj kartu a nabi kredit — **5 $ stačí na mesiace** testovania.
+   3. V **API keys** klikni *Create new secret key*, pomenuj ho napr. „Ozvena"
+      a **hneď ho skopíruj** — OpenAI ho ukáže len raz.
+   4. V sprievodcovi klikni *Prilepiť* a **Uložiť a overiť**. Musí sa objaviť zelená správa,
+      že kľúč funguje.
 
-## 3. OpenAI API kľúč
+   Odkazy v sprievodcovi sú klikateľné. Kľúč sa ukladá do Kľúčenky macOS, nie do bežného súboru.
+   Gemini kľúč je voliteľný — preskoč.
+4. **Takmer hotovo** — voliteľný kvalitnejší hlas na čítanie (preskoč) a prepínač
+   **Zdieľať anonymné štatistiky používania**. Nechaj ho prosím zapnutý — posiela mi tempo
+   reči, počet slov, výplňové slová, dĺžku a výsledok diktovania a typ appky (správy / e-mail /
+   dokument). **Nikdy nie samotný text**, mená, kľúčové slová ani kľúče. Vypnúť sa dá kedykoľvek
+   v Nastaveniach → Všeobecné.
 
-Appka nemá vlastný kľúč — diktovanie ide cez tvoj OpenAI účet.
-
-1. Vytvor si účet na **platform.openai.com/signup** (stačí Google prihlásenie).
-2. V **Billing** pridaj kartu a nabi kredit — **5 $ stačí na mesiace** testovania.
-3. V **API keys** klikni *Create new secret key*, pomenuj ho napr. „Ozvena"
-   a **hned ho skopíruj** — OpenAI ho ukáže len raz.
-4. V okne appky ho vlož do poľa *sk-…* (tlačidlo *Prilepiť*), klikni **Uložiť** a potom
-   **Testovať kľúč**. Musí sa objaviť zelené ✅.
-
-Kľúč sa ukladá do Kľúčenky macOS, nie do bežného súboru.
-
-Ostatné polia v okne (Gemini, Google čítanie, prístupový kód) **preskoč** — sú voliteľné.
-
-Prepínač **Zdieľať anonymné štatistiky používania** nechaj prosím zapnutý — posiela mi tempo
-reči, počet slov, výplňové slová, dĺžku a výsledok diktovania a typ appky (správy / e-mail /
-dokument). **Nikdy nie samotný text**, mená, kľúčové slová ani kľúče. Presne z toho viem
-prepis zlepšovať. Vypnúť sa dá kedykoľvek v Nastaveniach → Všeobecné.
-
-Klikni **Zavrieť**.
+Klikni **Dokončiť** — otvoria sa Nastavenia, kde sa môžeš porozhliadnuť.
 
 ## 4. Prvé diktovanie
 
@@ -120,7 +114,7 @@ Appka si raz denne skontroluje novú verziu a ponúkne ju. Kedykoľvek aj ručne
 ikonka v lište → **Skontrolovať aktualizácie…**. Pri aktualizácii sa už žiadne
 „Otvoriť napriek tomu" neopakuje.
 
-Po aktualizácii sa môže objaviť dialóg **„OsobnyPomocnik chce použiť dôverné informácie
+Po aktualizácii sa môže objaviť dialóg **„Ozvena chce použiť dôverné informácie
 uložené v Kľúčenke"** — appka si číta tvoj API kľúč. Klikni **Vždy povoliť** (nie len
 „Povoliť"), inak sa to spýta znova po každej aktualizácii. Kým dialóg neodklikneš, appka
 čaká a nereaguje.

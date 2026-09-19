@@ -226,6 +226,53 @@ obe pilulky; dictation pilulka mimo toho zachováva "sleduj zaostrené pole" (`f
 ako predtým — len keď pole nie je zaostrené, spadá na túto per-displej zapamätanú (alebo
 default vycentrovanú) pozíciu namiesto jednej spoločnej pre celý stôl.
 
+## Premenovanie „Osobný pomocník“ → „Ozvena“ (2026-09-19)
+
+Brand je **Ozvena**. Premenované je všetko, čo používateľ **vidí**: názov `.app` (`Ozvena.app` —
+Gatekeeper, Súkromie a bezpečnosť, žiadosti o povolenia, Aplikácie), spustiteľný súbor
+(`Contents/MacOS/Ozvena` — Monitor aktivity), release súbory (`Ozvena-<ver>.zip/.dmg`), súbor
+diagnostiky (`Ozvena-log-….txt`), texty v appke a v inštalačnom DMG.
+
+**Zámerne NEpremenované (interné, používateľ ich nevidí) — a prečo nie teraz:**
+
+| Čo | Hodnota | Čo by zmena rozbila |
+|---|---|---|
+| bundle identifier | `sk.matuskarak.osobny-pomocnik` | UserDefaults (všetky nastavenia), Kľúčenka (API kľúče), TCC povolenia, Sparkle identita — testeri by prišli o všetko |
+| UserDefaults doména | = bundle id | nastavenia |
+| Kľúčenka service | = bundle id | uložené API kľúče |
+| priečinky dát | `~/Library/Application Support/OsobnyPomocnik`, `~/Library/Logs/OsobnyPomocnik` | história, čakajúce nahrávky, logy (dalo by sa migrovať) |
+| URL schéma | `osobnypomocnik://` | skratky v Logi Options+ (Smart Actions) |
+| SwiftPM package/target/zdrojový priečinok | `OsobnyPomocnik` | nič pre usera, len veľký diff |
+| podpisová identita | `OsobnyPomocnikDev` | Kľúčenka ACL + TCC sú viazané na podpis |
+| GitHub repo | `personal-helper` | appcast URL (`SUFeedURL`) v už nainštalovaných appkách |
+
+**Úloha do budúcna (nezačaté):** globálne premenovanie aj interných identifikátorov — ideálne
+spolu s prechodom na Developer ID (tam sa aj tak mení podpis a teda TCC/Kľúčenka). Vyžaduje
+migráciu: pri prvom štarte novej verzie skopírovať UserDefaults zo starej domény, presunúť
+kľúče v Kľúčenke pod novú service, premenovať priečinky dát, ponechať starú URL schému ako alias
+a vydať prechodnú verziu, ktorá SUFeedURL presmeruje na nové repo. TCC povolenia sa migrovať
+nedajú — používateľ ich povolí znova (onboarding to zvládne).
+
+## Nová úloha — onboarding krok „Rola a appky“ (zadané 2026-09-19, nezačaté)
+
+Pridať do onboardingu (`OnboardingView.swift`, sprievodca po krokoch) ďalší krok, ktorý
+novému používateľovi predvyplní kľúčové slová a profily:
+- výber **roly / pracovnej pozície** (napr. vývojár, marketér, právnik, lekár, účtovník…),
+- výber **najpoužívanejších macOS appiek** (Mail, Slack, Notion, Safari/Chrome, Teams, Word…),
+- podľa výberu sa **predvytvoria profily appiek** (`AppProfileStore`) a **globálne kľúčové
+  slová** (`DictationEngine.defaultKeywords`).
+
+Ďalšie kroky onboardingu na neskôr (zadané 2026-09-19, ďalší update, nezačaté):
+- **Test mikrofónu** priamo v onboardingu — rovnaký ukazovateľ úrovne / posuvník hlasitosti
+  ako v Nastavenia → Mikrofón → Test mikrofónu (`MicTestEngine`, režim „Počúvať sa“).
+- **Vyskúšanie skratiek** — používateľ si každú skratku (⌘⇧D, ⌘⇧X, ⌘⇧R, …) stlačí a
+  onboarding potvrdí, že funguje; hneď tam si ju vie **prebindovať** podľa seba (rovnaký
+  editor ako Nastavenia → Skratky), len pre funkcie, ktoré licencia povoľuje.
+
+Pozor: profily sú Smart-only funkcia (od 2026-09-19 sa bez `smartDictationAllowed` pri prepise
+ignorujú) — pri licencii bez Smart má zmysel len časť s kľúčovými slovami, krok sa tomu musí
+prispôsobiť. Zoznam rolí, appiek a k nim patriacich slov treba navrhnúť (a odsúhlasiť s userom).
+
 ## Otvorené — realtime diktovanie s live vkladaním (2026-09-14)
 
 Dve veci ladené 2026-09-12/14, obe zlepšené, ani jedna doriešená — pokračovať v ďalšej session:

@@ -54,6 +54,7 @@ final class MicTestEngine {
     private var deviceCapture: DeviceCapture?
     private var systemTap: AVAudioEngine?
     private var captureSampleRate: Double = 24_000
+    private var captureFormat: AVAudioFormat?
     private let sampleStore = MicTestSampleStore()
     private var testTask: Task<Void, Never>?
     private var levelPollTask: Task<Void, Never>?
@@ -64,10 +65,11 @@ final class MicTestEngine {
     // and the old duration left no margin, cutting the tail off mid-sentence and tanking
     // the transcript-match score. The prep countdown adds further reaction-time margin.
     func startTest(durationSeconds: Int = 9, prepSeconds: Int = 2) {
-        guard phase == .idle || isTerminal(phase) else { return }
+        guard phase == .idle || isTerminal(phase), !isMonitoring else { return }
         referenceText = Self.referenceSentences.randomElement() ?? Self.referenceSentences[0]
         result = nil
         sampleStore.reset()
+        sampleStore.setCollecting(true)
         testTask = Task { await runTest(durationSeconds: durationSeconds, prepSeconds: prepSeconds) }
     }
 
@@ -152,6 +154,162 @@ final class MicTestEngine {
         phase = .done
     }
 
+    // MARK: - Live monitor ("Počúvať sa")
+
+    enum ReplayState: Equatable { case idle, recording(secondsLeft: Int), playing }
+
+    private(set) var isMonitoring = false
+    private(set) var hearSelf = false
+    /// Output is Bluetooth — the UI warns that the delay is the headphones', not a fault.
+    private(set) var hearSelfDelayed = false
+    /// Peak-hold in dBFS: jumps up instantly, falls ~20 dB/s so a word's peak stays readable.
+    private(set) var livePeakDBFS: Double = -100
+    /// Lit for 1.5 s after the last flat-topped (clipped) stretch.
+    private(set) var isClipping = false
+    private(set) var replay: ReplayState = .idle
+    private(set) var monitorError: String?
+    /// The mic the test and monitor record from (priority list, else system default).
+    private(set) var device: AudioInputDevice?
+    /// 0…1; nil = the device has no software volume (iPhone mic).
+    private(set) var inputVolume: Float?
+
+    private var monitorOutput: AVAudioEngine?
+    private var pendingOutput: AVAudioEngine?
+    private var replayPlayer: AVAudioPlayer?
+    private var replayTask: Task<Void, Never>?
+    private var lastClip = Date.distantPast
+
+    func refreshDevice() {
+        let devices = AudioDeviceManager.inputDevices()
+        if let uid = DictationEngine.shared.resolvedInputDeviceUID(devices: devices) {
+            device = devices.first { $0.uid == uid }
+        } else {
+            device = AudioDeviceManager.defaultInputDevice(in: devices)
+        }
+        inputVolume = device.flatMap { AudioDeviceManager.inputVolume($0.id) }
+    }
+
+    /// Writes the device's own (system-wide) input volume — same control as macOS Sound settings.
+    func setInputVolume(_ v: Float) {
+        guard let device else { return }
+        AudioDeviceManager.setInputVolume(device.id, v)
+        inputVolume = v
+    }
+
+    func startMonitor() {
+        guard !isMonitoring, phase == .idle || isTerminal(phase) else { return }
+        refreshDevice()
+        monitorError = nil
+        sampleStore.reset()
+        sampleStore.setCollecting(false) // metering only; recordAndReplay switches it on
+        do { try setupCapture() } catch {
+            monitorError = "Nepodarilo sa spustiť mikrofón: \(error.localizedDescription)"
+            return
+        }
+        isMonitoring = true
+        AppLogger.log("[MicTest] počúvanie — '\(device?.name ?? "?")' hlasitosť=\(inputVolume.map { "\(Int($0 * 100))%" } ?? "–")")
+        _ = testLevelHolder.takePeak()
+        levelPollTask = Task { @MainActor [weak self] in
+            while let self, !Task.isCancelled {
+                self.liveLevel = testLevelHolder.current
+                let (peak, clipped) = testLevelHolder.takePeak()
+                self.livePeakDBFS = max(20 * log10(Double(max(peak, 1e-6))), self.livePeakDBFS - 1)
+                if clipped { self.lastClip = Date() }
+                self.isClipping = -self.lastClip.timeIntervalSinceNow < 1.5
+                try? await Task.sleep(for: .milliseconds(50))
+            }
+        }
+    }
+
+    func stopMonitor() {
+        guard isMonitoring else { return }
+        replayTask?.cancel(); replayTask = nil
+        replayPlayer?.stop(); replayPlayer = nil
+        replay = .idle
+        setHearSelf(false)
+        levelPollTask?.cancel()
+        teardownCapture()
+        sampleStore.setCollecting(true)
+        liveLevel = 0; livePeakDBFS = -100; isClipping = false
+        isMonitoring = false
+    }
+
+    /// Plays the mic straight back into the headphones. Refused on the built-in speakers,
+    /// where the mic would pick its own output up and howl.
+    func setHearSelf(_ on: Bool) {
+        monitorSink.set(nil)
+        monitorOutput?.stop(); monitorOutput = nil
+        pendingOutput = nil
+        hearSelf = false
+        guard on, isMonitoring, let fmt = captureFormat else { return }
+        if AudioDeviceManager.outputIsBuiltInSpeaker() {
+            monitorError = "Počúvať sa dá len so slúchadlami — cez reproduktory Macu by mikrofón pískal."
+            return
+        }
+        let engine = AVAudioEngine()
+        let player = AVAudioPlayerNode()
+        engine.attach(player)
+        // Standard mono float, never the capture format as-is: the SoloCast delivers interleaved
+        // stereo, which AVAudioPlayerNode rejects with an Obj-C exception — uncatchable in Swift,
+        // swallowed by AppKit mid-click, and the settings window stopped taking clicks after it.
+        guard let playFormat = AVAudioFormat(standardFormatWithSampleRate: fmt.sampleRate, channels: 1) else { return }
+        engine.connect(player, to: engine.mainMixerNode, format: playFormat)
+        hearSelf = true
+        monitorError = nil
+        // Started off the main thread: opening a Bluetooth output can take seconds, and doing it
+        // here froze the whole settings window meanwhile.
+        pendingOutput = engine
+        hearSelfDelayed = AudioDeviceManager.outputIsBluetooth()
+        let box = EngineBox(engine: engine, player: player)
+        DispatchQueue.global(qos: .userInitiated).async {
+            let error: Error?
+            do { try box.engine.start(); box.player.play(); error = nil } catch let e { error = e }
+            DispatchQueue.main.async {
+                let me = MicTestEngine.shared
+                // Stale start: turned off, or off-and-on again, while this one was opening.
+                guard me.pendingOutput === box.engine, me.hearSelf, me.isMonitoring else { box.engine.stop(); return }
+                me.pendingOutput = nil
+                if let error {
+                    me.hearSelf = false
+                    me.monitorError = "Nepodarilo sa spustiť prehrávanie: \(error.localizedDescription)"
+                    return
+                }
+                me.monitorOutput = box.engine
+                monitorSink.set(box.player, format: playFormat)
+                AppLogger.log("[MicTest] počuť sa — zapnuté")
+            }
+        }
+    }
+
+    /// Records a few seconds and plays back exactly the 24 kHz mono PCM16 that dictation
+    /// uploads — i.e. how the transcription model actually hears you.
+    func recordAndReplay(seconds: Int = 5) {
+        guard isMonitoring, replay == .idle else { return }
+        replayTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            let wasHearing = self.hearSelf
+            self.setHearSelf(false) // hear the recording, not yourself on top of it
+            self.sampleStore.reset()
+            self.sampleStore.setCollecting(true)
+            for r in stride(from: seconds, through: 1, by: -1) {
+                self.replay = .recording(secondsLeft: r)
+                try? await Task.sleep(for: .seconds(1))
+                if Task.isCancelled { return }
+            }
+            self.sampleStore.setCollecting(false)
+            let wav = Self.wavData(pcm16: self.sampleStore.pcm16Data(), sampleRate: 24_000, channels: 1)
+            guard let player = try? AVAudioPlayer(data: wav) else { self.replay = .idle; return }
+            self.replayPlayer = player
+            self.replay = .playing
+            player.play()
+            try? await Task.sleep(for: .seconds(player.duration + 0.2))
+            if Task.isCancelled { return }
+            self.replayPlayer = nil
+            self.replay = .idle
+            if wasHearing { self.setHearSelf(true) }
+        }
+    }
+
     // MARK: - Capture setup (mirrors DictationEngine's explicit-device/system-default split)
 
     private func setupCapture() throws {
@@ -166,8 +324,10 @@ final class MicTestEngine {
                 throw MicTestError.setupFailed
             }
             captureSampleRate = capture.format.sampleRate
+            captureFormat = capture.format
             let store = sampleStore
             capture.onBuffer = { [captureSampleRate = self.captureSampleRate] buffer in
+                monitorSink.push(buffer)
                 store.appendFloat(buffer: buffer)
                 store.appendPCM16(buffer: buffer, inputSampleRate: captureSampleRate, converter: converter, pcm16Format: pcm16Format)
                 Self.updateLiveLevel(buffer)
@@ -181,8 +341,10 @@ final class MicTestEngine {
             guard fmt.sampleRate > 0, fmt.channelCount > 0 else { throw MicTestError.setupFailed }
             guard let converter = AVAudioConverter(from: fmt, to: pcm16Format) else { throw MicTestError.setupFailed }
             captureSampleRate = fmt.sampleRate
+            captureFormat = fmt
             let store = sampleStore
             inputNode.installTap(onBus: 0, bufferSize: 2048, format: fmt) { [captureSampleRate = self.captureSampleRate] buffer, _ in
+                monitorSink.push(buffer)
                 store.appendFloat(buffer: buffer)
                 store.appendPCM16(buffer: buffer, inputSampleRate: captureSampleRate, converter: converter, pcm16Format: pcm16Format)
                 Self.updateLiveLevel(buffer)
@@ -199,13 +361,22 @@ final class MicTestEngine {
         guard let ptr = buffer.floatChannelData?.pointee else { return }
         let frameCount = Int(buffer.frameLength)
         var peak: Float = 0
+        var run = 0, clipped = false
         for i in 0..<frameCount {
             let a = abs(ptr[i])
             if a > peak { peak = a }
+            run = a >= clipLevel ? run + 1 : 0
+            if run >= minClipRun { clipped = true }
         }
         let perceptual = min(1, sqrt(peak) * 1.6)
-        testLevelHolder.update(perceptual)
+        testLevelHolder.update(perceptual, peak: peak, clipped: clipped)
     }
+
+    // Same rule as DictationQualityMonitor: clipping = several samples in a row pinned at the
+    // ceiling (a flat-topped wave), not one loud transient. The test used to count single
+    // samples, so it and the mid-dictation notice could disagree about the same mic.
+    nonisolated static let clipLevel: Float = 0.999
+    nonisolated static let minClipRun = 3
 
     private func teardownCapture() {
         deviceCapture?.stop()
@@ -230,12 +401,13 @@ final class MicTestEngine {
         guard !samples.isEmpty else { return (-100, -100, 0, nil) }
         var peak: Float = 0
         var sumSquares: Float = 0
-        var clipped = 0
+        var clipped = 0, run = 0
         for s in samples {
             let a = abs(s)
             if a > peak { peak = a }
             sumSquares += s * s
-            if a >= 0.999 { clipped += 1 }
+            run = a >= clipLevel ? run + 1 : 0
+            if run >= minClipRun { clipped += run == minClipRun ? minClipRun : 1 }
         }
         let rms = sqrt(sumSquares / Float(samples.count))
         let (peakDBFS, rmsDBFS) = analyzeDBFS(peak: peak, rms: rms)
@@ -336,7 +508,7 @@ final class MicTestEngine {
         var verdict: Verdict = .excellent
 
         if clippingPercent > 0.5 {
-            suggestions.append("Zvuk je skreslený (clipping) — zníž vstupnú hlasitosť mikrofónu v Nastaveniach zvuku macOS.")
+            suggestions.append("Zvuk je skreslený (clipping) — zníž hlasitosť mikrofónu posuvníkom v režime „Počúvať sa“ nižšie.")
             verdict = max(verdict, .poor)
         }
         if peakDBFS < -35 {
@@ -380,8 +552,59 @@ final class MicTestEngine {
 private final class TestLevelHolder: @unchecked Sendable {
     private let lock = NSLock()
     private var value: Float = 0
-    func update(_ v: Float) { lock.lock(); value = v; lock.unlock() }
+    private var peak: Float = 0
+    private var clipped = false
+    func update(_ v: Float, peak p: Float = 0, clipped c: Bool = false) {
+        lock.lock(); value = v; peak = max(peak, p); clipped = clipped || c; lock.unlock()
+    }
     var current: Float { lock.lock(); defer { lock.unlock() }; return value }
+    /// Loudest sample and whether it clipped since the last call — the capture thread
+    /// delivers several buffers per UI poll, and a clip in any of them must not be lost.
+    func takePeak() -> (peak: Float, clipped: Bool) {
+        lock.lock(); defer { lock.unlock() }
+        let r = (peak, clipped); peak = 0; clipped = false; return r
+    }
+}
+
+/// Routes captured buffers to the "hear yourself" player — set only while that's on.
+/// Called on the capture thread. The queue is capped by duration, not buffer count: a USB mic
+/// delivers ~10 ms buffers while a Bluetooth output pulls 40–90 ms per render, so the old cap
+/// of 6 buffers (~60 ms) starved it — the playback kept dropping out ("zasekne sa").
+/// 0.3 s still keeps latency from creeping up when the output clock runs a bit slow.
+private final class MonitorSink: @unchecked Sendable {
+    private let lock = NSLock()
+    private var player: AVAudioPlayerNode?
+    private var playerFormat: AVAudioFormat?
+    private var queuedFrames: AVAudioFrameCount = 0
+    func set(_ p: AVAudioPlayerNode?, format: AVAudioFormat? = nil) {
+        lock.lock(); player = p; playerFormat = format; queuedFrames = 0; lock.unlock()
+    }
+    func push(_ buffer: AVAudioPCMBuffer) {
+        let frames = buffer.frameLength
+        lock.lock()
+        guard let player, let format = playerFormat, Double(queuedFrames) < format.sampleRate * 0.3,
+              let src = buffer.floatChannelData,
+              let copy = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frames),
+              let dst = copy.floatChannelData?[0]
+        else { lock.unlock(); return }
+        queuedFrames += frames
+        lock.unlock()
+        // First channel only, read with the buffer's stride: works for interleaved and
+        // non-interleaved capture alike, and the player always gets the one format it accepts.
+        let stride = buffer.stride
+        for i in 0..<Int(frames) { dst[i] = src[0][i * stride] }
+        copy.frameLength = frames
+        player.scheduleBuffer(copy) { [weak self] in
+            guard let self else { return }
+            self.lock.lock(); self.queuedFrames -= min(frames, self.queuedFrames); self.lock.unlock()
+        }
+    }
+}
+private let monitorSink = MonitorSink()
+
+private struct EngineBox: @unchecked Sendable {
+    let engine: AVAudioEngine
+    let player: AVAudioPlayerNode
 }
 private let testLevelHolder = TestLevelHolder()
 
@@ -392,6 +615,9 @@ private final class MicTestSampleStore: @unchecked Sendable {
     private let lock = NSLock()
     private var floats: [Float] = []
     private var pcm16 = Data()
+    private var collecting = true
+
+    func setCollecting(_ on: Bool) { lock.lock(); collecting = on; lock.unlock() }
 
     func reset() {
         lock.lock(); floats.removeAll(); pcm16 = Data(); lock.unlock()
@@ -401,11 +627,14 @@ private final class MicTestSampleStore: @unchecked Sendable {
         guard let ptr = buffer.floatChannelData?.pointee else { return }
         let frameCount = Int(buffer.frameLength)
         lock.lock()
+        guard collecting else { lock.unlock(); return }
         floats.append(contentsOf: UnsafeBufferPointer(start: ptr, count: frameCount))
         lock.unlock()
     }
 
     func appendPCM16(buffer: AVAudioPCMBuffer, inputSampleRate: Double, converter: AVAudioConverter, pcm16Format: AVAudioFormat) {
+        lock.lock(); let on = collecting; lock.unlock()
+        guard on else { return }
         let ratio = 24_000.0 / inputSampleRate
         let capacity = AVAudioFrameCount(Double(buffer.frameLength) * ratio) + 1
         guard let out = AVAudioPCMBuffer(pcmFormat: pcm16Format, frameCapacity: capacity) else { return }

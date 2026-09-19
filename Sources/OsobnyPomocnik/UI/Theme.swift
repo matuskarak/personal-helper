@@ -27,10 +27,16 @@ enum Theme {
     /// (#8C9DF2 / #E0A268) read well as text but not as a fill under white labels.
     static let brandBlueSafe  = adaptive(light: 0x24399E, dark: 0x2E4BD1)
     static let brandAmberSafe = adaptive(light: 0x7A4A1C, dark: 0x7A4A1C)
+    /// Link text — dark blue on light, the pale brand blue on dark (brandBlueSafe's dark value
+    /// is a saturated fill colour, too dim to read as text on the dark surfaces).
+    static let link = adaptive(light: 0x24399E, dark: 0x8C9DF2)
 
     /// Semantic states. Blue doubles as "info", amber as "warning" — no extra hues for those.
     static let success = adaptive(light: 0x125A41, dark: 0x5FD1A8)
     static let error   = adaptive(light: 0x9E2318, dark: 0xF0897E)
+    /// Text/foreground colour for warnings, readable in both modes (unlike `brandAmberSafe`,
+    /// which stays a dark brown in dark mode and is unreadable on a near-black background).
+    static let warning = adaptive(light: 0x7A4A1C, dark: 0xF2B872)
 
     // MARK: - HUD (floating pills)
 
@@ -65,7 +71,7 @@ enum KeyCheck {
     var color: Color {
         switch self {
         case .ok: Theme.success
-        case .warning: Theme.brandAmberSafe
+        case .warning: Theme.warning
         case .failure: Theme.error
         }
     }

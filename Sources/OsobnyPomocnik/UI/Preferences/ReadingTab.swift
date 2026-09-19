@@ -20,7 +20,7 @@ extension PreferencesView {
                 if tts.mode == .googleCloud {
                     if !google.hasAPIKey {
                         rowDivider
-                        captionRow("Chýba Google Cloud API kľúč — nastavíš ho vo Všeobecné.", color: Theme.brandAmberSafe)
+                        captionRow("Chýba Google Cloud API kľúč — nastavíš ho vo Všeobecné.", color: Theme.warning)
                     }
                     rowDivider
                     if !availableGoogleVoices.isEmpty {

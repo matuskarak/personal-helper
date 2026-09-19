@@ -75,40 +75,42 @@ struct PreferencesView: View {
         }
     }
 
-    @State var selectedTab: Tab = .dictation
+    @State var selectedTab: Tab = .general
     // Collapsed by default — fewer rows at first glance. Clicking "Diktovanie" opens it AND
     // toggles this, so there's exactly one hit target, not a separate arrow to miss.
-    @State var dictationExpanded = false
+    // All accordion cards below are collapsed on first launch, then each remembers what the
+    // user last did with it (persisted in UserDefaults under "ui.expanded.*").
+    @AppStorage("ui.expanded.dictationExpanded") var dictationExpanded = false
     @State var showKeywordSuggestions = false
-    @State var dictationIntroExpanded = false
+    @AppStorage("ui.expanded.dictationIntroExpanded") var dictationIntroExpanded = false
     // Opened automatically in onAppear when Smart spracovanie is already configured.
-    @State var smartSectionExpanded = false
-    @State var realtimeSectionExpanded = true
-    @State var batchSectionExpanded = true
-    @State var keywordsSectionExpanded = true
-    @State var pillSectionExpanded = false
-    @State var duckSectionExpanded = false
-    @State var keysSectionExpanded = true
+    @AppStorage("ui.expanded.smartSectionExpanded") var smartSectionExpanded = false
+    @AppStorage("ui.expanded.realtimeSectionExpanded") var realtimeSectionExpanded = false
+    @AppStorage("ui.expanded.batchSectionExpanded") var batchSectionExpanded = false
+    @AppStorage("ui.expanded.keywordsSectionExpanded") var keywordsSectionExpanded = false
+    @AppStorage("ui.expanded.pillSectionExpanded") var pillSectionExpanded = false
+    @AppStorage("ui.expanded.duckSectionExpanded") var duckSectionExpanded = false
+    @AppStorage("ui.expanded.keysSectionExpanded") var keysSectionExpanded = false
     @State var editingKey: String?
-    @State var voiceSectionExpanded = true
-    @State var readingSectionExpanded = true
-    @State var shortcutsIntroExpanded = false
-    @State var micOrderExpanded = true
-    @State var micTestExpanded = false
-    @State var qualityModesExpanded = false
-    @State var qualityModelsExpanded = false
-    @State var qualityShadowExpanded = false
-    @State var qualityFillersExpanded = false
-    @State var qualityAppsExpanded = false
-    @State var qualityRecentExpanded = true
-    @State var diagnosticsExpanded = false
+    @AppStorage("ui.expanded.voiceSectionExpanded") var voiceSectionExpanded = false
+    @AppStorage("ui.expanded.readingSectionExpanded") var readingSectionExpanded = false
+    @AppStorage("ui.expanded.shortcutsIntroExpanded") var shortcutsIntroExpanded = false
+    @AppStorage("ui.expanded.micOrderExpanded") var micOrderExpanded = false
+    @AppStorage("ui.expanded.micTestExpanded") var micTestExpanded = false
+    @AppStorage("ui.expanded.qualityModesExpanded") var qualityModesExpanded = false
+    @AppStorage("ui.expanded.qualityModelsExpanded") var qualityModelsExpanded = false
+    @AppStorage("ui.expanded.qualityShadowExpanded") var qualityShadowExpanded = false
+    @AppStorage("ui.expanded.qualityFillersExpanded") var qualityFillersExpanded = false
+    @AppStorage("ui.expanded.qualityAppsExpanded") var qualityAppsExpanded = false
+    @AppStorage("ui.expanded.qualityRecentExpanded") var qualityRecentExpanded = false
+    @AppStorage("ui.expanded.diagnosticsExpanded") var diagnosticsExpanded = false
     @State var tts          = TTSEngine.shared
     @State var google       = GoogleCloudTTSEngine.shared
     @State var dictation    = DictationEngine.shared
     @State var duckAudio    = AudioDucking.shared
     @State var profileStore = AppProfileStore.shared
     @State var rewriteEngine = SmartRewriteEngine.shared
-    @State var visionPromptExpanded = false
+    @AppStorage("ui.expanded.visionPromptExpanded") var visionPromptExpanded = false
     @State var remoteConfig  = RemoteConfig.shared
     @State var telemetry     = Telemetry.shared
     @State var micTest       = MicTestEngine.shared
@@ -159,7 +161,7 @@ struct PreferencesView: View {
     let accent   = Theme.brandBlueSafe
     let pageBG   = Theme.surfaceBase
     let warnBG   = Theme.brandAmber.opacity(0.14)
-    let warnFG   = Theme.brandAmberSafe
+    let warnFG   = Theme.warning
     let greenDot = Theme.success
 
     // MARK: - Root
@@ -216,9 +218,7 @@ struct PreferencesView: View {
             // Normalise legacy "minimal" → "low" (removed from new segmented control)
             if dictation.transcriptionDelay == "minimal" { dictation.transcriptionDelay = "low" }
             if google.hasAPIKey { Task { await loadGoogleVoices() } }
-            if rewriteEngine.visionPromptEnabled || !profileStore.profiles.isEmpty || dictation.liveInsertEnabled {
-                smartSectionExpanded = true
-            }
+            // No auto-expanding of sections here: every card remembers the user's own open/closed choice.
         }
         .onChange(of: apiKeyInput)    { _, _ in apiKeySaved    = false }
         .onChange(of: openAIKeyInput) { _, _ in openAIKeySaved = false }
