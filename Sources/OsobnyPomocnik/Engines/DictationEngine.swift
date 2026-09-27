@@ -1275,7 +1275,8 @@ final class DictationEngine {
         accumulatedText = ""
         if !dictatedText.isEmpty {
             let model = transcriptionMode == .realtime ? realtimeModel.rawValue : batchModel
-            UsageStore.shared.logDictation(seconds: elapsed, text: dictatedText, model: model)
+            UsageStore.shared.logDictation(seconds: elapsed, text: dictatedText, model: model,
+                                           trimmedSeconds: transcriptionMode == .batch ? Int(silenceTrimmer.trimmedSeconds) : 0)
             DictationHistoryStore.shared.log(dictatedText, id: currentEntryID,
                                              appName: appName, bundleID: bundleID,
                                              category: category, seconds: elapsed,

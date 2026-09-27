@@ -187,6 +187,23 @@ extension PreferencesView {
                 .nestedRow()
             }
             rowDivider
+            toggleRow(title: "Podpis v e-mailoch",
+                      subtitle: "Smart pridá na koniec e-mailu tvoj podpis (Mail, Outlook, Gmail…).",
+                      isOn: $rewriteEngine.emailSignatureEnabled)
+            if rewriteEngine.emailSignatureEnabled {
+                rowDivider
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Podpis").font(Theme.body(13))
+                    TextEditor(text: $rewriteEngine.emailSignature)
+                        .font(Theme.body(13))
+                        .frame(height: 54)
+                        .overlay(RoundedRectangle(cornerRadius: 6).stroke(.separator))
+                    Text("Napríklad: Ján Novák\nFirma s.r.o. · +421 …").font(Theme.body(11)).foregroundStyle(Theme.textSecondary)
+                }
+                .padding(.horizontal, 16).padding(.vertical, 12)
+                .nestedRow()
+            }
+            rowDivider
             toggleRow(title: "Ukladať screenshoty do histórie",
                       subtitle: "Na ladenie. Môže obsahovať citlivý obsah obrazovky.",
                       isOn: $rewriteEngine.saveScreenshotsToHistory)

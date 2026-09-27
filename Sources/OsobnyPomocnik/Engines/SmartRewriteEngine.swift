@@ -36,6 +36,19 @@ final class SmartRewriteEngine {
         didSet { UserDefaults.standard.set(saveScreenshotsToHistory, forKey: "smart.saveScreenshotsToHistory") }
     }
 
+    /// Smart e-mail signature (2026-09-27): plain text appended to e-mails in place of a
+    /// dictated name. Only for the `.email` category.
+    var emailSignatureEnabled: Bool {
+        didSet { UserDefaults.standard.set(emailSignatureEnabled, forKey: "smart.emailSignatureEnabled") }
+    }
+    var emailSignature: String {
+        didSet { UserDefaults.standard.set(emailSignature, forKey: "smart.emailSignature") }
+    }
+    private func signature(for category: AppCategory) -> String? {
+        let sig = emailSignature.trimmingCharacters(in: .whitespacesAndNewlines)
+        return category == .email && emailSignatureEnabled && !sig.isEmpty ? sig : nil
+    }
+
     /// Explains to the model what the attached screenshot is for — without this, a vision
     /// model given transcript + image with no framing may ignore the image or use it
     /// unpredictably (e.g. inventing content that was only on screen, not dictated).
@@ -55,6 +68,8 @@ final class SmartRewriteEngine {
         let stored = UserDefaults.standard.string(forKey: "smart.visionPromptOverride")
         self.visionPromptOverride = (stored?.isEmpty ?? true) ? Self.defaultVisionPreamble : stored!
         self.saveScreenshotsToHistory = UserDefaults.standard.bool(forKey: "smart.saveScreenshotsToHistory")
+        self.emailSignatureEnabled = UserDefaults.standard.bool(forKey: "smart.emailSignatureEnabled")
+        self.emailSignature = UserDefaults.standard.string(forKey: "smart.emailSignature") ?? ""
     }
 
     func rewrite(
@@ -95,7 +110,11 @@ final class SmartRewriteEngine {
             "žiadosť a NIE odmietnutie typu \"Nemôžem to spraviť\"."
         // Profile instructions come last and win — a user's own profile beats the built-in rules.
         let profileRules = profile.instructions.isEmpty ? nil : "Pokyny pre túto appku (majú prednosť):\n\(profile.instructions)"
-        let systemPrompt = ([hardRule, preamble, category.formattingRules, profileRules] as [String?])
+        let signatureRule = signature(for: category).map {
+            "Na úplný koniec e-mailu daj pozdrav (ak bol nadiktovaný) a pod neho PRESNE tento podpis, " +
+            "na samostatných riadkoch, namiesto nadiktovaného mena:\n\($0)"
+        }
+        let systemPrompt = ([hardRule, preamble, category.formattingRules, signatureRule, profileRules] as [String?])
             .compactMap { $0 }.joined(separator: "\n\n")
         let preambleSource = !visionPromptEnabled ? "vypnutý" :
             (visionPromptOverride == Self.defaultVisionPreamble ? "predvolený" : "vlastný")
@@ -165,7 +184,10 @@ final class SmartRewriteEngine {
             let text = parsed["corrected_text_same_content"] as? String
         else { throw SmartRewriteError.invalidResponse }
 
-        return text.trimmingCharacters(in: .whitespacesAndNewlines)
+        var out = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        // The model may drop it — the signature is the user's own text, so it's guaranteed here.
+        if let sig = signature(for: category), !out.contains(sig) { out += "\n\n" + sig }
+        return out
     }
 
     enum SmartRewriteError: LocalizedError {

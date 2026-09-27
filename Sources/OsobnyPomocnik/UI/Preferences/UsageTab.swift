@@ -79,6 +79,11 @@ extension PreferencesView {
             }
             Text("Odhad: písanie ~40 slov/min, čítanie ~120, počúvanie ~180 slov/min.")
                 .font(Theme.body(11)).foregroundStyle(Theme.textSecondary).padding(.horizontal, 4)
+            if summary.trimmedSeconds > 0 {
+                // Cut audio is never uploaded: that much less to send, transcribe and pay for.
+                Text("Strihanie ticha: neodoslaných \(minutesString(summary.trimmedSeconds)) nahrávky · ušetrené \(dictationCostString(summary.trimmedSeconds))")
+                    .font(Theme.body(11)).foregroundStyle(Theme.textSecondary).padding(.horizontal, 4)
+            }
             usageChart(range: range)
         }
     }

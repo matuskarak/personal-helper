@@ -43,6 +43,9 @@ struct DailyBucket: Codable {
     var seconds = 0
     var words = 0
     var chars = 0
+    /// Seconds of silence SilenceTrimmer cut before upload — not sent, not billed.
+    /// Optional so buckets saved before this field existed still decode.
+    var trimmedSeconds: Int?
 }
 
 @Observable
@@ -65,9 +68,10 @@ final class UsageStore {
         migrateLegacyEventsIfNeeded()
     }
 
-    func logDictation(seconds: Int, text: String, model: String) {
+    func logDictation(seconds: Int, text: String, model: String, trimmedSeconds: Int = 0) {
         guard seconds > 0 || !text.isEmpty else { return }
-        addToBucket(kind: .dictation, model: model, seconds: seconds, words: wordCount(text), chars: text.count)
+        addToBucket(kind: .dictation, model: model, seconds: seconds, words: wordCount(text), chars: text.count,
+                    trimmedSeconds: trimmedSeconds)
     }
 
     func logReading(_ text: String) {
@@ -79,15 +83,18 @@ final class UsageStore {
         text.split(whereSeparator: { $0.isWhitespace || $0.isNewline }).count
     }
 
-    private func addToBucket(kind: UsageEvent.Kind, model: String, seconds: Int, words: Int, chars: Int) {
+    private func addToBucket(kind: UsageEvent.Kind, model: String, seconds: Int, words: Int, chars: Int,
+                             trimmedSeconds: Int = 0) {
         let day = Calendar.current.startOfDay(for: Date())
         if let i = dailyBuckets.firstIndex(where: { $0.day == day && $0.kind == kind && $0.model == model }) {
             dailyBuckets[i].seconds += seconds
             dailyBuckets[i].words   += words
             dailyBuckets[i].chars   += chars
+            if trimmedSeconds > 0 { dailyBuckets[i].trimmedSeconds = (dailyBuckets[i].trimmedSeconds ?? 0) + trimmedSeconds }
         } else {
             dailyBuckets.append(DailyBucket(day: day, kind: kind, model: model,
-                                             seconds: seconds, words: words, chars: chars))
+                                             seconds: seconds, words: words, chars: chars,
+                                             trimmedSeconds: trimmedSeconds > 0 ? trimmedSeconds : nil))
         }
         prune()
         save()
@@ -153,6 +160,7 @@ final class UsageStore {
         var dictationWords   = 0
         var readingWords     = 0
         var readingChars     = 0
+        var trimmedSeconds   = 0
     }
 
     /// Estimated time saved versus doing it by hand: dictation compares actual recording
@@ -176,6 +184,7 @@ final class UsageStore {
         for b in dailyBuckets where b.day >= from && b.day < to {
             switch b.kind {
             case .dictation: s.dictationSeconds += b.seconds; s.dictationWords += b.words
+                             s.trimmedSeconds += b.trimmedSeconds ?? 0
             case .reading:   s.readingWords += b.words; s.readingChars += b.chars
             }
         }
