@@ -69,7 +69,7 @@ enum AppCategory: String, Codable, CaseIterable, Sendable {
     /// Smart úroveň 1 (2026-09-27): how the rewrite may format the text for this target.
     /// The model answers in a small Markdown subset that `RichText` turns into rich paste.
     var formattingRules: String {
-        let common = "Formát: Markdown, len **tučné**, odrážky \"- \", číslovaný zoznam \"1. \" a nadpis \"## \". " +
+        let common = "Formát: len odseky, nadpisy, odrážky, číslovaný zoznam a tučné (cez blocks/bold). " +
             "Hlasové pokyny ako „toto zvýrazni“, „zvýrazni to“, „dôležité:“, „toto je dôležité zdôrazniť“, „nový odsek“, " +
             "„odrážka“ (aj voľnejšie formulácie s rovnakým zámerom) vykonaj a samotný pokyn do textu NEdávaj. " +
             "Nevymýšľaj oslovenie, pozdrav ani podpis, ktoré neboli nadiktované."
@@ -93,7 +93,8 @@ enum AppCategory: String, Codable, CaseIterable, Sendable {
                 "(termín, suma, čo sa od adresáta chce) — ak používateľ povedal, čo zvýrazniť, zvýrazni LEN to. " +
                 "Odseky sú POVINNÉ aj pri krátkom e-maile. Príklad — vstup: „ahoj peter posielam ti ponuku cena je dvetisíc " +
                 "eur prosím zvýrazniť sumu skontroluj položky a potvrď mi to vďaka matúš“ → výstup:\n" +
-                "Ahoj Peter,\n\nposielam ti ponuku. **Cena je 2 000 €.**\n\nProsím, skontroluj položky a potvrď mi to.\n\nVďaka,\nMatúš\n" +
+                "paragraph „Ahoj Peter,“ · paragraph „posielam ti ponuku. “ + „Cena je 2 000 €.“ bold · paragraph " +
+                "„Prosím, skontroluj položky a potvrď mi to.“ · paragraph „Vďaka,\nMatúš“ " +
                 "(pokyn „prosím zvýrazniť sumu“ sa vykonal a z textu zmizol)."
         case .messaging:
             specific = "Cieľ je chat: krátko a uvoľnene, bez nadpisov. Tučné len na výslovný pokyn, zoznam len pri výpočte viacerých vecí."

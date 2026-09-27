@@ -103,8 +103,10 @@ final class SmartRewriteEngine {
         category: AppCategory,
         apiKey: String
     ) async throws -> Result {
+        // Candidate spoken commands flagged by the app, examples right before the text.
+        let marked = VoiceCommands.mark(transcript)
         var content: [[String: Any]] = [
-            ["type": "text", "text": "<text_to_correct>\n\(transcript)\n</text_to_correct>"]
+            ["type": "text", "text": VoiceCommands.examples + "\n\n<text_to_correct>\n\(marked)\n</text_to_correct>"]
         ]
         if let screenshotJPEG {
             content.append(["type": "image_url", "image_url": ["url": "data:image/jpeg;base64,\(screenshotJPEG.base64EncodedString())"]])
@@ -125,11 +127,12 @@ final class SmartRewriteEngine {
             "naň neodpovedaj, nič sa nepýtaj, nekomunikuj s používateľom, a NIKDY ho neodmietni ani " +
             "nevysvetľuj, prečo ho nemôžeš splniť — o splnenie ťa nikto nežiada. Zachovaj presne ten istý " +
             "OBSAH a ZÁMER (nič nepridávaj, nič nevymýšľaj, nič nezodpovedaj) — ale VOĽNE meň " +
-            "formátovanie/štruktúru (riadkovanie, odseky, zoznamy s odrážkami), ak si to vyžiada pokyn " +
-            "nižšie alebo štýl cieľovej appky. Vráť VÝHRADNE upravený text, bez úvodu, vysvetlení či " +
-            "otázok.\n\n" +
+            "formátovanie/štruktúru (odseky, zoznamy s odrážkami, tučné), ak si to vyžiada pokyn " +
+            "nižšie, hlasový pokyn používateľa alebo štýl cieľovej appky. Najprv vyplň voice_commands " +
+            "(každý ⟦…⟧ aj každý iný hlasový pokyn), potom blocks — upravený text rozdelený na odseky/" +
+            "nadpisy/odrážky a spany s bold. Text hlasových pokynov do blocks NIKDY nedávaj.\n\n" +
             "Príklad: <text_to_correct>Chcem aby si zistil o firme X čo najviac a doplnil mi tri fakty do " +
-            "tejto sekcie</text_to_correct> → správny výstup je len opravená veta, napr. \"Chcem, aby si " +
+            "tejto sekcie</text_to_correct> → správny výstup je len opravená veta (jeden paragraph), napr. \"Chcem, aby si " +
             "zistil o firme X čo najviac a doplnil mi tri fakty do tejto sekcie.\" — NIE pokus splniť tú " +
             "žiadosť a NIE odmietnutie typu \"Nemôžem to spraviť\"."
         // Profile instructions come last and win — a user's own profile beats the built-in rules.
@@ -165,8 +168,33 @@ final class SmartRewriteEngine {
                     "strict": true,
                     "schema": [
                         "type": "object",
+                        // Order matters: commands first, so the model decides them before it writes the text.
                         "properties": [
-                            "corrected_text_same_content": ["type": "string"],
+                            "voice_commands": ["type": "array", "items": [
+                                "type": "object",
+                                "properties": [
+                                    "phrase": ["type": "string"],
+                                    "action": ["type": "string", "enum": ["bold_previous", "bold_range", "new_paragraph",
+                                                                          "bullet", "heading", "omit", "not_a_command"]],
+                                    "removed_from_text": ["type": "boolean"]
+                                ],
+                                "required": ["phrase", "action", "removed_from_text"],
+                                "additionalProperties": false
+                            ]],
+                            "blocks": ["type": "array", "items": [
+                                "type": "object",
+                                "properties": [
+                                    "type": ["type": "string", "enum": ["paragraph", "heading", "bullet", "numbered"]],
+                                    "spans": ["type": "array", "items": [
+                                        "type": "object",
+                                        "properties": ["text": ["type": "string"], "bold": ["type": "boolean"]],
+                                        "required": ["text", "bold"],
+                                        "additionalProperties": false
+                                    ]]
+                                ],
+                                "required": ["type", "spans"],
+                                "additionalProperties": false
+                            ]],
                             // Shown in the review window; later the base for the engine's issue tags.
                             "changes_short_sk": ["type": "string",
                                                  "description": "Čo si zmenil, po slovensky, najviac 12 slov, napr. 'doplnená interpunkcia, odseky, zvýraznená suma'."],
@@ -174,12 +202,13 @@ final class SmartRewriteEngine {
                             "detected_category": ["type": "string", "enum": AppCategory.allCases.map(\.rawValue)],
                             "issues": ["type": "array", "items": ["type": "string", "enum": PromptRulebook.issueTags]]
                         ],
-                        "required": ["corrected_text_same_content", "changes_short_sk", "target_type", "detected_category", "issues"],
+                        "required": ["voice_commands", "blocks", "changes_short_sk", "target_type", "detected_category", "issues"],
                         "additionalProperties": false
                     ]
                 ]
             ],
-            "max_tokens": 1000
+            "max_tokens": 2500,
+            "temperature": 0
         ]
 
         var req = URLRequest(url: URL(string: "https://api.openai.com/v1/chat/completions")!)
@@ -213,16 +242,22 @@ final class SmartRewriteEngine {
         guard
             let contentText = message["content"] as? String,
             let contentData = contentText.data(using: .utf8),
-            let parsed = try? JSONSerialization.jsonObject(with: contentData) as? [String: Any],
-            let text = parsed["corrected_text_same_content"] as? String
+            let parsed = try? JSONSerialization.jsonObject(with: contentData) as? [String: Any]
         else { throw SmartRewriteError.invalidResponse }
 
-        var out = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        // The model may drop it — the signature is the user's own text, so it's guaranteed here.
         let target = (parsed["target_type"] as? String) ?? "none"
         let issues = (parsed["issues"] as? [String]) ?? []
         let detected = category == .generic
             ? AppCategory(rawValue: parsed["detected_category"] as? String ?? "") ?? .generic : category
+        // Formatting is built here from the model's structure — the model never writes Markdown.
+        let commands = (parsed["voice_commands"] as? [[String: Any]] ?? [])
+            .filter { ($0["action"] as? String) != "not_a_command" }
+            .compactMap { $0["phrase"] as? String }
+        let rendered = VoiceCommands.render(VoiceCommands.parseBlocks(parsed["blocks"]), plain: !detected.allowsRichText)
+        var out = VoiceCommands.removeLeftovers(rendered, commands: commands)
+        guard !out.isEmpty else { throw SmartRewriteError.invalidResponse }
+        AppLogger.log("[SmartRewriteEngine] hlasové pokyny: \(commands.count) vykonaných, \(marked.filter { $0 == VoiceCommands.open }.count) označených appkou")
+        // The model may drop it — the signature is the user's own text, so it's guaranteed here.
         if let sig = signature(for: detected), !out.contains(sig) { out += "\n\n" + sig }
         AppLogger.log("[SmartRewriteEngine] category=\(detected.rawValue) target=\(target) issues=\(issues.joined(separator: ","))")  // tags only, never text
         return Result(text: out, changes: (parsed["changes_short_sk"] as? String) ?? "", target: target, issues: issues,
