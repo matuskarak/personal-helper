@@ -90,7 +90,11 @@ enum AppCategory: String, Codable, CaseIterable, Sendable {
         case .email:
             specific = "Cieľ je e-mail: oslovenie na samostatnom riadku, text v krátkych odsekoch (prázdny riadok medzi nimi), " +
                 "pozdrav a meno na samostatných riadkoch na konci. Tučne zvýrazni najviac 3 kľúčové informácie " +
-                "(termín, suma, čo sa od adresáta chce) — ak používateľ povedal, čo zvýrazniť, zvýrazni LEN to."
+                "(termín, suma, čo sa od adresáta chce) — ak používateľ povedal, čo zvýrazniť, zvýrazni LEN to. " +
+                "Odseky sú POVINNÉ aj pri krátkom e-maile. Príklad — vstup: „ahoj peter posielam ti ponuku cena je dvetisíc " +
+                "eur prosím zvýrazniť sumu skontroluj položky a potvrď mi to vďaka matúš“ → výstup:\n" +
+                "Ahoj Peter,\n\nposielam ti ponuku. **Cena je 2 000 €.**\n\nProsím, skontroluj položky a potvrď mi to.\n\nVďaka,\nMatúš\n" +
+                "(pokyn „prosím zvýrazniť sumu“ sa vykonal a z textu zmizol)."
         case .messaging:
             specific = "Cieľ je chat: krátko a uvoľnene, bez nadpisov. Tučné len na výslovný pokyn, zoznam len pri výpočte viacerých vecí."
         case .document:

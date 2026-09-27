@@ -10,7 +10,7 @@ final class ReviewPanelController: NSObject, NSWindowDelegate {
 
     private var window: NSWindow?
     private var target: NSRunningApplication?
-    private var pendingText = ""   // what Zrušiť / closing the window parks in memory
+    private var textView: NSTextView?   // the editor — read at insert time, WYSIWYG
     private var onAction: (String) -> Void = { _ in }
 
     /// `onAction` gets what the user did: inserted | edited | original | cancelled | copied.
@@ -18,21 +18,47 @@ final class ReviewPanelController: NSObject, NSWindowDelegate {
                  onAction: @escaping (String) -> Void) {
         close(parking: false)
         target = NSWorkspace.shared.frontmostApplication
-        pendingText = markdown ? RichText.plain(text) : text
         self.onAction = onAction
         let engine = SmartRewriteEngine.shared
 
+        // Shows the text exactly as it will be pasted (bold, paragraphs, lists), not Markdown.
+        let scroll = NSTextView.scrollableTextView()
+        let tv = scroll.documentView as! NSTextView
+        tv.isRichText = markdown
+        tv.allowsUndo = true
+        tv.textContainerInset = NSSize(width: 6, height: 8)
+        if markdown, let attr = RichText.attributed(text) {
+            tv.textStorage?.setAttributedString(attr)
+        } else {
+            tv.string = text
+            tv.font = NSFont.systemFont(ofSize: NSFont.systemFontSize)
+            tv.textColor = .textColor
+        }
+        textView = tv
+        let initial = tv.string
+
         let view = ReviewView(
-            text: text, original: original, changes: changes,
+            editor: scroll, original: original, changes: changes,
             showChanges: engine.reviewShowChanges, showOriginal: engine.reviewShowOriginal,
-            onInsert: { [weak self] edited in
-                self?.insert(edited, markdown: markdown, action: edited == text ? "inserted" : "edited")
+            onInsert: { [weak self] in
+                guard let self, let tv = self.textView else { return }
+                let action = tv.string == initial ? "inserted" : "edited"
+                if markdown {
+                    let attr = tv.attributedString()
+                    self.insert(action: action) { TextInserter.shared.insert(attributed: attr) }
+                } else {
+                    let plain = tv.string
+                    self.insert(action: action) { TextInserter.shared.insert(plain) }
+                }
             },
-            onInsertOriginal: { [weak self] in self?.insert(original, markdown: false, action: "original") },
-            onCopy: { [weak self] edited in
-                self?.onAction("copied")
+            onInsertOriginal: { [weak self] in
+                self?.insert(action: "original") { TextInserter.shared.insert(original) }
+            },
+            onCopy: { [weak self] in
+                guard let self, let tv = self.textView else { return }
+                self.onAction("copied")
                 NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(markdown ? RichText.plain(edited) : edited, forType: .string)
+                NSPasteboard.general.writeObjects([tv.attributedString()])
             },
             onCancel: { [weak self] in self?.close(parking: true) }
         )
@@ -51,17 +77,19 @@ final class ReviewPanelController: NSObject, NSWindowDelegate {
         NSApp.activate(ignoringOtherApps: true)
     }
 
-    private func insert(_ text: String, markdown: Bool, action: String) {
+    private func insert(action: String, paste: @escaping () -> Void) {
         let app = target
         close(parking: false)
         app?.activate()
         // Give the target a moment to take focus back — ⌘V sent earlier lands in our own app.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [onAction] in
-            AppLogger.log("[ReviewPanel] vkladám (\(text.count) znakov, \(action))")
-            TextInserter.shared.insert(text, markdown: markdown)
+            AppLogger.log("[ReviewPanel] vkladám (\(action))")
+            paste()
             onAction(action)
         }
     }
+
+    private var pendingText: String { textView?.string ?? "" }
 
     /// Cancel never throws the words away — they go to the ⌃⌥V slot like any unplaced text.
     private func close(parking: Bool) {
@@ -72,6 +100,7 @@ final class ReviewPanelController: NSObject, NSWindowDelegate {
         if parking {
             onAction("cancelled")
             DictationMemoryStore.shared.store(pendingText)
+            textView = nil
             AppLogger.log("[ReviewPanel] zrušené — text v pamäti (⌃⌥V)")
             target?.activate()
         }
@@ -89,14 +118,14 @@ final class ReviewPanelController: NSObject, NSWindowDelegate {
 }
 
 private struct ReviewView: View {
-    @State var text: String
+    let editor: NSScrollView
     let original: String
     let changes: String
     let showChanges: Bool
     let showOriginal: Bool
-    let onInsert: (String) -> Void
+    let onInsert: () -> Void
     let onInsertOriginal: () -> Void
-    let onCopy: (String) -> Void
+    let onCopy: () -> Void
     let onCancel: () -> Void
 
     var body: some View {
@@ -106,10 +135,8 @@ private struct ReviewView: View {
                     .font(Theme.body(12)).foregroundStyle(Theme.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            // ponytail: Markdown shown as-is (**tučné**) — a rich-text editor when users ask for it.
-            TextEditor(text: $text)
-                .font(Theme.body(14))
-                .frame(minHeight: 160)
+            HostedView(view: editor)
+                .frame(minHeight: 180)
                 .overlay(RoundedRectangle(cornerRadius: 6).stroke(Theme.border))
             if showOriginal {
                 DisclosureGroup("Pôvodný prepis") {
@@ -123,10 +150,10 @@ private struct ReviewView: View {
             }
             HStack {
                 Button("Zrušiť", action: onCancel).keyboardShortcut(.cancelAction)
-                Button("Kopírovať") { onCopy(text) }
+                Button("Kopírovať", action: onCopy)
                 Spacer()
                 if showOriginal { Button("Vložiť pôvodný", action: onInsertOriginal) }
-                Button("Vložiť  ⌘↩") { onInsert(text) }
+                Button("Vložiť  ⌘↩", action: onInsert)
                     .keyboardShortcut(.return, modifiers: .command)
                     .buttonStyle(.borderedProminent)
             }
@@ -136,4 +163,10 @@ private struct ReviewView: View {
         .frame(width: 540)
         .background(Theme.surfaceBase)
     }
+}
+
+private struct HostedView: NSViewRepresentable {
+    let view: NSView
+    func makeNSView(context: Context) -> NSView { view }
+    func updateNSView(_ nsView: NSView, context: Context) {}
 }

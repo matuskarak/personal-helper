@@ -83,6 +83,38 @@ final class TextInserter: Sendable {
         }
     }
 
+    /// Pastes styled text as edited in the review window — RTF for native editors, HTML for
+    /// browsers, plain text for everything else. No Markdown round-trip.
+    @MainActor
+    func insert(attributed attr: NSAttributedString) {
+        let full = NSRange(location: 0, length: attr.length)
+        // Theme text colour is for the editor only — the target app picks its own.
+        let clean = NSMutableAttributedString(attributedString: attr)
+        clean.removeAttribute(.foregroundColor, range: full)
+        let pasteboard = NSPasteboard.general
+        let saved: [(NSPasteboard.PasteboardType, Data)] = (pasteboard.types ?? []).compactMap { t in
+            pasteboard.data(forType: t).map { (t, $0) }
+        }
+        pasteboard.clearContents()
+        pasteboard.setString(clean.string, forType: .string)
+        if let rtf = try? clean.data(from: full, documentAttributes: [.documentType: NSAttributedString.DocumentType.rtf]) {
+            pasteboard.setData(rtf, forType: .rtf)
+        }
+        if let html = try? clean.data(from: full, documentAttributes: [.documentType: NSAttributedString.DocumentType.html]) {
+            pasteboard.setData(html, forType: .html)
+        }
+        let src = CGEventSource(stateID: .hidSystemState)
+        let down = CGEvent(keyboardEventSource: src, virtualKey: 9, keyDown: true)
+        let up = CGEvent(keyboardEventSource: src, virtualKey: 9, keyDown: false)
+        down?.flags = .maskCommand; up?.flags = .maskCommand
+        down?.post(tap: .cghidEventTap); up?.post(tap: .cghidEventTap)
+        AppLogger.log("[TextInserter] insert(attributed \(clean.length) chars) — ⌘V posted")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+            NSPasteboard.general.clearContents()
+            for (t, d) in saved { NSPasteboard.general.setData(d, forType: t) }
+        }
+    }
+
     /// Types text directly into the focused field via CGEvent Unicode injection — no clipboard used.
     /// Works universally (native + browser). Used for realtime live-insert deltas.
     @MainActor
@@ -155,9 +187,17 @@ enum RichText {
         }.joined(separator: "\n")
     }
 
-    /// RTF with the system font — HTML imported by AppKit would otherwise come out in Times.
     @MainActor
     static func rtf(_ md: String) -> Data? {
+        guard let attr = attributed(md) else { return nil }
+        return try? attr.data(from: NSRange(location: 0, length: attr.length),
+                              documentAttributes: [.documentType: NSAttributedString.DocumentType.rtf])
+    }
+
+    /// Styled text with the system font — HTML imported by AppKit would otherwise come out in
+    /// Times. Also what the review window edits, so it shows exactly what will be pasted.
+    @MainActor
+    static func attributed(_ md: String) -> NSMutableAttributedString? {
         guard let data = html(md).data(using: .utf8),
               let attr = try? NSMutableAttributedString(data: data, options: [
                 .documentType: NSAttributedString.DocumentType.html,
@@ -170,7 +210,8 @@ enum RichText {
             let size = (old?.pointSize ?? 12) > 14 ? 15.0 : NSFont.systemFontSize   // <h3> stays a bit larger
             attr.addAttribute(.font, value: bold ? NSFont.boldSystemFont(ofSize: size) : NSFont.systemFont(ofSize: size), range: range)
         }
-        return try? attr.data(from: full, documentAttributes: [.documentType: NSAttributedString.DocumentType.rtf])
+        attr.addAttribute(.foregroundColor, value: NSColor.textColor, range: full)   // readable in dark mode
+        return attr
     }
 
     private static func listItem(_ line: String) -> (tag: String, text: String)? {
