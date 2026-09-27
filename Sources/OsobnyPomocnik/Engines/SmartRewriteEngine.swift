@@ -51,7 +51,11 @@ final class SmartRewriteEngine {
         reviewMode == .always || (reviewMode == .aiChats && category == .aiChat)
     }
 
-    struct Result { let text: String; let changes: String; var target = "none"; var issues: [String] = [] }
+    struct Result {
+        let text: String; let changes: String; var target = "none"; var issues: [String] = []
+        /// What the model saw the target to be — only differs from the input for `.generic`.
+        var category: AppCategory = .generic
+    }
 
     /// Smart e-mail signature (2026-09-27): plain text appended to e-mails in place of a
     /// dictated name. Only for the `.email` category.
@@ -130,11 +134,13 @@ final class SmartRewriteEngine {
             "žiadosť a NIE odmietnutie typu \"Nemôžem to spraviť\"."
         // Profile instructions come last and win — a user's own profile beats the built-in rules.
         let profileRules = profile.instructions.isEmpty ? nil : "Pokyny pre túto appku (majú prednosť):\n\(profile.instructions)"
-        let signatureRule = signature(for: category).map {
-            "Na úplný koniec e-mailu daj pozdrav (ak bol nadiktovaný) a pod neho PRESNE tento podpis, " +
+        // For an unknown target the model decides whether it's an e-mail — the rule is conditional.
+        let signatureRule = signature(for: category == .generic ? .email : category).map {
+            (category == .generic ? "Ak je cieľ e-mail: " : "") + "Na úplný koniec e-mailu daj pozdrav (ak bol nadiktovaný) a pod neho PRESNE tento podpis, " +
             "na samostatných riadkoch, namiesto nadiktovaného mena:\n\($0)"
         }
-        let promptRules = category.tunesPrompts ? PromptRulebook.prompt : nil
+        let promptRules = category.tunesPrompts ? PromptRulebook.prompt
+            : category == .generic ? "Ak je cieľ AI nástroj (aiChat alebo code), platí navyše:\n" + PromptRulebook.prompt : nil
         let systemPrompt = ([hardRule, preamble, category.formattingRules, promptRules, signatureRule, profileRules] as [String?])
             .compactMap { $0 }.joined(separator: "\n\n")
         let preambleSource = !visionPromptEnabled ? "vypnutý" :
@@ -165,9 +171,10 @@ final class SmartRewriteEngine {
                             "changes_short_sk": ["type": "string",
                                                  "description": "Čo si zmenil, po slovensky, najviac 12 slov, napr. 'doplnená interpunkcia, odseky, zvýraznená suma'."],
                             "target_type": ["type": "string", "enum": PromptRulebook.targets],
+                            "detected_category": ["type": "string", "enum": AppCategory.allCases.map(\.rawValue)],
                             "issues": ["type": "array", "items": ["type": "string", "enum": PromptRulebook.issueTags]]
                         ],
-                        "required": ["corrected_text_same_content", "changes_short_sk", "target_type", "issues"],
+                        "required": ["corrected_text_same_content", "changes_short_sk", "target_type", "detected_category", "issues"],
                         "additionalProperties": false
                     ]
                 ]
@@ -212,11 +219,14 @@ final class SmartRewriteEngine {
 
         var out = text.trimmingCharacters(in: .whitespacesAndNewlines)
         // The model may drop it — the signature is the user's own text, so it's guaranteed here.
-        if let sig = signature(for: category), !out.contains(sig) { out += "\n\n" + sig }
         let target = (parsed["target_type"] as? String) ?? "none"
         let issues = (parsed["issues"] as? [String]) ?? []
-        AppLogger.log("[SmartRewriteEngine] target=\(target) issues=\(issues.joined(separator: ","))")  // tags only, never text
-        return Result(text: out, changes: (parsed["changes_short_sk"] as? String) ?? "", target: target, issues: issues)
+        let detected = category == .generic
+            ? AppCategory(rawValue: parsed["detected_category"] as? String ?? "") ?? .generic : category
+        if let sig = signature(for: detected), !out.contains(sig) { out += "\n\n" + sig }
+        AppLogger.log("[SmartRewriteEngine] category=\(detected.rawValue) target=\(target) issues=\(issues.joined(separator: ","))")  // tags only, never text
+        return Result(text: out, changes: (parsed["changes_short_sk"] as? String) ?? "", target: target, issues: issues,
+                      category: detected)
     }
 
     enum SmartRewriteError: LocalizedError {

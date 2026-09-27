@@ -51,7 +51,7 @@ enum AppCategory: String, Codable, CaseIterable, Sendable {
                         "md.obsidian", "net.shinyfrog.bear", "com.lukilabs.lukiapp"],
             .code: ["com.microsoft.VSCode", "com.todesktop.230313mzl4w4u92", "com.apple.dt.Xcode",
                     "com.apple.Terminal", "com.googlecode.iterm2", "com.sublimetext.4"],
-            .aiChat: ["com.openai.chat", "com.anthropic.claudefordesktop", "ai.perplexity.mac"],
+            .aiChat: ["com.openai.chat", "com.openai.codex", "com.anthropic.claudefordesktop", "ai.perplexity.mac"],
         ]
         if let hit = byBundle.first(where: { $0.value.contains(id) }) { return hit.key }
         if id.hasPrefix("com.jetbrains.") { return .code }
@@ -70,8 +70,21 @@ enum AppCategory: String, Codable, CaseIterable, Sendable {
     /// The model answers in a small Markdown subset that `RichText` turns into rich paste.
     var formattingRules: String {
         let common = "Formát: Markdown, len **tučné**, odrážky \"- \", číslovaný zoznam \"1. \" a nadpis \"## \". " +
-            "Hlasové pokyny ako „toto zvýrazni“, „zvýrazni to“, „dôležité:“, „nový odsek“, „odrážka“ vykonaj " +
-            "a samotný pokyn do textu NEdávaj. Nevymýšľaj oslovenie, pozdrav ani podpis, ktoré neboli nadiktované."
+            "Hlasové pokyny ako „toto zvýrazni“, „zvýrazni to“, „dôležité:“, „toto je dôležité zdôrazniť“, „nový odsek“, " +
+            "„odrážka“ (aj voľnejšie formulácie s rovnakým zámerom) vykonaj a samotný pokyn do textu NEdávaj. " +
+            "Nevymýšľaj oslovenie, pozdrav ani podpis, ktoré neboli nadiktované."
+        guard self != .generic else {
+            // Unknown target (browser tab title wrong, e.g. Arc reported another tab over Gmail
+            // 2026-09-27) — let the model tell from the screenshot and report it back.
+            let byTarget = [AppCategory.email, .messaging, .document, .aiChat, .code]
+                .map { "- \($0.rawValue): \($0.specificRules)" }.joined(separator: "\n")
+            return common + "\nPodľa screenshotu a textu urči, kam sa píše (detected_category), a použi pravidlá pre daný cieľ:\n" +
+                byTarget + "\n- generic (nevieš určiť): formátuj striedmo, odseky pri dlhšom texte, odrážky pri výpočte."
+        }
+        return self == .code ? specificRules : common + " " + specificRules
+    }
+
+    private var specificRules: String {
         let specific: String
         switch self {
         case .email:
@@ -86,11 +99,11 @@ enum AppCategory: String, Codable, CaseIterable, Sendable {
         case .aiChat:
             specific = "Cieľ je prompt pre AI: žiadne tučné ani nadpisy; odseky a odrážky len keď prompt obsahuje viac požiadaviek."
         case .code:
-            return "Cieľ je kód alebo terminál: žiadny Markdown, len čistý text."
+            specific = "Cieľ je kód alebo terminál: žiadny Markdown, len čistý text."
         case .generic:
             specific = "Formátuj striedmo: odseky pri dlhšom texte, odrážky pri výpočte, tučné len na výslovný pokyn."
         }
-        return common + " " + specific
+        return specific
     }
 
     /// Smart úroveň 2 (2026-09-27): dictating into an AI tool (or a coding agent) → rewrite

@@ -10,20 +10,14 @@ import Observation
 /// Install ID is a random UUID minted on first launch — not tied to a name or email, but it
 /// lets a tester ask "delete my rows". Timestamps are rounded to the hour.
 ///
-/// Sink is an n8n webhook feeding a Data Table (no backend of our own yet). Events queue
-/// locally and flush in one POST; a failed flush keeps the queue for next time.
+/// Sink is our own licence backend (Ozvena-licencie, `api/telemetry.php` → SQLite `events`);
+/// the n8n webhook is retired (2026-09-27). Events queue locally and flush in one POST; a
+/// failed flush keeps the queue for next time.
 @Observable
 @MainActor
 final class Telemetry {
     static let shared = Telemetry()
 
-    // ponytail: public repo, so this token is public too — it only lets someone spam rows,
-    // not read them. Rotate here + in the n8n webhook filter if it gets abused.
-    private static let endpoint = URL(string: "https://example.invalid/removed")!
-    private static let token = "REMOVED"
-    // Duplicitný príjemca — rovnaký anonymný envelope, aj do vlastného licenčného backendu
-    // (Ozvena-licencie), nech sa dáta zbierajú aj tam pre admin dashboard. Fire-and-forget:
-    // n8n zostáva zdroj pravdy pre retry frontu, tento druhý POST sa neopakuje pri zlyhaní.
     private static let backendEndpoint = URL(string: "https://paleturquoise-hedgehog-719343.hostingersite.com/api/telemetry.php")!
     private static let maxQueued = 500
 
@@ -146,18 +140,9 @@ final class Telemetry {
         ]
         guard let body = try? JSONSerialization.data(withJSONObject: envelope) else { return }
 
-        Task.detached(priority: .background) {
-            var backendReq = URLRequest(url: Self.backendEndpoint, timeoutInterval: 15)
-            backendReq.httpMethod = "POST"
-            backendReq.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            backendReq.httpBody = body
-            _ = try? await URLSession.shared.data(for: backendReq)
-        }
-
-        var req = URLRequest(url: Self.endpoint, timeoutInterval: 15)
+        var req = URLRequest(url: Self.backendEndpoint, timeoutInterval: 15)
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        req.setValue(Self.token, forHTTPHeaderField: "x-op-token")
         req.httpBody = body
         do {
             let (_, resp) = try await URLSession.shared.data(for: req)

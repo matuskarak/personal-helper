@@ -1238,14 +1238,14 @@ final class DictationEngine {
                         result = raw
                     } else {
                         result = output
-                        lastResultIsMarkdown = capturedCategory.allowsRichText
+                        lastResultIsMarkdown = rewrite.category.allowsRichText
                         lastRawTranscript = raw
                         lastSmartChanges = rewrite.changes
                         lastSmartTarget = rewrite.target
                         lastSmartIssues = rewrite.issues
-                        lastSmartCategory = capturedCategory
+                        lastSmartCategory = rewrite.category
                         lastWasSmart = true
-                        lastResultNeedsReview = SmartRewriteEngine.shared.needsReview(capturedCategory)
+                        lastResultNeedsReview = SmartRewriteEngine.shared.needsReview(rewrite.category)
                     }
                     AppLogger.log("[DictationEngine] Smart rewrite done — outChars=\(output.count), \(Int(Date().timeIntervalSince(t0) * 1000))ms")
                 } catch {
