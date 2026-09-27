@@ -15,3 +15,5 @@
 - Prehľad ukazuje, koľko ticha sa z nahrávok vystrihlo a koľko sa tým ušetrilo na prepise.
 - Kontrola pred vložením (Smart): voliteľne sa výsledok najprv ukáže v okne, kde ho upravíš, vložíš (⌘↩), vložíš pôvodný prepis alebo zrušíš. V nastaveniach si zvolíš nikdy / len v AI chatoch / vždy a či chceš vidieť, čo AI zmenila, a pôvodný text.
 - Smart v AI appkách (ChatGPT, Claude, Cursor…) upraví nadiktovaný prompt podľa typu modelu — iné pravidlá pre textový chat, premýšľajúci model, obrázky, video a programovacieho agenta. Stačí povedať napr. „promptujem pre image model“.
+- Hlasové pokyny v Smart („toto zvýrazni“, „daj to tučne“, „nový odsek“, „odrážka“, „začni tučné … koniec tučného“) sa spoľahlivo vykonajú a samotný pokyn už nezostane v texte.
+- Okno kontroly pred vložením má nový vzhľad podľa dizajnu Ozveny.
