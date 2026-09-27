@@ -4,19 +4,26 @@ import ApplicationServices
 /// Used to decide whether dictated text should be auto-inserted or saved to memory
 /// instead of silently pasting into nothing.
 enum FocusValidator {
-    static func hasEditableFocus() -> Bool {
+    /// `nil` = AX couldn't answer. Electron/Chromium apps (Claude, Slack, Arc…) intermittently
+    /// fail the focused-element query even with a caret in a field (2026-09-24: Claude desktop,
+    /// user pressed ⌃⌥V 4 s later). Unknown must not mean "no field" — callers paste anyway.
+    static func hasEditableFocus() -> Bool? {
         let systemWide = AXUIElementCreateSystemWide()
 
         var focusedAppRef: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(systemWide, kAXFocusedApplicationAttribute as CFString, &focusedAppRef) == .success,
-              let focusedAppRef, CFGetTypeID(focusedAppRef) == AXUIElementGetTypeID()
-        else { return false }
+        let appErr = AXUIElementCopyAttributeValue(systemWide, kAXFocusedApplicationAttribute as CFString, &focusedAppRef)
+        guard appErr == .success, let focusedAppRef, CFGetTypeID(focusedAppRef) == AXUIElementGetTypeID() else {
+            AppLogger.log("[FocusValidator] focused app nezistená (AX \(appErr.rawValue))")
+            return nil
+        }
         let focusedApp = focusedAppRef as! AXUIElement
 
         var focusedElementRef: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(focusedApp, kAXFocusedUIElementAttribute as CFString, &focusedElementRef) == .success,
-              let focusedElementRef, CFGetTypeID(focusedElementRef) == AXUIElementGetTypeID()
-        else { return false }
+        let elErr = AXUIElementCopyAttributeValue(focusedApp, kAXFocusedUIElementAttribute as CFString, &focusedElementRef)
+        guard elErr == .success, let focusedElementRef, CFGetTypeID(focusedElementRef) == AXUIElementGetTypeID() else {
+            AppLogger.log("[FocusValidator] focused element nezistený (AX \(elErr.rawValue))")
+            return nil
+        }
         let element = focusedElementRef as! AXUIElement
 
         // Known editable roles cover most native macOS text fields/areas.
@@ -41,6 +48,7 @@ enum FocusValidator {
             return true
         }
 
+        AppLogger.log("[FocusValidator] zaostrený prvok nie je editovateľný (role: \(roleRef as? String ?? "?"))")
         return false
     }
 

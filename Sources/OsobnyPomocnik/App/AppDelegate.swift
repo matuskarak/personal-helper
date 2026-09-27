@@ -378,6 +378,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
+        // A transcript that took over 20 s ("Server neodpovedá" was already shown) and whose
+        // target app is no longer in front would land in the wrong window — park it instead.
+        let frontID = NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? ""
+        if engine.lastTranscriptionLatencyMs > 20_000, !engine.lastTargetBundleID.isEmpty,
+           frontID != engine.lastTargetBundleID {
+            DictationMemoryStore.shared.store(text)
+            AppLogger.log("[AppDelegate] \(label) — neskorý prepis (\(engine.lastTranscriptionLatencyMs) ms), iná appka navrchu → do pamäte (\(text.count) znakov)")
+            engine.showNotice("Prepis dorazil neskoro a medzitým si prepol appku. Text je v pamäti (⌃⌥V).")
+            return
+        }
+
         switch TextInserter.shared.insertOrRemember(text) {
         case .inserted:
             AppLogger.log("[AppDelegate] \(label) — vložené (\(text.count) znakov)")

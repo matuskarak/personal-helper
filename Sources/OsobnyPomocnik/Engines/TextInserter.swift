@@ -14,10 +14,17 @@ final class TextInserter: Sendable {
     /// saves the text to DictationMemoryStore instead of pasting into nothing.
     @MainActor
     func insertOrRemember(_ text: String) -> InsertOutcome {
-        guard FocusValidator.hasEditableFocus() else {
+        switch FocusValidator.hasEditableFocus() {
+        case false:
             DictationMemoryStore.shared.store(text)
             AppLogger.log("[TextInserter] No editable field focused — saved \(text.count) chars to memory")
             return .savedToMemory
+        case nil:
+            // Can't tell — paste, and keep a copy in case the paste went nowhere.
+            DictationMemoryStore.shared.store(text)
+            AppLogger.log("[TextInserter] focus neznámy — vkladám a kópiu nechávam v pamäti (⌃⌥V)")
+        case true:
+            break
         }
         insert(text)
         return .inserted

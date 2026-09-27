@@ -435,6 +435,11 @@ final class DictationEngine {
     private var capturedProfile:    AppProfile?
     private var capturedAppName:    String = ""
     private var capturedBundleID:   String = ""
+    /// App the finished dictation was aimed at — read by AppDelegate to avoid pasting a very
+    /// late transcript into a different app.
+    private(set) var lastTargetBundleID = ""
+    private var primaryUpload: (id: UUID, task: Task<String, Error>)?
+    private var retryingPending: Set<UUID> = []
     private var contextCaptureTask: Task<Void, Never>?
     /// History entry id for the dictation currently being transcribed — see stopAndTranscribe.
     private var currentEntryID = UUID()
@@ -1041,6 +1046,7 @@ final class DictationEngine {
     /// `smart` comes from the STOP shortcut: same shortcut as start = raw insert,
     /// Smart shortcut = rewrite with screen context before inserting.
     func stopAndTranscribe(smart: Bool = false) async -> String? {
+        lastTranscriptionLatencyMs = 0  // never let a previous dictation's latency leak into this one
         if smart {
             if liveInsertActive || didLiveInsert {
                 // Live insert already typed the raw text into the field as it was spoken —
@@ -1226,6 +1232,7 @@ final class DictationEngine {
 
         let appName  = capturedAppName
         let bundleID = capturedBundleID
+        lastTargetBundleID = bundleID
         let category = capturedProfile?.category ?? .generic
         let screenshotJPEG = SmartRewriteEngine.shared.saveScreenshotsToHistory
             ? capturedScreenshotJPEG : nil
@@ -1296,9 +1303,17 @@ final class DictationEngine {
         }
         defer { watchdog.cancel() }
 
+        // Held so a menu retry of this same recording can cancel it: otherwise both finish,
+        // the recording is transcribed (and paid for) twice, and this one pastes into
+        // whatever is frontmost minutes later (2026-09-24: 91 s late into Claude).
+        let model = batchModel, key = batchAPIKey
+        let uploadTask = Task { try await Self.upload(wav: wav, model: model, keywords: keywords, apiKey: key) }
+        if let pending { primaryUpload = (pending.id, uploadTask) }
+        defer { if primaryUpload?.id == pending?.id { primaryUpload = nil } }
+
         do {
             let uploadStart = Date()
-            let text = try await Self.upload(wav: wav, model: batchModel, keywords: keywords, apiKey: batchAPIKey)
+            let text = try await uploadTask.value
             lastTranscriptionLatencyMs = Int(Date().timeIntervalSince(uploadStart) * 1000)
             watchdog.cancel()
             // An empty transcript over audible speech is the model failing to hear it, not the
@@ -1319,6 +1334,10 @@ final class DictationEngine {
             startShadowTranscription(wav: wav, keywords: keywords, seconds: seconds)
             startTrimABTest(rawPCM: rawPCM, keywords: keywords, seconds: seconds)
             return text
+        } catch where uploadTask.isCancelled {
+            watchdog.cancel()
+            AppLogger.log("[DictationEngine] pôvodný upload zrušený — nahrávku prevzalo opakovanie z menu")
+            return ""
         } catch {
             AppLogger.log("[DictationEngine] ⚠️ Batch transcription failed: \(error)")
             Telemetry.shared.dictation(seconds: seconds, metrics: nil, model: batchModel, mode: "batch",
@@ -1416,6 +1435,18 @@ final class DictationEngine {
             PendingDictationStore.shared.remove(item)
             return
         }
+        guard !retryingPending.contains(item.id) else {
+            AppLogger.log("[DictationEngine] retryPending \(item.id) — už beží, ignorujem")
+            showNotice("Prepis tejto nahrávky už prebieha…")
+            return
+        }
+        retryingPending.insert(item.id)
+        defer { retryingPending.remove(item.id) }
+        if let primary = primaryUpload, primary.id == item.id {
+            AppLogger.log("[DictationEngine] retryPending — ruším pôvodný upload tej istej nahrávky")
+            primary.task.cancel()
+            primaryUpload = nil
+        }
         AppLogger.log("[DictationEngine] retryPending \(item.id) — \(wav.count) B")
         isTranscribing = true
         defer { isTranscribing = false }
@@ -1471,7 +1502,9 @@ final class DictationEngine {
     private static func upload(wav: Data, model: String, keywords: [String], apiKey: String) async throws -> String {
         var lastError: Error = TranscriptionError.badResponse
         for attempt in 1...3 {
+            try Task.checkCancellation()  // a menu retry took this recording over — stop here
             if attempt > 1 { try? await Task.sleep(for: .seconds(attempt == 2 ? 1 : 4)) }
+            try Task.checkCancellation()
             do {
                 return try await uploadOnce(wav: wav, model: model, keywords: keywords, apiKey: apiKey)
             } catch let error as TranscriptionError where !error.isRetryable {
@@ -1834,7 +1867,7 @@ final class DictationEngine {
                 isWaitingForServer = false
                 if transcriptionMode == .realtime, liveInsertEnabled, !isSmartMode {
                     if !liveInsertActive {
-                        liveInsertActive = FocusValidator.hasEditableFocus()
+                        liveInsertActive = FocusValidator.hasEditableFocus() ?? false  // ponytail: live typing do neznáma môže spúšťať skratky appky — konzervatívne
                         if liveInsertActive {
                             AppLogger.log("[DictationEngine] Live-insert active — focused field confirmed")
                         }
