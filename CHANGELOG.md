@@ -13,3 +13,5 @@
 - Smart diktovanie (⌘⇧A) formátuje podľa appky: e-mail dostane oslovenie, odseky, pozdrav a tučne zvýraznené dôležité veci, chat zostane krátky, poznámky majú odrážky. Hlasom stačí povedať „toto zvýrazni“ alebo „dôležité:“. Do Mailu, Gmailu či Notes sa vloží už naformátovaný text.
 - Podpis v e-mailoch: v Nastaveniach → Smart ukončenie si nastavíš vlastný podpis, ktorý Smart pridá na koniec e-mailu.
 - Prehľad ukazuje, koľko ticha sa z nahrávok vystrihlo a koľko sa tým ušetrilo na prepise.
+- Kontrola pred vložením (Smart): voliteľne sa výsledok najprv ukáže v okne, kde ho upravíš, vložíš (⌘↩), vložíš pôvodný prepis alebo zrušíš. V nastaveniach si zvolíš nikdy / len v AI chatoch / vždy a či chceš vidieť, čo AI zmenila, a pôvodný text.
+- Smart v AI appkách (ChatGPT, Claude, Cursor…) upraví nadiktovaný prompt podľa typu modelu — iné pravidlá pre textový chat, premýšľajúci model, obrázky, video a programovacieho agenta. Stačí povedať napr. „promptujem pre image model“.

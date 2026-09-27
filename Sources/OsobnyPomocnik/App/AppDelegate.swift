@@ -400,6 +400,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
+        let smartTelemetry: (String) -> Void = { [engine] action in
+            guard engine.lastWasSmart else { return }
+            Telemetry.shared.smart(category: engine.lastSmartCategory, target: engine.lastSmartTarget,
+                                   issues: engine.lastSmartIssues, action: action)
+        }
+        if engine.lastResultNeedsReview {
+            AppLogger.log("[AppDelegate] \(label) — Smart výsledok ide do okna kontroly")
+            DictationIndicatorController.shared.hide()
+            ReviewPanelController.shared.present(text: text, original: engine.lastRawTranscript,
+                                                 changes: engine.lastSmartChanges,
+                                                 markdown: engine.lastResultIsMarkdown,
+                                                 onAction: { action in
+                                                     if ["inserted", "edited", "original"].contains(action) { DictationSounds.playInserted() }
+                                                     smartTelemetry(action)
+                                                 })
+            return
+        }
+
+        smartTelemetry("direct")
         switch TextInserter.shared.insertOrRemember(text, markdown: engine.lastResultIsMarkdown) {
         case .inserted:
             AppLogger.log("[AppDelegate] \(label) — vložené (\(text.count) znakov)")

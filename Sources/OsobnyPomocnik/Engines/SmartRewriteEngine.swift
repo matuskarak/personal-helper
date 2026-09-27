@@ -36,6 +36,23 @@ final class SmartRewriteEngine {
         didSet { UserDefaults.standard.set(saveScreenshotsToHistory, forKey: "smart.saveScreenshotsToHistory") }
     }
 
+    /// Review window before insert (2026-09-27): never / AI chats only / always.
+    enum ReviewMode: String, CaseIterable { case never, aiChats, always }
+    var reviewMode: ReviewMode {
+        didSet { UserDefaults.standard.set(reviewMode.rawValue, forKey: "smart.reviewMode") }
+    }
+    var reviewShowChanges: Bool {
+        didSet { UserDefaults.standard.set(reviewShowChanges, forKey: "smart.reviewShowChanges") }
+    }
+    var reviewShowOriginal: Bool {
+        didSet { UserDefaults.standard.set(reviewShowOriginal, forKey: "smart.reviewShowOriginal") }
+    }
+    func needsReview(_ category: AppCategory) -> Bool {
+        reviewMode == .always || (reviewMode == .aiChats && category == .aiChat)
+    }
+
+    struct Result { let text: String; let changes: String; var target = "none"; var issues: [String] = [] }
+
     /// Smart e-mail signature (2026-09-27): plain text appended to e-mails in place of a
     /// dictated name. Only for the `.email` category.
     var emailSignatureEnabled: Bool {
@@ -68,6 +85,9 @@ final class SmartRewriteEngine {
         let stored = UserDefaults.standard.string(forKey: "smart.visionPromptOverride")
         self.visionPromptOverride = (stored?.isEmpty ?? true) ? Self.defaultVisionPreamble : stored!
         self.saveScreenshotsToHistory = UserDefaults.standard.bool(forKey: "smart.saveScreenshotsToHistory")
+        self.reviewMode = ReviewMode(rawValue: UserDefaults.standard.string(forKey: "smart.reviewMode") ?? "") ?? .never
+        self.reviewShowChanges = UserDefaults.standard.object(forKey: "smart.reviewShowChanges") as? Bool ?? true
+        self.reviewShowOriginal = UserDefaults.standard.object(forKey: "smart.reviewShowOriginal") as? Bool ?? true
         self.emailSignatureEnabled = UserDefaults.standard.bool(forKey: "smart.emailSignatureEnabled")
         self.emailSignature = UserDefaults.standard.string(forKey: "smart.emailSignature") ?? ""
     }
@@ -78,7 +98,7 @@ final class SmartRewriteEngine {
         profile: AppProfile,
         category: AppCategory,
         apiKey: String
-    ) async throws -> String {
+    ) async throws -> Result {
         var content: [[String: Any]] = [
             ["type": "text", "text": "<text_to_correct>\n\(transcript)\n</text_to_correct>"]
         ]
@@ -114,7 +134,8 @@ final class SmartRewriteEngine {
             "Na úplný koniec e-mailu daj pozdrav (ak bol nadiktovaný) a pod neho PRESNE tento podpis, " +
             "na samostatných riadkoch, namiesto nadiktovaného mena:\n\($0)"
         }
-        let systemPrompt = ([hardRule, preamble, category.formattingRules, signatureRule, profileRules] as [String?])
+        let promptRules = category.tunesPrompts ? PromptRulebook.prompt : nil
+        let systemPrompt = ([hardRule, preamble, category.formattingRules, promptRules, signatureRule, profileRules] as [String?])
             .compactMap { $0 }.joined(separator: "\n\n")
         let preambleSource = !visionPromptEnabled ? "vypnutý" :
             (visionPromptOverride == Self.defaultVisionPreamble ? "predvolený" : "vlastný")
@@ -139,9 +160,14 @@ final class SmartRewriteEngine {
                     "schema": [
                         "type": "object",
                         "properties": [
-                            "corrected_text_same_content": ["type": "string"]
+                            "corrected_text_same_content": ["type": "string"],
+                            // Shown in the review window; later the base for the engine's issue tags.
+                            "changes_short_sk": ["type": "string",
+                                                 "description": "Čo si zmenil, po slovensky, najviac 12 slov, napr. 'doplnená interpunkcia, odseky, zvýraznená suma'."],
+                            "target_type": ["type": "string", "enum": PromptRulebook.targets],
+                            "issues": ["type": "array", "items": ["type": "string", "enum": PromptRulebook.issueTags]]
                         ],
-                        "required": ["corrected_text_same_content"],
+                        "required": ["corrected_text_same_content", "changes_short_sk", "target_type", "issues"],
                         "additionalProperties": false
                     ]
                 ]
@@ -187,7 +213,10 @@ final class SmartRewriteEngine {
         var out = text.trimmingCharacters(in: .whitespacesAndNewlines)
         // The model may drop it — the signature is the user's own text, so it's guaranteed here.
         if let sig = signature(for: category), !out.contains(sig) { out += "\n\n" + sig }
-        return out
+        let target = (parsed["target_type"] as? String) ?? "none"
+        let issues = (parsed["issues"] as? [String]) ?? []
+        AppLogger.log("[SmartRewriteEngine] target=\(target) issues=\(issues.joined(separator: ","))")  // tags only, never text
+        return Result(text: out, changes: (parsed["changes_short_sk"] as? String) ?? "", target: target, issues: issues)
     }
 
     enum SmartRewriteError: LocalizedError {

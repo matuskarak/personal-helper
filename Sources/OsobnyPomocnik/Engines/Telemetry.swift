@@ -47,6 +47,12 @@ final class Telemetry {
         // quiet stretch. 0/0 on realtime and non-batch outcomes that don't track it.
         var silentSeconds = 0
         var longestSilenceSec = 0
+        // Smart (event "smart", 2026-09-27) — tags from a fixed list, never text. Optional so
+        // events queued by an older build still decode.
+        var target: String?          // PromptRulebook.targets
+        var issues: String?          // comma-joined PromptRulebook.issueTags
+        var action: String?          // direct | inserted | edited | original | cancelled | copied
+        var rulesVersion: String?
     }
 
     var isEnabled: Bool {
@@ -84,6 +90,18 @@ final class Telemetry {
         e.model = model ?? ""; e.mode = mode ?? ""; e.outcome = outcome
         e.latencyMs = latencyMs; e.category = category.rawValue
         e.silentSeconds = silentSeconds; e.longestSilenceSec = longestSilenceSeconds
+        record(e)
+    }
+
+    /// One row per Smart result: what the model found missing and what the user did with it —
+    /// the data for tuning the global prompts (Notion → Engine → globálne ladenie).
+    func smart(category: AppCategory, target: String, issues: [String], action: String) {
+        var e = Event(event: "smart", ts: Self.hourStamp())
+        e.category = category.rawValue
+        e.target = target
+        e.issues = issues.filter(PromptRulebook.issueTags.contains).joined(separator: ",")
+        e.action = action
+        e.rulesVersion = PromptRulebook.version
         record(e)
     }
 

@@ -437,6 +437,14 @@ final class DictationEngine {
     /// The last stopAndTranscribe() result is Smart-formatted Markdown for a rich-text target —
     /// AppDelegate pastes it as HTML/RTF instead of plain text.
     private(set) var lastResultIsMarkdown = false
+    /// Smart result the user wants to check before it's pasted (SmartRewriteEngine.reviewMode).
+    private(set) var lastResultNeedsReview = false
+    private(set) var lastRawTranscript = ""
+    private(set) var lastSmartChanges = ""
+    private(set) var lastSmartTarget = "none"
+    private(set) var lastSmartIssues: [String] = []
+    private(set) var lastSmartCategory: AppCategory = .generic
+    private(set) var lastWasSmart = false
     private var capturedAppName:    String = ""
     private var capturedBundleID:   String = ""
     /// App the finished dictation was aimed at — read by AppDelegate to avoid pasting a very
@@ -1066,6 +1074,8 @@ final class DictationEngine {
     /// Smart shortcut = rewrite with screen context before inserting.
     func stopAndTranscribe(smart: Bool = false) async -> String? {
         lastResultIsMarkdown = false
+        lastResultNeedsReview = false
+        lastWasSmart = false
         lastTranscriptionLatencyMs = 0  // never let a previous dictation's latency leak into this one
         if smart {
             if liveInsertActive || didLiveInsert {
@@ -1207,13 +1217,14 @@ final class DictationEngine {
                 let t0 = Date()
                 isRewriting = true
                 do {
-                    let output = try await SmartRewriteEngine.shared.rewrite(
+                    let rewrite = try await SmartRewriteEngine.shared.rewrite(
                         transcript: raw,
                         screenshotJPEG: capturedScreenshotJPEG,
                         profile: profile,
                         category: capturedCategory,
                         apiKey: openAIKey
                     )
+                    let output = rewrite.text
                     rewritten = output
                     // Safety net independent of prompt reliability: a refusal or an "I
                     // answered your question instead of correcting it" response is reliably
@@ -1228,6 +1239,13 @@ final class DictationEngine {
                     } else {
                         result = output
                         lastResultIsMarkdown = capturedCategory.allowsRichText
+                        lastRawTranscript = raw
+                        lastSmartChanges = rewrite.changes
+                        lastSmartTarget = rewrite.target
+                        lastSmartIssues = rewrite.issues
+                        lastSmartCategory = capturedCategory
+                        lastWasSmart = true
+                        lastResultNeedsReview = SmartRewriteEngine.shared.needsReview(capturedCategory)
                     }
                     AppLogger.log("[DictationEngine] Smart rewrite done — outChars=\(output.count), \(Int(Date().timeIntervalSince(t0) * 1000))ms")
                 } catch {

@@ -187,6 +187,20 @@ extension PreferencesView {
                 .nestedRow()
             }
             rowDivider
+            pickerRow(title: "Kontrola pred vložením", selection: $rewriteEngine.reviewMode) {
+                Text("Nikdy — vložiť hneď").tag(SmartRewriteEngine.ReviewMode.never)
+                Text("Len v AI chatoch").tag(SmartRewriteEngine.ReviewMode.aiChats)
+                Text("Vždy").tag(SmartRewriteEngine.ReviewMode.always)
+            }
+            if rewriteEngine.reviewMode != .never {
+                rowDivider
+                toggleRow(title: "Zobraziť, čo AI zmenila", isOn: $rewriteEngine.reviewShowChanges).nestedRow()
+                rowDivider
+                toggleRow(title: "Zobraziť pôvodný prepis",
+                          subtitle: "Aj s tlačidlom Vložiť pôvodný.",
+                          isOn: $rewriteEngine.reviewShowOriginal).nestedRow()
+            }
+            rowDivider
             toggleRow(title: "Podpis v e-mailoch",
                       subtitle: "Smart pridá na koniec e-mailu tvoj podpis (Mail, Outlook, Gmail…).",
                       isOn: $rewriteEngine.emailSignatureEnabled)

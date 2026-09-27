@@ -93,6 +93,10 @@ enum AppCategory: String, Codable, CaseIterable, Sendable {
         return common + " " + specific
     }
 
+    /// Smart úroveň 2 (2026-09-27): dictating into an AI tool (or a coding agent) → rewrite
+    /// into a better prompt for the target model type, and report what was missing.
+    var tunesPrompts: Bool { self == .aiChat || self == .code }
+
     /// Targets that get the rich (HTML/RTF) paste. AI chats and code take Markdown as plain text.
     var allowsRichText: Bool { self != .aiChat && self != .code }
 }
@@ -279,4 +283,32 @@ final class AppProfileStore {
             category: .aiChat
         )
     ]
+}
+
+// MARK: - Prompt rulebooks (Smart úroveň 2)
+
+/// What kind of model a dictated prompt is for. Rulebooks are per TYPE, not per vendor —
+/// research 2026-09-27 (Notion → Engine): reasoning-vs-chat and text-vs-image matter more than
+/// OpenAI-vs-Anthropic. ponytail: bundled here; move to remote config (like models.json) with
+/// `last_verified` + source per block once the rules need monthly updates without a release.
+enum PromptRulebook {
+    static let version = "2026-09-27"
+
+    static let targets = ["none", "textChat", "reasoning", "image", "video", "codeAgent"]
+
+    /// Fixed tag list — the only thing that ever leaves the Mac (telemetry), never the text.
+    static let issueTags = ["chyba_format_vystupu", "chyba_publikum", "chyba_kontext", "nejasny_ciel",
+                            "vyplnove_slova", "prilis_dlhe", "chybaju_obmedzenia", "chyba_styl",
+                            "chyba_kompozicia", "chyba_pomer_stran", "chyba_overenie"]
+
+    static let prompt = """
+    Text je prompt pre AI nástroj. Najprv urči target_type podľa screenshotu, appky a toho, čo používateľ     povedal (napr. „promptujem pre image model“ → image). Vetu, ktorou používateľ opisuje cieľový model,     použi len na výber pravidiel a do výsledku ju NEdávaj. Potom prompt uprav podľa pravidiel pre daný typ:
+    - textChat: úloha jasne na začiatku; kontext, ktorý používateľ povedal (pre koho, prečo); požadovaný     formát a dĺžka výstupu, ak ich spomenul; obmedzenia ako samostatné body; viac požiadaviek = očíslovaný zoznam.
+    - reasoning: cieľ, kritériá úspechu a obmedzenia; NEpridávaj „premýšľaj krok za krokom“ ani postup krokov.
+    - image: jeden súvislý popis bez konverzačných fráz — hlavný objekt, prostredie, štýl alebo médium,     kompozícia a uhol, svetlo, farby, pomer strán ak zaznel. Po anglicky len ak to používateľ chce.
+    - video: ako image + pohyb kamery a dej v čase po krokoch; dialógy oddelene v úvodzovkách.
+    - codeAgent: cieľ zmeny, dotknuté súbory/funkcie ak zazneli, očakávané správanie, ako to overiť, čo nemeniť;     technické názvy presne.
+    - none: nie je to prompt (poznámka, príkaz, kód) — len oprav text.
+    Nevymýšľaj nové fakty ani požiadavky. Čo v prompte podľa pravidiel chýba, NEdopĺňaj — uveď to v issues.
+    """
 }
