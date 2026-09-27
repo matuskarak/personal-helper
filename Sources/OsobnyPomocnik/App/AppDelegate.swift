@@ -35,6 +35,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         AppProfile.selfCheck()
         KeywordSuggestionEngine.selfCheck()
         SilenceTrimmer.selfCheck()
+        RichText.selfCheck()
         #endif
         // Assets are bundled by build-app.sh, not SPM — one line tells a tester's log whether they arrived.
         let fontsOK = ["AtkinsonHyperlegible-Regular", "BricolageGrotesque-SemiBold"].allSatisfy { NSFont(name: $0, size: 12) != nil }
@@ -399,7 +400,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
-        switch TextInserter.shared.insertOrRemember(text) {
+        switch TextInserter.shared.insertOrRemember(text, markdown: engine.lastResultIsMarkdown) {
         case .inserted:
             AppLogger.log("[AppDelegate] \(label) — vložené (\(text.count) znakov)")
             DictationSounds.playInserted()

@@ -433,6 +433,10 @@ final class DictationEngine {
     // the encode is ~50-150ms of main-actor work that used to sit between stop and insert.
     private var capturedScreenshotJPEG: Data?
     private var capturedProfile:    AppProfile?
+    private var capturedCategory:   AppCategory = .generic
+    /// The last stopAndTranscribe() result is Smart-formatted Markdown for a rich-text target —
+    /// AppDelegate pastes it as HTML/RTF instead of plain text.
+    private(set) var lastResultIsMarkdown = false
     private var capturedAppName:    String = ""
     private var capturedBundleID:   String = ""
     /// App the finished dictation was aimed at — read by AppDelegate to avoid pasting a very
@@ -700,6 +704,7 @@ final class DictationEngine {
         isSmartMode        = false  // decided by the STOP shortcut — see stopAndTranscribe(smart:)
         capturedScreenshotJPEG = nil
         capturedProfile    = nil
+        capturedCategory   = .generic
         capturedAppName    = ""
         capturedBundleID   = ""
         liveText          = ""
@@ -751,9 +756,13 @@ final class DictationEngine {
             self.capturedScreenshotJPEG = ctx.image?.jpegData(quality: 0.75)
             self.capturedAppName    = ctx.appName ?? ""
             self.capturedBundleID   = ctx.bundleID ?? ""
-            self.capturedProfile = AppProfileStore.shared.matchingProfile(
+            let profile = AppProfileStore.shared.matchingProfile(
                 bundleID: ctx.bundleID, windowTitle: ctx.windowTitle
             )
+            self.capturedProfile = profile
+            // The generic fallback profile says nothing about the target — infer it instead.
+            self.capturedCategory = profile.bundleID.isEmpty
+                ? AppCategory.infer(bundleID: ctx.bundleID, windowTitle: ctx.windowTitle) : profile.category
             AppLogger.log("[DictationEngine] context capture task finished — profile=\(self.capturedProfile?.displayName ?? "?") hasScreenshot=\(ctx.image != nil)")
         }
 
@@ -1056,6 +1065,7 @@ final class DictationEngine {
     /// `smart` comes from the STOP shortcut: same shortcut as start = raw insert,
     /// Smart shortcut = rewrite with screen context before inserting.
     func stopAndTranscribe(smart: Bool = false) async -> String? {
+        lastResultIsMarkdown = false
         lastTranscriptionLatencyMs = 0  // never let a previous dictation's latency leak into this one
         if smart {
             if liveInsertActive || didLiveInsert {
@@ -1201,6 +1211,7 @@ final class DictationEngine {
                         transcript: raw,
                         screenshotJPEG: capturedScreenshotJPEG,
                         profile: profile,
+                        category: capturedCategory,
                         apiKey: openAIKey
                     )
                     rewritten = output
@@ -1216,6 +1227,7 @@ final class DictationEngine {
                         result = raw
                     } else {
                         result = output
+                        lastResultIsMarkdown = capturedCategory.allowsRichText
                     }
                     AppLogger.log("[DictationEngine] Smart rewrite done — outChars=\(output.count), \(Int(Date().timeIntervalSince(t0) * 1000))ms")
                 } catch {
@@ -1244,7 +1256,7 @@ final class DictationEngine {
         let appName  = capturedAppName
         let bundleID = capturedBundleID
         lastTargetBundleID = bundleID
-        let category = capturedProfile?.category ?? .generic
+        let category = capturedCategory
         let screenshotJPEG = SmartRewriteEngine.shared.saveScreenshotsToHistory
             ? capturedScreenshotJPEG : nil
         let wasSmart = isSmartMode  // captured before the reset below — logged to history
@@ -1252,6 +1264,7 @@ final class DictationEngine {
         isSmartMode        = false
         capturedScreenshotJPEG = nil
         capturedProfile    = nil
+        capturedCategory   = .generic
         sessionProfile     = nil
         capturedAppName    = ""
         capturedBundleID   = ""

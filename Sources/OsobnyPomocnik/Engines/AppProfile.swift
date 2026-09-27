@@ -35,6 +35,66 @@ enum AppCategory: String, Codable, CaseIterable, Sendable {
         case .generic:   return "Používateľ diktuje text do aplikácie na Macu."
         }
     }
+
+    /// Category for an app without its own profile — bundle ID first, then the window title
+    /// (web apps all report as the browser). Source: Vyvoj/prieskum-appky-roly-2026-09.md.
+    /// ponytail: hardcoded list, move to remote config with the Smart rulebooks.
+    static func infer(bundleID: String?, windowTitle: String?) -> AppCategory {
+        let id = bundleID ?? ""
+        let byBundle: [AppCategory: Set<String>] = [
+            .email: ["com.apple.mail", "com.microsoft.Outlook", "com.readdle.smartemail-Mac",
+                     "org.mozilla.thunderbird", "it.bloop.airmail2"],
+            .messaging: ["com.tinyspeck.slackmacgap", "com.microsoft.teams2", "com.microsoft.teams",
+                         "net.whatsapp.WhatsApp", "com.apple.MobileSMS", "ru.keepcoder.Telegram",
+                         "com.hnc.Discord", "org.whispersystems.signal-desktop", "us.zoom.xos"],
+            .document: ["notion.id", "com.apple.Notes", "com.microsoft.Word", "com.apple.iWork.Pages",
+                        "md.obsidian", "net.shinyfrog.bear", "com.lukilabs.lukiapp"],
+            .code: ["com.microsoft.VSCode", "com.todesktop.230313mzl4w4u92", "com.apple.dt.Xcode",
+                    "com.apple.Terminal", "com.googlecode.iterm2", "com.sublimetext.4"],
+            .aiChat: ["com.openai.chat", "com.anthropic.claudefordesktop", "ai.perplexity.mac"],
+        ]
+        if let hit = byBundle.first(where: { $0.value.contains(id) }) { return hit.key }
+        if id.hasPrefix("com.jetbrains.") { return .code }
+
+        let title = (windowTitle ?? "").lowercased()
+        let byTitle: [(AppCategory, [String])] = [
+            (.aiChat, ["chatgpt", "claude", "gemini", "perplexity", "midjourney"]),
+            (.email, ["gmail", "outlook"]),
+            (.messaging, ["slack", "whatsapp", "messenger", "teams", "discord"]),
+            (.document, ["google docs", "dokumenty google", "notion", "confluence"]),
+        ]
+        return byTitle.first { $0.1.contains(where: title.contains) }?.0 ?? .generic
+    }
+
+    /// Smart úroveň 1 (2026-09-27): how the rewrite may format the text for this target.
+    /// The model answers in a small Markdown subset that `RichText` turns into rich paste.
+    var formattingRules: String {
+        let common = "Formát: Markdown, len **tučné**, odrážky \"- \", číslovaný zoznam \"1. \" a nadpis \"## \". " +
+            "Hlasové pokyny ako „toto zvýrazni“, „zvýrazni to“, „dôležité:“, „nový odsek“, „odrážka“ vykonaj " +
+            "a samotný pokyn do textu NEdávaj. Nevymýšľaj oslovenie, pozdrav ani podpis, ktoré neboli nadiktované."
+        let specific: String
+        switch self {
+        case .email:
+            specific = "Cieľ je e-mail: oslovenie na samostatnom riadku, text v krátkych odsekoch (prázdny riadok medzi nimi), " +
+                "pozdrav a meno na samostatných riadkoch na konci. Tučne zvýrazni najviac 3 kľúčové informácie " +
+                "(termín, suma, čo sa od adresáta chce) — ak používateľ povedal, čo zvýrazniť, zvýrazni LEN to."
+        case .messaging:
+            specific = "Cieľ je chat: krátko a uvoľnene, bez nadpisov. Tučné len na výslovný pokyn, zoznam len pri výpočte viacerých vecí."
+        case .document:
+            specific = "Cieľ je dokument alebo poznámky: pri viacerých témach krátke nadpisy, výpočty ako odrážky, " +
+                "najviac 3 kľúčové pojmy tučne, ak to pomáha čitateľnosti."
+        case .aiChat:
+            specific = "Cieľ je prompt pre AI: žiadne tučné ani nadpisy; odseky a odrážky len keď prompt obsahuje viac požiadaviek."
+        case .code:
+            return "Cieľ je kód alebo terminál: žiadny Markdown, len čistý text."
+        case .generic:
+            specific = "Formátuj striedmo: odseky pri dlhšom texte, odrážky pri výpočte, tučné len na výslovný pokyn."
+        }
+        return common + " " + specific
+    }
+
+    /// Targets that get the rich (HTML/RTF) paste. AI chats and code take Markdown as plain text.
+    var allowsRichText: Bool { self != .aiChat && self != .code }
 }
 
 /// Maps a frontmost app (by bundle ID, optionally narrowed by window-title keyword
