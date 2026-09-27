@@ -75,6 +75,12 @@ final class DictationIndicatorController: NSWindowController, NSWindowDelegate {
 
     func hide(from caller: String = #function) {
         let e = DictationEngine.shared
+        // A previous session finishing late (slow upload, notice timer) must not close the pill
+        // of one the user already started. Only a click may hide a live session.
+        if caller != "tap", e.isRecording || e.isStarting {
+            AppLogger.log("[Indicator] hide() ← \(caller) ignorované — beží nové diktovanie")
+            return
+        }
         AppLogger.log("[Indicator] hide() ← \(caller) | isRecording=\(e.isRecording) isMicReady=\(e.isMicReady) btNeg=\(e.btNegotiating) err=\(e.connectionError ?? "nil")")
         window?.orderOut(nil)
     }
@@ -372,7 +378,9 @@ struct DictationIndicatorView: View {
                 guard !engine.noticeIsSticky else { return }
                 Task {
                     try? await Task.sleep(for: .seconds(6))
-                    guard engine.notice != nil else {
+                    // Same notice, not just any: a newer sticky one ("model returned nothing")
+                    // was closed 1.5 s in by this timer (2026-09-27 21:35:57).
+                    guard engine.notice == notice else {
                         AppLogger.log("[Indicator] notice auto-hide cancelled — notice already cleared (new session started)")
                         return
                     }

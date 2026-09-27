@@ -206,7 +206,7 @@ final class DictationEngine {
     // impatient second hotkey press during that window started a SECOND session
     // that tore down the first — visible in the UI as "ready" flickering back to
     // "connecting".
-    private var isStarting = false
+    private(set) var isStarting = false
 
     private(set) var totalSecondsRecorded: Int {
         didSet { UserDefaults.standard.set(totalSecondsRecorded, forKey: "whisper.usage.seconds") }
@@ -444,6 +444,9 @@ final class DictationEngine {
     /// History entry id for the dictation currently being transcribed — see stopAndTranscribe.
     private var currentEntryID = UUID()
     private var apiProbeTask: Task<Void, Never>?
+    /// Realtime socket got `session.created` this session — the API is demonstrably up,
+    /// whatever the side probe says.
+    private var realtimeServerAnswered = false
 
     // Profile resolved synchronously at recording start, purely so its keywords can go into
     // the very FIRST session.update. capturedProfile above can't serve here: it's filled by
@@ -588,6 +591,11 @@ final class DictationEngine {
         }
         isStarting = true
         defer { isStarting = false }
+        // Cleared now, not after the device setup below (up to seconds): the previous
+        // session's notice otherwise stays in the pill and its 6 s auto-hide closes the pill
+        // over the new recording — "second start after 'no text' shows nothing" (2026-09-21).
+        notice = nil
+        connectionError = nil
 
         AppLogger.markSection("nové diktovanie")
         chunkCounter.reset()
@@ -706,6 +714,7 @@ final class DictationEngine {
         liveInsertActive    = false
         liveInsertedCount   = 0
         isWaitingForServer  = false
+        realtimeServerAnswered = false
         lastDeltaDate       = nil
         reconnectAttempts   = 0
         sendQueue.resetStats()
@@ -769,7 +778,8 @@ final class DictationEngine {
             try? await Task.sleep(for: .seconds(3))
             guard !Task.isCancelled, self.isRecording, self.sessionID == mySessionID else { return }
             guard await Self.apiUnreachable(apiKey: key, gemini: usesGemini) else { return }
-            guard !Task.isCancelled, self.isRecording, self.sessionID == mySessionID else { return }
+            guard !Task.isCancelled, self.isRecording, self.sessionID == mySessionID,
+                  !self.realtimeServerAnswered else { return }
             AppLogger.log("[DictationEngine] ⚠️ probe — API nedostupné počas štartu diktovania (potvrdené opakovaným pokusom)")
             self.showNotice("API je nedostupné — hovor ďalej, nahrávka sa uloží a prepíšeš ju neskôr.", sticky: false)
         }
@@ -1067,6 +1077,7 @@ final class DictationEngine {
         // sessionID. Checked again below, right before this call would otherwise mutate
         // shared captured*/isSmartMode state or insert text into whatever's now frontmost.
         let mySessionID = sessionID
+        let myBundleID = capturedBundleID  // the next session resets it
 
         stopAudio()
         isTranscribing = true
@@ -1153,7 +1164,7 @@ final class DictationEngine {
         // stuck (e.g. a slow Smart-rewrite network request). Bail before touching any of it.
         guard sessionID == mySessionID else {
             AppLogger.log("[DictationEngine] ⚠️ stopAndTranscribe — session #\(mySessionID) superseded by #\(sessionID) mid-flight, nevkladám do cudzej session")
-            parkSupersededTranscript(result, entryID: myEntryID, elapsed: elapsed)
+            parkSupersededTranscript(result, entryID: myEntryID, elapsed: elapsed, bundleID: myBundleID)
             isTranscribing = false
             return nil
         }
@@ -1225,7 +1236,7 @@ final class DictationEngine {
         // timeout) — a new session can easily have started while it was in flight.
         guard sessionID == mySessionID else {
             AppLogger.log("[DictationEngine] ⚠️ stopAndTranscribe — session #\(mySessionID) superseded by #\(sessionID) during Smart rewrite, nevkladám do cudzej session")
-            parkSupersededTranscript(result, entryID: myEntryID, elapsed: elapsed)
+            parkSupersededTranscript(result, entryID: myEntryID, elapsed: elapsed, bundleID: myBundleID)
             isTranscribing = false
             return nil
         }
@@ -1357,12 +1368,21 @@ final class DictationEngine {
     /// would land in whatever is frontmost now. Throwing it away was the old behaviour, and it
     /// silently binned real dictated words (measured: a 257-character transcript). So it goes
     /// to history and to the insert-from-memory slot, where ⌃⌥V can still reach it.
-    private func parkSupersededTranscript(_ text: String?, entryID: UUID, elapsed: Int) {
+    private func parkSupersededTranscript(_ text: String?, entryID: UUID, elapsed: Int, bundleID: String) {
         guard let text, !text.isEmpty else { return }
-        DictationMemoryStore.shared.store(text)
         DictationHistoryStore.shared.log(text, id: entryID, seconds: elapsed,
                                          mode: transcriptionMode.rawValue, smart: false,
                                          model: transcriptionMode == .realtime ? realtimeModel.rawValue : batchModel)
+        // Stop→start in the same app (2026-09-27: 693 chars parked while the user kept
+        // dictating into the same Claude field) — the field is still there, insert it.
+        // Not while the new session live-types: the paste would interleave with its deltas.
+        if !bundleID.isEmpty, !liveInsertActive,
+           NSWorkspace.shared.frontmostApplication?.bundleIdentifier == bundleID {
+            AppLogger.log("[DictationEngine] oneskorený prepis — rovnaká appka navrchu, vkladám (\(text.count) znakov)")
+            _ = TextInserter.shared.insertOrRemember(text)
+            return
+        }
+        DictationMemoryStore.shared.store(text)
         // Non-sticky: a new dictation is already recording and its pill must come back.
         showNotice("Predchádzajúci prepis dorazil neskoro (\(text.count) znakov) — vlož ho cez ⌃⌥V.", sticky: false)
         AppLogger.log("[DictationEngine] oneskorený prepis odložený do pamäte (\(text.count) znakov)")
@@ -1523,14 +1543,17 @@ final class DictationEngine {
         guard !apiKey.isEmpty else { return false }
         // Must point at the host the upload will actually use — probing OpenAI while the
         // transcript goes to Google would miss a Google-side outage entirely.
-        let url = gemini ? "https://generativelanguage.googleapis.com/v1beta/models"
-                         : "https://api.openai.com/v1/models"
+        // Bare host, no auth: any HTTP answer (404 included) proves DNS+TLS+server are up.
+        // /v1/models with a key was a real API call that sometimes took >4 s on its own
+        // and raised "API je nedostupné" while the socket worked fine (2026-09-12/14).
+        let url = gemini ? "https://generativelanguage.googleapis.com/" : "https://api.openai.com/"
         var req = URLRequest(url: URL(string: url)!)
         req.httpMethod = "HEAD"
-        if gemini { req.setValue(apiKey, forHTTPHeaderField: "x-goog-api-key") }
-        else      { req.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization") }
-        req.timeoutInterval = 4
-        do { _ = try await batchSession.data(for: req); return false } catch { return true }
+        req.timeoutInterval = 8
+        do { _ = try await batchSession.data(for: req); return false } catch {
+            AppLogger.log("[DictationEngine] probe zlyhal: \((error as NSError).domain) \((error as NSError).code)")
+            return true
+        }
     }
 
     private static func uploadOnce(wav: Data, model: String, keywords: [String], apiKey: String) async throws -> String {
@@ -1829,6 +1852,7 @@ final class DictationEngine {
         switch type {
         case "session.created", "transcription_session.created", "session.updated":
             AppLogger.log("[DictationEngine] ✅ Session ready: \(type)")
+            realtimeServerAnswered = true
 
         case "error":
             let errObj = json["error"] as? [String: Any]

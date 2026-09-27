@@ -1,4 +1,5 @@
 import AVFoundation
+import MediaPlayer
 import NaturalLanguage
 import Observation
 
@@ -19,8 +20,8 @@ enum TTSMode: String, CaseIterable {
 final class TTSEngine: NSObject {
     static let shared = TTSEngine()
 
-    private(set) var isSpeaking = false
-    private(set) var isPaused   = false
+    private(set) var isSpeaking = false { didSet { updateNowPlaying() } }
+    private(set) var isPaused   = false { didSet { updateNowPlaying() } }
     private(set) var currentText: String?
 
     // Stored properties so @Observable tracks changes and SwiftUI re-renders
@@ -77,6 +78,39 @@ final class TTSEngine: NSObject {
         self.languageMode = UserDefaults.standard.string(forKey: "tts.languageMode") ?? "auto"
         super.init()
         synthesizer.delegate = self
+        setupMediaKeys()
+    }
+
+    /// ⌘⇧R while reading with nothing new selected (or the same text) = pause/resume.
+    func togglePause() { isPaused ? resume() : pause() }
+
+    // MARK: - Media keys (⏯ F8, AirPods tap, ⏮ = from the start)
+
+    /// Reading control without another shortcut (2026-09-27). Enabled only while reading, so
+    /// the keys go back to Spotify/Music the moment reading ends.
+    private func setupMediaKeys() {
+        let cc = MPRemoteCommandCenter.shared()
+        func on(_ cmd: MPRemoteCommand, _ action: @escaping @MainActor (TTSEngine) -> Void) {
+            cmd.isEnabled = false
+            cmd.addTarget { [weak self] _ in
+                Task { @MainActor in if let self { action(self) } }
+                return .success
+            }
+        }
+        on(cc.togglePlayPauseCommand) { $0.togglePause() }
+        on(cc.playCommand)            { $0.resume() }
+        on(cc.pauseCommand)           { $0.pause() }
+        on(cc.previousTrackCommand)   { $0.replayLast() }
+        on(cc.stopCommand)            { $0.stop() }
+    }
+
+    private func updateNowPlaying() {
+        let cc = MPRemoteCommandCenter.shared()
+        for cmd in [cc.togglePlayPauseCommand, cc.playCommand, cc.pauseCommand,
+                    cc.previousTrackCommand, cc.stopCommand] { cmd.isEnabled = isSpeaking }
+        let info = MPNowPlayingInfoCenter.default()
+        info.nowPlayingInfo = isSpeaking ? [MPMediaItemPropertyTitle: "Ozvena — čítanie"] : nil
+        info.playbackState = !isSpeaking ? .stopped : isPaused ? .paused : .playing
     }
 
     // MARK: - Public interface

@@ -228,7 +228,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard requireLicense() else { return }
         AppLogger.log("[AppDelegate] handleReadText — skratka stlačená")
         Telemetry.shared.feature("read")
-        guard let text = await TextExtractor.shared.extractSelected(), !text.isEmpty else {
+        let selected = await TextExtractor.shared.extractSelected()
+        // Mid-read, nothing new selected → pause/resume instead of an error or a restart.
+        // A different selection still starts a new reading (2026-09-27).
+        let tts = TTSEngine.shared
+        if tts.isSpeaking, selected == nil || selected == tts.currentText {
+            tts.togglePause()
+            AppLogger.log("[AppDelegate] handleReadText — počas čítania bez nového výberu → \(tts.isPaused ? "pauza" : "pokračovanie")")
+            ControlPanelWindowController.shared.show()
+            return
+        }
+        guard let text = selected, !text.isEmpty else {
             AppLogger.log("[AppDelegate] handleReadText — žiadny text na pasteboarde")
             menuBarController?.showError("Nie je označený žiadny text.")
             return
