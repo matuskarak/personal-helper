@@ -187,6 +187,10 @@ extension PreferencesView {
                 .nestedRow()
             }
             rowDivider
+            pickerRow(title: "Tón", selection: $rewriteEngine.tone) {
+                ForEach(SmartRewriteEngine.Tone.allCases, id: \.self) { Text($0.label).tag($0) }
+            }
+            rowDivider
             pickerRow(title: "Kontrola pred vložením", selection: $rewriteEngine.reviewMode) {
                 Text("Nikdy — vložiť hneď").tag(SmartRewriteEngine.ReviewMode.never)
                 Text("Len v AI chatoch").tag(SmartRewriteEngine.ReviewMode.aiChats)

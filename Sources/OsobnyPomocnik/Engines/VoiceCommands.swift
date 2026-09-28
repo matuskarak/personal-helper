@@ -153,7 +153,8 @@ enum VoiceCommands {
         func words(_ s: String) -> [String] {
             String(Array(s).map(fold)).split { !$0.isLetter }.map(String.init).filter { $0.count >= 4 }
         }
-        let skip = Set(commands.flatMap(words))
+        // Fillers are meant to go (Smart tone) — not counted as lost content.
+        let skip = Set(commands.flatMap(words)).union(DictationQualityEngine.fillerWords)
         let src = words(raw).filter { !skip.contains($0) }
         guard !src.isEmpty else { return 1 }
         let out = Set(words(result))

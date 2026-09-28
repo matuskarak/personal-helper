@@ -51,6 +51,36 @@ final class SmartRewriteEngine {
         reviewMode == .always || (reviewMode == .aiChats && category == .aiChat)
     }
 
+    /// How much Smart may tighten the wording (2026-09-28: "veľa výplňových slov, rozvláčne").
+    enum Tone: String, CaseIterable {
+        case keep, polished, formal
+        var label: String {
+            switch self {
+            case .keep:     "Zachovať môj štýl"
+            case .polished: "Uhladiť — bez výplňových slov"
+            case .formal:   "Formálne a vecne"
+            }
+        }
+        var rule: String {
+            switch self {
+            case .keep:
+                "Tón: zachovaj slová a štýl používateľa, oprav len gramatiku, interpunkciu a zjavné chyby prepisu."
+            case .polished:
+                "Tón: vyhoď výplňové slová a vatu (teda, proste, vlastne, akože, nejakých, zhruba, s tým, že, " +
+                "následne, ako keby, prosím ťa na každom kroku…), rozvláčne vety skráť a zjednoduš. Zachovaj VŠETKY " +
+                "informácie, požiadavky, oslovenie a tykanie/vykanie používateľa."
+            case .formal:
+                "Tón: vecný a zdvorilý, bez výplňových slov a hovorových obratov, stručné jasné vety. Zachovaj VŠETKY " +
+                "informácie, požiadavky, oslovenie a tykanie/vykanie používateľa."
+            }
+        }
+        /// Tightening drops words on purpose — the lost-content guard must allow for it.
+        var minCoverage: Double { self == .keep ? 0.85 : 0.6 }
+    }
+    var tone: Tone {
+        didSet { UserDefaults.standard.set(tone.rawValue, forKey: "smart.tone") }
+    }
+
     struct Result {
         let text: String; let changes: String; var target = "none"; var issues: [String] = []
         /// What the model saw the target to be — only differs from the input for `.generic`.
@@ -89,6 +119,7 @@ final class SmartRewriteEngine {
         let stored = UserDefaults.standard.string(forKey: "smart.visionPromptOverride")
         self.visionPromptOverride = (stored?.isEmpty ?? true) ? Self.defaultVisionPreamble : stored!
         self.saveScreenshotsToHistory = UserDefaults.standard.bool(forKey: "smart.saveScreenshotsToHistory")
+        self.tone = Tone(rawValue: UserDefaults.standard.string(forKey: "smart.tone") ?? "") ?? .polished
         self.reviewMode = ReviewMode(rawValue: UserDefaults.standard.string(forKey: "smart.reviewMode") ?? "") ?? .never
         self.reviewShowChanges = UserDefaults.standard.object(forKey: "smart.reviewShowChanges") as? Bool ?? true
         self.reviewShowOriginal = UserDefaults.standard.object(forKey: "smart.reviewShowOriginal") as? Bool ?? true
@@ -144,7 +175,7 @@ final class SmartRewriteEngine {
         }
         let promptRules = category.tunesPrompts ? PromptRulebook.prompt
             : category == .generic ? "Ak je cieľ AI nástroj (aiChat alebo code), platí navyše:\n" + PromptRulebook.prompt : nil
-        let systemPrompt = ([hardRule, preamble, category.formattingRules, promptRules, signatureRule, profileRules] as [String?])
+        let systemPrompt = ([hardRule, preamble, category.formattingRules, tone.rule, promptRules, signatureRule, profileRules] as [String?])
             .compactMap { $0 }.joined(separator: "\n\n")
         let preambleSource = !visionPromptEnabled ? "vypnutý" :
             (visionPromptOverride == Self.defaultVisionPreamble ? "predvolený" : "vlastný")
@@ -258,7 +289,7 @@ final class SmartRewriteEngine {
         guard !out.isEmpty else { throw SmartRewriteError.invalidResponse }
         let kept = VoiceCommands.coverage(raw: transcript, result: out, commands: commands)
         // Prompt tuning legitimately rephrases more than formatting does.
-        guard kept >= (detected.tunesPrompts ? 0.5 : 0.85) else {
+        guard kept >= (detected.tunesPrompts ? 0.5 : tone.minCoverage) else {
             AppLogger.log("[SmartRewriteEngine] ⚠️ výsledok stratil obsah (zachovaných \(Int(kept * 100)) % slov) — použije sa pôvodný text")
             throw SmartRewriteError.lostContent
         }

@@ -17,3 +17,4 @@
 - Smart v AI appkách (ChatGPT, Claude, Cursor…) upraví nadiktovaný prompt podľa typu modelu — iné pravidlá pre textový chat, premýšľajúci model, obrázky, video a programovacieho agenta. Stačí povedať napr. „promptujem pre image model“.
 - Hlasové pokyny v Smart („toto zvýrazni“, „daj to tučne“, „nový odsek“, „odrážka“, „začni tučné … koniec tučného“) sa spoľahlivo vykonajú a samotný pokyn už nezostane v texte.
 - Okno kontroly pred vložením má nový vzhľad podľa dizajnu Ozveny.
+- Smart má nastavenie Tón: zachovať môj štýl / uhladiť bez výplňových slov (predvolené) / formálne a vecne.
