@@ -210,6 +210,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case "insertFromMemory":  handleInsertFromMemory()
         case "preferences":       menuBarController?.openPreferences()
         case "smartTest":         Task { @MainActor in await SmartTestBench.run() }
+        case "benchDump":         SmartTestBench.dump()
+        case "benchRun":          Task { @MainActor in await SmartTestBench.proxy() }
         default: AppLogger.log("[AppDelegate] URL trigger — neznáma akcia: \(action)")
         }
     }

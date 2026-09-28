@@ -158,10 +158,10 @@ extension PreferencesView {
             }
             rowDivider
             pickerRow(title: "Model", selection: $smartModelInput) {
-                Text("gpt-4o-mini (rýchly, odporúčaný)").tag("gpt-4o-mini")
-                Text("gpt-4o (presnejší)").tag("gpt-4o")
-                Text("gpt-4.1-mini").tag("gpt-4.1-mini")
-                Text("gpt-4.1").tag("gpt-4.1")
+                Text("gpt-4.1 (odporúčaný)").tag("gpt-4.1")
+                Text("gpt-4.1-mini (lacnejší, horšie formátuje)").tag("gpt-4.1-mini")
+                Text("gpt-4o").tag("gpt-4o")
+                Text("gpt-4o-mini (najlacnejší, slabý na formátovanie)").tag("gpt-4o-mini")
             }
             .onChange(of: smartModelInput) { _, v in rewriteEngine.model = v }
             rowDivider

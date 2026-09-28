@@ -66,10 +66,13 @@ final class SmartRewriteEngine {
             case .keep:
                 "Tón: zachovaj slová a štýl používateľa, oprav len gramatiku, interpunkciu a zjavné chyby prepisu."
             case .polished:
-                "Tón: vyhoď výplňové slová a vatu (teda, proste, vlastne, akože, nejakých, zhruba, s tým, že, " +
-                "následne, ako keby, prosím ťa na každom kroku…) — tieto slová vo výsledku NESMÚ zostať, ak nenesú " +
+                "Tón: vyhoď výplňové slová a vatu (teda, proste, vlastne, akože, no, tak, s tým, že, " +
+                "následne, ako keby…) — tieto slová vo výsledku NESMÚ zostať, ak nenesú " +
                 "význam. Rozvláčne vety skráť a zjednoduš (napr. „cena bude teda nejakých 2 000 eur“ → „cena bude " +
-                "2 000 eur“). Zachovaj VŠETKY " +
+                "približne 2 000 eur“). Približnosť NIE je vata: „zhruba“, „asi“, „okolo“ pri sume, čase či dátume " +
+                "zachovaj ako „približne“/„okolo“ (samotné „nejakých“ je vata). Zdvorilé „prosím“ pri žiadosti " +
+                "zachovaj. Ak sa používateľ v reči opraví („v utorok, nie, v stredu“, „päť, teda šesť“), nechaj LEN " +
+                "opravenú verziu. Zachovaj VŠETKY " +
                 "informácie, požiadavky, oslovenie a tykanie/vykanie používateľa."
             case .formal:
                 "Tón: vecný a zdvorilý, spisovná slovenčina. Vyhoď VŠETKY výplňové slová (teda, proste, vlastne, zhruba, nejakých…) a hovorové obraty nahraď spisovnými " +
@@ -116,7 +119,9 @@ final class SmartRewriteEngine {
     """
 
     private init() {
-        self.model = UserDefaults.standard.string(forKey: "smart.model") ?? "gpt-4o-mini"
+        // gpt-4.1: prompt bench 2026-09-28 (22 diktovaní × 2) — 0 chýb; gpt-4.1-mini 14, gpt-5-mini 13,
+        // gpt-4o-mini 32 (malé písmená, „- -“ odrážky, pokyny v texte, ignorovaný tón).
+        self.model = UserDefaults.standard.string(forKey: "smart.model") ?? "gpt-4.1"
         self.visionPromptEnabled = UserDefaults.standard.object(forKey: "smart.visionPromptEnabled") as? Bool ?? true
         // Nil OR empty stored value → seed with the default text so the field always shows
         // real, editable text instead of a blank box (an older build could've persisted "").
@@ -134,13 +139,10 @@ final class SmartRewriteEngine {
     /// Output the lost-content guard threw away — only SmartTestBench reads it.
     private(set) var lastRejected: String?
 
-    func rewrite(
-        transcript: String,
-        screenshotJPEG: Data?,   // pre-encoded by DictationEngine's capture task — see capturedScreenshotJPEG
-        profile: AppProfile,
-        category: AppCategory,
-        apiKey: String
-    ) async throws -> Result {
+    /// The exact Chat Completions body Smart sends — also dumped by SmartTestBench so prompt
+    /// variants can be tested outside the app against the real baseline.
+    func requestBody(transcript: String, screenshotJPEG: Data?, profile: AppProfile,
+                     category: AppCategory) -> (body: [String: Any], marked: String) {
         // Candidate spoken commands flagged by the app, examples right before the text.
         let marked = VoiceCommands.mark(transcript)
         var content: [[String: Any]] = [
@@ -248,6 +250,18 @@ final class SmartRewriteEngine {
             "max_tokens": 2500,
             "temperature": 0
         ]
+        return (body, marked)
+    }
+
+    func rewrite(
+        transcript: String,
+        screenshotJPEG: Data?,   // pre-encoded by DictationEngine's capture task — see capturedScreenshotJPEG
+        profile: AppProfile,
+        category: AppCategory,
+        apiKey: String
+    ) async throws -> Result {
+        let (body, marked) = requestBody(transcript: transcript, screenshotJPEG: screenshotJPEG,
+                                         profile: profile, category: category)
 
         var req = URLRequest(url: URL(string: "https://api.openai.com/v1/chat/completions")!)
         req.httpMethod = "POST"
@@ -260,7 +274,12 @@ final class SmartRewriteEngine {
         // (see DictationEngine.stopAndTranscribe's staleness guard). Fail faster instead.
         req.timeoutInterval = 20
 
-        let (data, response) = try await URLSession.shared.data(for: req)
+        var (data, response) = try await URLSession.shared.data(for: req)
+        // OpenAI's gateway sometimes answers 502/503 once (seen in the bench) — one retry.
+        if let code = (response as? HTTPURLResponse)?.statusCode, code >= 500 {
+            AppLogger.log("[SmartRewriteEngine] server \(code) — skúšam znova")
+            (data, response) = try await URLSession.shared.data(for: req)
+        }
         guard let http = response as? HTTPURLResponse else { throw SmartRewriteError.invalidResponse }
         guard http.statusCode == 200 else {
             throw SmartRewriteError.apiError(http.statusCode, String(data: data, encoding: .utf8) ?? "unknown")
@@ -291,12 +310,16 @@ final class SmartRewriteEngine {
         let commands = (parsed["voice_commands"] as? [[String: Any]] ?? [])
             .filter { ($0["action"] as? String) != "not_a_command" }
             .compactMap { $0["phrase"] as? String }
-        let rendered = VoiceCommands.render(VoiceCommands.parseBlocks(parsed["blocks"]), plain: !detected.allowsRichText)
+        var blocks = VoiceCommands.tidy(VoiceCommands.parseBlocks(parsed["blocks"]))
+        if detected == .email { blocks = VoiceCommands.joinSignoff(blocks) }
+        let rendered = VoiceCommands.render(blocks, plain: !detected.allowsRichText)
         var out = VoiceCommands.removeLeftovers(rendered, commands: commands)
         guard !out.isEmpty else { throw SmartRewriteError.invalidResponse }
         let kept = VoiceCommands.coverage(raw: transcript, result: out, commands: commands)
-        // Prompt tuning legitimately rephrases more than formatting does.
-        guard kept >= (detected.tunesPrompts ? 0.5 : tone.minCoverage) else {
+        // Prompt tuning legitimately rephrases more than formatting does; "vymaž poslednú vetu"
+        // legitimately drops a whole sentence.
+        let omitted = (parsed["voice_commands"] as? [[String: Any]] ?? []).contains { ($0["action"] as? String) == "omit" }
+        guard kept >= (omitted ? 0.4 : detected.tunesPrompts ? 0.5 : tone.minCoverage) else {
             AppLogger.log("[SmartRewriteEngine] ⚠️ výsledok stratil obsah (zachovaných \(Int(kept * 100)) % slov) — použije sa pôvodný text")
             lastRejected = out
             throw SmartRewriteError.lostContent

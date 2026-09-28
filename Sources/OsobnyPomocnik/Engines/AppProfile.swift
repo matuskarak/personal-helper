@@ -69,7 +69,7 @@ enum AppCategory: String, Codable, CaseIterable, Sendable {
     /// Smart úroveň 1 (2026-09-27): how the rewrite may format the text for this target.
     /// The model answers in a small Markdown subset that `RichText` turns into rich paste.
     var formattingRules: String {
-        let common = "Formát: len odseky, nadpisy, odrážky, číslovaný zoznam a tučné (cez blocks/bold). " +
+        let common = "Formát: len odseky, nadpisy (nikdy nekončia dvojbodkou), odrážky, číslovaný zoznam a tučné (cez blocks/bold). " +
             "Hlasové pokyny ako „toto zvýrazni“, „zvýrazni to“, „dôležité:“, „toto je dôležité zdôrazniť“, „nový odsek“, " +
             "„odrážka“ (aj voľnejšie formulácie s rovnakým zámerom) vykonaj a samotný pokyn do textu NEdávaj. " +
             "Nevymýšľaj oslovenie, pozdrav ani podpis, ktoré neboli nadiktované."
@@ -92,14 +92,16 @@ enum AppCategory: String, Codable, CaseIterable, Sendable {
                 "pozdrav a meno na samostatných riadkoch na konci. Tučne zvýrazni najviac 3 kľúčové informácie " +
                 "(termín, suma, čo sa od adresáta chce) — ak používateľ povedal, čo zvýrazniť, zvýrazni LEN to. " +
                 "Odseky sú POVINNÉ aj pri krátkom e-maile. Štruktúra: paragraph s oslovením (ak bolo nadiktované), " +
-                "odseky s obsahom, JEDEN paragraph so záverom (poďakovanie + rozlúčka spolu, napr. „Ďakujem, maj sa.“) " +
-                "a menom (ak boli nadiktované). Oslovenie končí čiarkou a prvý odsek pod ním začína malým písmenom " +
+                "odseky s obsahom, JEDEN posledný paragraph so záverom: poďakovanie/rozlúčka (napr. „Ďakujem, maj sa.“ " +
+                "alebo „S pozdravom“) a pod ňou meno, ak bolo nadiktované — oddelené znakom nového riadku \\n v tom " +
+                "istom spane, nie ako samostatné odseky. Oslovenie končí čiarkou a prvý odsek pod ním začína malým písmenom " +
                 "(slovenská pravopisná norma). Zachovaj VŠETKY vety, aj úvod."
         case .messaging:
             specific = "Cieľ je chat: krátko a uvoľnene, bez nadpisov. Tučné len na výslovný pokyn, zoznam len pri výpočte viacerých vecí."
         case .document:
             specific = "Cieľ je dokument alebo poznámky: pri viacerých témach krátke nadpisy, výpočty ako odrážky, " +
-                "najviac 3 kľúčové pojmy tučne, ak to pomáha čitateľnosti."
+                "tučné len na výslovný pokyn alebo pre 1 – 2 najdôležitejšie údaje (termín, suma) — nikdy celé položky " +
+                "zoznamu, názvy produktov či firiem."
         case .aiChat:
             specific = "Cieľ je prompt pre AI: žiadne tučné ani nadpisy; odseky a odrážky len keď prompt obsahuje viac požiadaviek."
         case .code:
@@ -326,7 +328,7 @@ enum PromptRulebook {
     - video: ako image + pohyb kamery a dej v čase po krokoch; dialógy oddelene v úvodzovkách.
     - codeAgent: cieľ zmeny, dotknuté súbory/funkcie ak zazneli, očakávané správanie, ako to overiť, čo nemeniť;     technické názvy presne.
     - none: nie je to prompt (poznámka, príkaz, kód) — len oprav text.
-    Výsledok je VŽDY upravené zadanie (rozkazovací tvar ako „Napíš…“, „Vytvor…“), NIKDY jeho splnenie — \
+    Výsledok je VŽDY upravená požiadavka v rovnakej forme — otázka ostane otázkou, príkaz príkazom — NIKDY jej splnenie ani odpoveď — \
     nepíš článok, kód ani odpoveď, o ktoré používateľ AI žiada.
     Nevymýšľaj nové fakty ani požiadavky. Čo v prompte podľa pravidiel chýba, NEdopĺňaj — uveď to v issues.
     """

@@ -14,6 +14,10 @@
 - Podpis v e-mailoch: v Nastaveniach → Smart ukončenie si nastavíš vlastný podpis, ktorý Smart pridá na koniec e-mailu.
 - Smart v AI chatoch (ChatGPT, Claude…) nadiktovaný prompt len učeše — predtým ho niekedy rovno „splnil“ (napísal celý článok namiesto zadania).
 - Smart tón „Uhladiť“ spoľahlivejšie vyhodí výplňové slová (teda, vlastne, nejakých…); v e-maile je poďakovanie s rozlúčkou v jednom riadku a text pod oslovením začína malým písmenom.
+- Čítanie má nastavenie hlasitosti (Nastavenia → Čítanie), pri hlase Google sa mení hneď počas čítania.
+- Smart formátuje spoľahlivejšie: zachová „približne“ pri sumách a termínoch, aj zdvorilé „prosím“; keď sa v reči opravíš („v utorok, nie, v stredu“), ostane len oprava; „S pozdravom“ a meno sú pod sebou; otázka pre AI ostane otázkou; funguje „vymaž poslednú vetu“; menej zbytočného tučného v poznámkach.
+- Smart má predvolený model gpt-4.1 — v teste na 28 diktovaniach jediný bez chýb vo formátovaní (lacnejšie modely písali malé písmená, zdvojené odrážky a nechávali pokyny v texte).
+- Keď server OpenAI na chvíľu zlyhá, Smart to automaticky skúsi ešte raz.
 - Prehľad ukazuje, koľko ticha sa z nahrávok vystrihlo a koľko sa tým ušetrilo na prepise.
 - Kontrola pred vložením (Smart): voliteľne sa výsledok najprv ukáže v okne, kde ho upravíš, vložíš (⌘↩), vložíš pôvodný prepis alebo zrušíš. V nastaveniach si zvolíš nikdy / len v AI chatoch / vždy a či chceš vidieť, čo AI zmenila, a pôvodný text.
 - Smart v AI appkách (ChatGPT, Claude, Cursor…) upraví nadiktovaný prompt podľa typu modelu — iné pravidlá pre textový chat, premýšľajúci model, obrázky, video a programovacieho agenta. Stačí povedať napr. „promptujem pre image model“.
