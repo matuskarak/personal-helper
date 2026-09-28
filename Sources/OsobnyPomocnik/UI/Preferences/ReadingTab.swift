@@ -101,6 +101,21 @@ extension PreferencesView {
                 }
                 .padding(.horizontal, 16).padding(.vertical, 12)
                 rowDivider
+                HStack(spacing: 12) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Hlasitosť").font(Theme.body(13))
+                        Text("Voči hlasitosti systému.").font(Theme.body(11)).foregroundStyle(Theme.textSecondary)
+                    }
+                    Spacer()
+                    Image(systemName: "speaker.fill").font(.system(size: 11)).foregroundStyle(Theme.textSecondary)
+                    Slider(value: Binding(get: { tts.volume }, set: { tts.volume = $0 }), in: 0.1...1)
+                        .frame(maxWidth: 160)
+                    Image(systemName: "speaker.wave.3.fill").font(.system(size: 11)).foregroundStyle(Theme.textSecondary)
+                    Text("\(Int((tts.volume * 100).rounded())) %").font(Theme.body(11).monospacedDigit())
+                        .foregroundStyle(Theme.textSecondary).frame(width: 38, alignment: .trailing)
+                }
+                .padding(.horizontal, 16).padding(.vertical, 12)
+                rowDivider
                 HStack(alignment: .top, spacing: 16) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Automaticky skryť pilulku").font(Theme.body(13))

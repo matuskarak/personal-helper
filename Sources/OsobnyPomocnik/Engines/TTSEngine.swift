@@ -37,6 +37,14 @@ final class TTSEngine: NSObject {
     var speed: Double {
         didSet { UserDefaults.standard.set(speed, forKey: "tts.speed") }
     }
+    /// Reading volume 0.1–1, relative to the system volume. Google applies it live; the macOS
+    /// voice only from the next utterance (AVSpeechUtterance can't change mid-way).
+    var volume: Double {
+        didSet {
+            UserDefaults.standard.set(volume, forKey: "tts.volume")
+            googleEngine.volume = Float(volume)
+        }
+    }
     /// Speeds the pill button cycles through — kept sorted and always containing 1×, so the
     /// user can never end up with an empty set.
     var enabledSpeeds: [Double] {
@@ -76,7 +84,9 @@ final class TTSEngine: NSObject {
         self.enabledSpeeds = UserDefaults.standard.array(forKey: "tts.enabledSpeeds") as? [Double] ?? Self.defaultSpeeds
         self.selectedVoiceIdentifier = UserDefaults.standard.string(forKey: "tts.voiceIdentifier")
         self.languageMode = UserDefaults.standard.string(forKey: "tts.languageMode") ?? "auto"
+        self.volume = UserDefaults.standard.object(forKey: "tts.volume") as? Double ?? 1
         super.init()
+        googleEngine.volume = Float(volume)
         synthesizer.delegate = self
         setupMediaKeys()
     }
@@ -181,6 +191,7 @@ final class TTSEngine: NSObject {
         synthesizer.stopSpeaking(at: .immediate)
         let utterance = AVSpeechUtterance(string: text)
         utterance.rate = rate.clamped(AVSpeechUtteranceMinimumSpeechRate, AVSpeechUtteranceMaximumSpeechRate)
+        utterance.volume = Float(volume)
         utterance.voice = preferredSystemVoice(language: language)
         currentUtterance = ObjectIdentifier(utterance)
         synthesizer.speak(utterance)

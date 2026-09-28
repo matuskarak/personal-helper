@@ -52,6 +52,8 @@ final class GoogleCloudTTSEngine: NSObject {
     private let baseURL = "https://texttospeech.googleapis.com/v1"
 
     private var player: AVAudioPlayer?
+    /// Set by TTSEngine — applies to the sentence playing now and every next one.
+    var volume: Float = 1 { didSet { player?.volume = volume } }
     private var playbackContinuation: CheckedContinuation<Void, Error>?
     // Bumped by every speak() and stop(). A pipeline loop only keeps going while its own
     // number is still current — `isSpeaking` alone can't tell "my read" from "a newer read":
@@ -179,6 +181,7 @@ final class GoogleCloudTTSEngine: NSObject {
                 self.player = p
                 self.playbackContinuation = cont
                 p.delegate = self
+                p.volume = self.volume
                 p.prepareToPlay()
                 if !p.play() {
                     self.playbackContinuation = nil
