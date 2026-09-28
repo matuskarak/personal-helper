@@ -92,7 +92,9 @@ enum AppCategory: String, Codable, CaseIterable, Sendable {
                 "pozdrav a meno na samostatných riadkoch na konci. Tučne zvýrazni najviac 3 kľúčové informácie " +
                 "(termín, suma, čo sa od adresáta chce) — ak používateľ povedal, čo zvýrazniť, zvýrazni LEN to. " +
                 "Odseky sú POVINNÉ aj pri krátkom e-maile. Štruktúra: paragraph s oslovením (ak bolo nadiktované), " +
-                "odseky s obsahom, paragraph s pozdravom a menom (ak boli nadiktované). Zachovaj VŠETKY vety, aj úvod."
+                "odseky s obsahom, JEDEN paragraph so záverom (poďakovanie + rozlúčka spolu, napr. „Ďakujem, maj sa.“) " +
+                "a menom (ak boli nadiktované). Oslovenie končí čiarkou a prvý odsek pod ním začína malým písmenom " +
+                "(slovenská pravopisná norma). Zachovaj VŠETKY vety, aj úvod."
         case .messaging:
             specific = "Cieľ je chat: krátko a uvoľnene, bez nadpisov. Tučné len na výslovný pokyn, zoznam len pri výpočte viacerých vecí."
         case .document:
@@ -324,6 +326,8 @@ enum PromptRulebook {
     - video: ako image + pohyb kamery a dej v čase po krokoch; dialógy oddelene v úvodzovkách.
     - codeAgent: cieľ zmeny, dotknuté súbory/funkcie ak zazneli, očakávané správanie, ako to overiť, čo nemeniť;     technické názvy presne.
     - none: nie je to prompt (poznámka, príkaz, kód) — len oprav text.
+    Výsledok je VŽDY upravené zadanie (rozkazovací tvar ako „Napíš…“, „Vytvor…“), NIKDY jeho splnenie — \
+    nepíš článok, kód ani odpoveď, o ktoré používateľ AI žiada.
     Nevymýšľaj nové fakty ani požiadavky. Čo v prompte podľa pravidiel chýba, NEdopĺňaj — uveď to v issues.
     """
 }

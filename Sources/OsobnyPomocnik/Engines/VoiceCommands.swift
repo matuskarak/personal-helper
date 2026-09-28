@@ -142,6 +142,8 @@ enum VoiceCommands {
     „V záhrade treba:“, bullet „pokosiť“, bullet „poliať“, paragraph „Vďaka.“
     D) „⟦začni tučné⟧ vlak ide o siedmej ⟦koniec tučného⟧ lístky mám“ → bold_range: „Vlak ide o siedmej.“ \
     bold=true, „ Lístky mám.“
+    E) prompt pre AI: „napíš mi teda nejakú krátku báseň o jeseni a nech sa to rýmuje“ → blocks: paragraph \
+    „Napíš krátku rýmovanú báseň o jeseni.“ — výsledok je STÁLE zadanie, nikdy nie báseň samotná.
     Pravidlá: bold_previous = posledná veta alebo fráza PRED pokynom. Text pokynu NIKDY nepatrí do blocks. \
     Formátovanie vyjadri LEN cez blocks a bold — nepíš Markdown znaky (** # -).
     </priklady>
@@ -149,15 +151,18 @@ enum VoiceCommands {
 
     /// Share of the transcript's content words (4+ letters, pokyny excluded) found in the result.
     /// Low = the model dropped or replaced content — the caller falls back to the raw text.
+    /// Compared by the first 5 letters: Slovak inflects ("priateľské" → "priateľským"), and a
+    /// prompt rewrite changes endings a lot (whole-word matching kept only 37 % of a fine prompt).
+    // ponytail: prefix stem, a real stemmer only if the guard misfires again
     static func coverage(raw: String, result: String, commands: [String]) -> Double {
         func words(_ s: String) -> [String] {
             String(Array(s).map(fold)).split { !$0.isLetter }.map(String.init).filter { $0.count >= 4 }
         }
         // Fillers are meant to go (Smart tone) — not counted as lost content.
         let skip = Set(commands.flatMap(words)).union(DictationQualityEngine.fillerWords)
-        let src = words(raw).filter { !skip.contains($0) }
+        let src = words(raw).filter { !skip.contains($0) }.map { $0.prefix(5) }
         guard !src.isEmpty else { return 1 }
-        let out = Set(words(result))
+        let out = Set(words(result).map { $0.prefix(5) })
         return Double(src.filter(out.contains).count) / Double(src.count)
     }
 
@@ -175,6 +180,7 @@ enum VoiceCommands {
         assert(coverage(raw: "Čau Peťo, posielam ti návrh spolupráce, tie peniaze zvýrazni",
                         result: "**Cena bude 2 000 €.**", commands: ["tie peniaze zvýrazni"]) < 0.5, "lost greeting")
         assert(coverage(raw: "ahoj peťo posielam návrh", result: "Ahoj Peťo,\n\nposielam návrh.", commands: []) == 1, "kept")
+        assert(coverage(raw: "priateľské články", result: "Priateľským článkom", commands: []) == 1, "inflection")
         assert(removeLeftovers("Cena. Toto prosím ťa zvýrazni. Pošli.", commands: ["toto prosím ťa zvýrazni"]) == "Cena. Pošli.", "leftover")
         AppLogger.log("[VoiceCommands] selfCheck OK")
     }

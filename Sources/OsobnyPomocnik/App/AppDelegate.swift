@@ -209,6 +209,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case "cancelDictation":            handleCancelDictation()
         case "insertFromMemory":  handleInsertFromMemory()
         case "preferences":       menuBarController?.openPreferences()
+        case "smartTest":         Task { @MainActor in await SmartTestBench.run() }
         default: AppLogger.log("[AppDelegate] URL trigger — neznáma akcia: \(action)")
         }
     }

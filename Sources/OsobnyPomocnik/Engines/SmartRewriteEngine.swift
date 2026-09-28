@@ -67,10 +67,14 @@ final class SmartRewriteEngine {
                 "Tón: zachovaj slová a štýl používateľa, oprav len gramatiku, interpunkciu a zjavné chyby prepisu."
             case .polished:
                 "Tón: vyhoď výplňové slová a vatu (teda, proste, vlastne, akože, nejakých, zhruba, s tým, že, " +
-                "následne, ako keby, prosím ťa na každom kroku…), rozvláčne vety skráť a zjednoduš. Zachovaj VŠETKY " +
+                "následne, ako keby, prosím ťa na každom kroku…) — tieto slová vo výsledku NESMÚ zostať, ak nenesú " +
+                "význam. Rozvláčne vety skráť a zjednoduš (napr. „cena bude teda nejakých 2 000 eur“ → „cena bude " +
+                "2 000 eur“). Zachovaj VŠETKY " +
                 "informácie, požiadavky, oslovenie a tykanie/vykanie používateľa."
             case .formal:
-                "Tón: vecný a zdvorilý, bez výplňových slov a hovorových obratov, stručné jasné vety. Zachovaj VŠETKY " +
+                "Tón: vecný a zdvorilý, spisovná slovenčina. Vyhoď VŠETKY výplňové slová (teda, proste, vlastne, zhruba, nejakých…) a hovorové obraty nahraď spisovnými " +
+                "(no, ok, skočiť, fakt, nejakých → vynechať alebo spisovne), vety stručné a úplné, rozlúčka zdvorilá " +
+                "(napr. „Ďakujem a prajem pekný deň.“). Zachovaj VŠETKY " +
                 "informácie, požiadavky, oslovenie a tykanie/vykanie používateľa."
             }
         }
@@ -127,6 +131,9 @@ final class SmartRewriteEngine {
         self.emailSignature = UserDefaults.standard.string(forKey: "smart.emailSignature") ?? ""
     }
 
+    /// Output the lost-content guard threw away — only SmartTestBench reads it.
+    private(set) var lastRejected: String?
+
     func rewrite(
         transcript: String,
         screenshotJPEG: Data?,   // pre-encoded by DictationEngine's capture task — see capturedScreenshotJPEG
@@ -137,7 +144,7 @@ final class SmartRewriteEngine {
         // Candidate spoken commands flagged by the app, examples right before the text.
         let marked = VoiceCommands.mark(transcript)
         var content: [[String: Any]] = [
-            ["type": "text", "text": VoiceCommands.examples + "\n\n<text_to_correct>\n\(marked)\n</text_to_correct>"]
+            ["type": "text", "text": VoiceCommands.examples + "\n\n" + tone.rule + "\n\n<text_to_correct>\n\(marked)\n</text_to_correct>"]
         ]
         if let screenshotJPEG {
             content.append(["type": "image_url", "image_url": ["url": "data:image/jpeg;base64,\(screenshotJPEG.base64EncodedString())"]])
@@ -291,6 +298,7 @@ final class SmartRewriteEngine {
         // Prompt tuning legitimately rephrases more than formatting does.
         guard kept >= (detected.tunesPrompts ? 0.5 : tone.minCoverage) else {
             AppLogger.log("[SmartRewriteEngine] ⚠️ výsledok stratil obsah (zachovaných \(Int(kept * 100)) % slov) — použije sa pôvodný text")
+            lastRejected = out
             throw SmartRewriteError.lostContent
         }
         AppLogger.log("[SmartRewriteEngine] hlasové pokyny: \(commands.count) vykonaných, \(marked.filter { $0 == VoiceCommands.open }.count) označených appkou")
