@@ -126,20 +126,39 @@ enum VoiceCommands {
 
     // MARK: - Few-shot (user message, right before the transcript — research: nearer = weighed more)
 
+    /// Topics deliberately far from real dictation (weather, a garden, a trip): with a price/e-mail
+    /// example gpt-4o-mini copied "Cena bude 2 000 €." into a real e-mail and dropped the greeting
+    /// (2026-09-28). The examples only show the MECHANICS.
     static let examples = """
-    Príklady — ⟦…⟧ označuje, kde appka našla MOŽNÝ hlasový pokyn; ty rozhodni, či to pokyn naozaj je:
-    1) „cena bude 2000 eur, ⟦toto prosím ťa zvýrazni⟧, pošli mi to do piatku“ → voice_commands: \
-    [{phrase: "toto prosím ťa zvýrazni", action: bold_previous, removed_from_text: true}], blocks: \
-    paragraph [„Cena bude 2 000 €.“ bold=true, „ Pošli mi to do piatku.“]
-    2) „⟦zvýraznená bola hlavne suma⟧, inak nič nové“ → action: not_a_command (opisuje minulosť, nie je to \
-    príkaz) — text zostáva: „Zvýraznená bola hlavne suma, inak nič nové.“
-    3) „kúp ⟦odrážka⟧ mlieko ⟦odrážka⟧ chlieb ⟦nový odsek⟧ ďakujem“ → blocks: paragraph „Kúp:“, bullet \
-    „mlieko“, bullet „chlieb“, paragraph „Ďakujem.“
-    4) „⟦začni tučné⟧ termín je piatok ⟦koniec tučného⟧ zvyšok neskôr“ → bold_range: „Termín je piatok.“ \
-    bold=true, „ Zvyšok neskôr.“
+    <priklady>
+    Toto sú LEN ukážky mechaniky pokynov. Ich slová a obsah NIKDY nepoužívaj vo výsledku — výsledok \
+    obsahuje výhradne text z <text_to_correct>, celý, od prvej po poslednú vetu.
+    ⟦…⟧ = appka tu našla MOŽNÝ hlasový pokyn; ty rozhodni, či to pokyn naozaj je.
+    A) „zajtra má pršať celý deň, ⟦toto zvýrazni⟧, dáždnik je v aute“ → voice_commands: \
+    [{phrase: "toto zvýrazni", action: bold_previous, removed_from_text: true}], blocks: \
+    paragraph [„Zajtra má pršať celý deň.“ bold=true, „ Dáždnik je v aute.“]
+    B) „⟦v knihe bolo zvýraznené⟧ celé prvé leto“ → not_a_command (opis, nie príkaz) — text zostáva celý.
+    C) „v záhrade treba ⟦odrážka⟧ pokosiť ⟦odrážka⟧ poliať ⟦nový odsek⟧ vďaka“ → blocks: paragraph \
+    „V záhrade treba:“, bullet „pokosiť“, bullet „poliať“, paragraph „Vďaka.“
+    D) „⟦začni tučné⟧ vlak ide o siedmej ⟦koniec tučného⟧ lístky mám“ → bold_range: „Vlak ide o siedmej.“ \
+    bold=true, „ Lístky mám.“
     Pravidlá: bold_previous = posledná veta alebo fráza PRED pokynom. Text pokynu NIKDY nepatrí do blocks. \
     Formátovanie vyjadri LEN cez blocks a bold — nepíš Markdown znaky (** # -).
+    </priklady>
     """
+
+    /// Share of the transcript's content words (4+ letters, pokyny excluded) found in the result.
+    /// Low = the model dropped or replaced content — the caller falls back to the raw text.
+    static func coverage(raw: String, result: String, commands: [String]) -> Double {
+        func words(_ s: String) -> [String] {
+            String(Array(s).map(fold)).split { !$0.isLetter }.map(String.init).filter { $0.count >= 4 }
+        }
+        let skip = Set(commands.flatMap(words))
+        let src = words(raw).filter { !skip.contains($0) }
+        guard !src.isEmpty else { return 1 }
+        let out = Set(words(result))
+        return Double(src.filter(out.contains).count) / Double(src.count)
+    }
 
     #if DEBUG
     static func selfCheck() {
@@ -152,6 +171,9 @@ enum VoiceCommands {
                       Block(type: "bullet", spans: [Span(text: "b", bold: false)])]
         assert(render(blocks, plain: false) == "**Cena je 2 000 €.** Pošli to.\n\n- a\n- b", "render")
         assert(render(blocks, plain: true) == "Cena je 2 000 €. Pošli to.\n\n- a\n- b", "render plain")
+        assert(coverage(raw: "Čau Peťo, posielam ti návrh spolupráce, tie peniaze zvýrazni",
+                        result: "**Cena bude 2 000 €.**", commands: ["tie peniaze zvýrazni"]) < 0.5, "lost greeting")
+        assert(coverage(raw: "ahoj peťo posielam návrh", result: "Ahoj Peťo,\n\nposielam návrh.", commands: []) == 1, "kept")
         assert(removeLeftovers("Cena. Toto prosím ťa zvýrazni. Pošli.", commands: ["toto prosím ťa zvýrazni"]) == "Cena. Pošli.", "leftover")
         AppLogger.log("[VoiceCommands] selfCheck OK")
     }

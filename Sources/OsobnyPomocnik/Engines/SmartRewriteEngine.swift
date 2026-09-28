@@ -256,6 +256,12 @@ final class SmartRewriteEngine {
         let rendered = VoiceCommands.render(VoiceCommands.parseBlocks(parsed["blocks"]), plain: !detected.allowsRichText)
         var out = VoiceCommands.removeLeftovers(rendered, commands: commands)
         guard !out.isEmpty else { throw SmartRewriteError.invalidResponse }
+        let kept = VoiceCommands.coverage(raw: transcript, result: out, commands: commands)
+        // Prompt tuning legitimately rephrases more than formatting does.
+        guard kept >= (detected.tunesPrompts ? 0.5 : 0.85) else {
+            AppLogger.log("[SmartRewriteEngine] ⚠️ výsledok stratil obsah (zachovaných \(Int(kept * 100)) % slov) — použije sa pôvodný text")
+            throw SmartRewriteError.lostContent
+        }
         AppLogger.log("[SmartRewriteEngine] hlasové pokyny: \(commands.count) vykonaných, \(marked.filter { $0 == VoiceCommands.open }.count) označených appkou")
         // The model may drop it — the signature is the user's own text, so it's guaranteed here.
         if let sig = signature(for: detected), !out.contains(sig) { out += "\n\n" + sig }
@@ -268,12 +274,14 @@ final class SmartRewriteEngine {
         case invalidResponse
         case apiError(Int, String)
         case refused(String)
+        case lostContent
 
         var errorDescription: String? {
             switch self {
             case .invalidResponse:        "Neplatná odpoveď servera."
             case .apiError(let c, let m): "API chyba \(c): \(m)"
             case .refused(let reason):    "Model odmietol prepis: \(reason)"
+            case .lostContent:            "Model vynechal časť textu."
             }
         }
     }

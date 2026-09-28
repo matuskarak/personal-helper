@@ -1254,7 +1254,9 @@ final class DictationEngine {
                     // The raw fallback is deliberately unpunctuated/uncorrected — inserting it
                     // silently reads as "wrong text got pasted" rather than "network hiccup,
                     // here's what you actually said". Say so.
-                    showNotice("Smart rewrite zlyhalo (sieť/timeout) — vložený je surový prepis bez úprav.", sticky: false)
+                    let lost = (error as? SmartRewriteEngine.SmartRewriteError).map { if case .lostContent = $0 { true } else { false } } ?? false
+                    showNotice(lost ? "Smart vynechal časť textu — radšej je vložený tvoj pôvodný prepis."
+                                    : "Smart rewrite zlyhalo (sieť/timeout) — vložený je surový prepis bez úprav.", sticky: false)
                 }
                 isRewriting = false
             } else {
