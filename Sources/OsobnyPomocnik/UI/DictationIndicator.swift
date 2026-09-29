@@ -46,7 +46,8 @@ final class DictationIndicatorController: NSWindowController, NSWindowDelegate {
         window.isOpaque = false
         window.hasShadow = false // shadow is drawn inside SwiftUI; the native window shadow was a rectangular halo around our rounded card
         window.isReleasedWhenClosed = false
-        window.isMovableByWindowBackground = true // drag anywhere on the pill to reposition
+        // Dragging is done by hand (drag()/endDrag()): the whole pill is one click target, and
+        // AppKit's background drag swallowed every drag into that click, hiding the pill.
         // Floating pills are always dark, whatever the system appearance (client decision 2026-09-11).
         window.appearance = NSAppearance(named: .darkAqua)
         let hostingView = NSHostingView(rootView: DictationIndicatorView())
@@ -97,6 +98,28 @@ final class DictationIndicatorController: NSWindowController, NSWindowDelegate {
         isProgrammaticMove = true
         window.setFrame(f, display: true)
         isProgrammaticMove = false
+    }
+
+    // MARK: - Drag (same click-vs-drag approach as ControlPanelWindow)
+
+    private var dragStart: (origin: NSPoint, mouse: NSPoint)?
+
+    func drag() {
+        guard let window else { return }
+        if dragStart == nil { dragStart = (window.frame.origin, NSEvent.mouseLocation) }
+        guard let start = dragStart else { return }
+        let m = NSEvent.mouseLocation
+        let dx = m.x - start.mouse.x, dy = m.y - start.mouse.y
+        guard max(abs(dx), abs(dy)) >= 3 else { return } // click jitter, not a drag
+        window.setFrameOrigin(NSPoint(x: start.origin.x + dx, y: start.origin.y + dy)) // windowDidMove saves it
+    }
+
+    /// True when the gesture was a click (under 3 pt of movement).
+    func endDrag() -> Bool {
+        defer { dragStart = nil }
+        guard let start = dragStart else { return true }
+        let m = NSEvent.mouseLocation
+        return max(abs(m.x - start.mouse.x), abs(m.y - start.mouse.y)) < 3
     }
 
     // MARK: - Positioning
@@ -311,18 +334,18 @@ struct DictationIndicatorView: View {
     private static let levelTicker = Timer.publish(every: 0.07, on: .main, in: .common).autoconnect()
 
     var body: some View {
-        // A real Button (not onTapGesture) is required here: with isMovableByWindowBackground
-        // on, plain content's mouseDownCanMoveWindow stays true and the window-drag machinery
-        // swallows the click before any gesture recognizer sees it. Buttons are the one thing
-        // AppKit reliably excludes from that, so clicking dismisses while dragging elsewhere
-        // on the pill still works.
-        Button {
-            DictationIndicatorController.shared.hide(from: "tap")
-        } label: {
-            coreContent
-        }
-        .buttonStyle(.plain).pointingHandCursor()
-        .accessibilityLabel("Diktovanie, kliknutím zavrieš")
+        // Click closes a finished pill (notice/error); during a recording it's ignored —
+        // hiding it there left the dictation running invisibly. ⌘⇧X cancels a recording.
+        coreContent
+        .contentShape(Rectangle())
+        .gesture(DragGesture(minimumDistance: 0, coordinateSpace: .global)
+            .onChanged { _ in DictationIndicatorController.shared.drag() }
+            .onEnded { _ in
+                guard DictationIndicatorController.shared.endDrag(),
+                      !engine.isRecording, !engine.isStarting else { return }
+                DictationIndicatorController.shared.hide(from: "tap")
+            })
+        .accessibilityLabel("Diktovanie")
             .onReceive(Self.levelTicker) { _ in
                 // ponytail: the pill's NSHostingView is built once and never torn down —
                 // hide() only orderOut's the window — so without this guard the noise-floor
