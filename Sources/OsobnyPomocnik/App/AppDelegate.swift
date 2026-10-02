@@ -285,6 +285,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// recording, ONLY the same mode's shortcut stops it (raw insert) — the other mode's
     /// shortcut is deliberately ignored so muscle memory stays unambiguous: what started
     /// the dictation is what stops it. Smart stop is the one exception (handleSmartStop).
+    /// Set when a dictation stops; a start within 1 s of it is a double press, not intent
+    /// (2026-10-02: stop + accidental restart 0.7 s apart left a stray recording running).
+    private var lastStopAt = Date.distantPast
+
     func handleDictate(mode: DictationEngine.TranscriptionMode) {
         guard requireLicense() else { return }
         if mode == .realtime, !RemoteConfig.shared.realtimeAllowed {
@@ -315,6 +319,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             DictationSounds.playStop()
             Task { @MainActor in await self.finishDictation(engine: engine, label: "handleDictate(\(mode.rawValue))", smart: false) }
         } else {
+            guard Date().timeIntervalSince(lastStopAt) > 1 else {
+                AppLogger.log("[AppDelegate] handleDictate(\(mode.rawValue)) — ignorované, 1 s po zastavení (dvojité stlačenie)")
+                return
+            }
             // Show the indicator immediately — startRecording() now has a multi-second
             // grace period for slow-to-connect mics (Bluetooth/Continuity), so the user
             // needs feedback that something is happening before that resolves.
@@ -368,6 +376,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func finishDictation(engine: DictationEngine, label: String, smart: Bool = false) async {
+        lastStopAt = Date()
         guard let text = await engine.stopAndTranscribe(smart: smart), !text.isEmpty else {
             if engine.didLiveInsert {
                 AppLogger.log("[AppDelegate] \(label) — live-insert dokončený")

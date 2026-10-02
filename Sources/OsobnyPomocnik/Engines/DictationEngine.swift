@@ -2277,16 +2277,18 @@ private final class DictationQualityMonitor: @unchecked Sendable {
     private let minClipRun = 3
     private var pendingRun = 0
 
+    private var fired = false
+
     func reset() {
         lock.lock()
         windowStart = nil; frameRMS.removeAll(); peak = 0
-        clippedSamples = 0; totalSamples = 0; ready = false; pendingRun = 0
+        clippedSamples = 0; totalSamples = 0; ready = false; fired = false; pendingRun = 0
         lock.unlock()
     }
 
     func recordChunk(ptr: UnsafePointer<Int16>, count: Int) {
         lock.lock(); defer { lock.unlock() }
-        guard !ready, count > 0 else { return }
+        guard !ready, !fired, count > 0 else { return }
         let now = Date()
         if windowStart == nil { windowStart = now }
 
@@ -2325,7 +2327,9 @@ private final class DictationQualityMonitor: @unchecked Sendable {
     func consumeIfReady() -> (peakDBFS: Double, clippingPercent: Double, snrDB: Double?)? {
         lock.lock(); defer { lock.unlock() }
         guard ready else { return nil }
-        ready = false // consumed — never fires again this session
+        // `ready = false` alone re-armed on the next chunk (window already elapsed), so the
+        // check fired every 50 ms for the rest of the session — 6 000 log lines on 2026-10-01.
+        ready = false; fired = true
         let peakDBFS = 20 * log10(Double(max(peak, 1e-6)))
         let clippingPercent = totalSamples > 0 ? Double(clippedSamples) / Double(totalSamples) * 100 : 0
         guard frameRMS.count >= 5 else { return (peakDBFS, clippingPercent, nil) }
