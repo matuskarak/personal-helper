@@ -1352,7 +1352,16 @@ final class DictationEngine {
         // the recording is transcribed (and paid for) twice, and this one pastes into
         // whatever is frontmost minutes later (2026-09-24: 91 s late into Claude).
         let model = batchModel, key = batchAPIKey
-        let uploadTask = Task { try await Self.upload(wav: wav, model: model, keywords: keywords, apiKey: key) }
+        // Gemini Tier 1 caps gemini-3.5-transcribe at 100 requests/day (enforced from 2026-10-07).
+        // Past it, finish this dictation on OpenAI rather than fail it, if that key exists.
+        let fallbackKey = Self.isGemini(model) ? openAIKey : ""
+        let uploadTask = Task {
+            do { return try await Self.upload(wav: wav, model: model, keywords: keywords, apiKey: key) }
+            catch TranscriptionError.http(429, _) where !fallbackKey.isEmpty {
+                AppLogger.log("[DictationEngine] Gemini limit (429) — prepisujem cez gpt-transcribe")
+                return try await Self.upload(wav: wav, model: "gpt-transcribe", keywords: keywords, apiKey: fallbackKey)
+            }
+        }
         if let pending { primaryUpload = (pending.id, uploadTask) }
         defer { if primaryUpload?.id == pending?.id { primaryUpload = nil } }
 
@@ -1544,7 +1553,8 @@ final class DictationEngine {
         /// 4xx means the request itself is wrong (bad key, bad audio) — repeating it verbatim
         /// can only fail the same way. Rate limits and 5xx are worth another go.
         var isRetryable: Bool {
-            if case .http(let code, _) = self { return code == 429 || code >= 500 }
+            // A daily quota ("100 requests per day") won't clear in the next 4 s.
+            if case .http(let code, let body) = self { return (code == 429 && !body.contains("per day")) || code >= 500 }
             if case .tooLong = self { return false }   // retrying can't shrink the recording
             return true
         }
