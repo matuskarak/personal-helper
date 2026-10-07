@@ -28,7 +28,7 @@ struct Check {
         assert(cfg["language_codes"] as? [String] == ["sk-SK"], "chýba sk-SK")
         assert(cfg["custom_vocabulary"] as? [String] == ["Elementor", "carousel"],
                "kľúčové slová sa neposielajú ako custom_vocabulary — celý dôvod tejto integrácie")
-        assert(cfg["mode"] == nil, "mode sa neposiela — Google od 2026-10-07 vracia 400 na verbatim")
+        assert((cfg["mode"] as! [String: Any])["type"] as? String == "verbatim", "mode nie je verbatim")
 
         // Keywords are optional; an empty list must omit the field, not send [].
         let bare = try GeminiTranscription.requestBody(base64WAV: "AAAA", model: "m", keywords: [])

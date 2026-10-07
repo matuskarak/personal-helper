@@ -1352,13 +1352,14 @@ final class DictationEngine {
         // the recording is transcribed (and paid for) twice, and this one pastes into
         // whatever is frontmost minutes later (2026-09-24: 91 s late into Claude).
         let model = batchModel, key = batchAPIKey
-        // Gemini Tier 1 caps gemini-3.5-transcribe at 100 requests/day (enforced from 2026-10-07).
-        // Past it, finish this dictation on OpenAI rather than fail it, if that key exists.
+        // Any HTTP error from Gemini → finish this dictation on OpenAI rather than fail it, if
+        // that key exists. 2026-10-07: Google answered every request (even an empty one) with
+        // 400 "Thinking is not enabled for this model", and Tier 1 also caps 100 requests/day.
         let fallbackKey = Self.isGemini(model) ? openAIKey : ""
         let uploadTask = Task {
             do { return try await Self.upload(wav: wav, model: model, keywords: keywords, apiKey: key) }
-            catch TranscriptionError.http(429, _) where !fallbackKey.isEmpty {
-                AppLogger.log("[DictationEngine] Gemini limit (429) — prepisujem cez gpt-transcribe")
+            catch TranscriptionError.http(let code, _) where !fallbackKey.isEmpty {
+                AppLogger.log("[DictationEngine] Gemini HTTP \(code) — prepisujem cez gpt-transcribe")
                 return try await Self.upload(wav: wav, model: "gpt-transcribe", keywords: keywords, apiKey: fallbackKey)
             }
         }

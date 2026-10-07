@@ -16,10 +16,12 @@ enum GeminiTranscription {
     static let maxInlineBase64Chars = 19_000_000
 
     static func requestBody(base64WAV: String, model: String, keywords: [String]) throws -> Data {
-        // No `mode`: verbatim is the default, and since 2026-10-07 sending
-        // `{"type":"verbatim"}` explicitly gets a 400 "Thinking is not enabled for this model".
-        // Never send "smart" — it strips fillers and reformats, which is the Smart engine's job.
-        var config: [String: Any] = ["language_codes": ["sk-SK"]]
+        var config: [String: Any] = [
+            "language_codes": ["sk-SK"],
+            // "smart" would strip fillers and reformat — that's the Smart engine's job here,
+            // and a pre-cleaned transcript can't be compared against OpenAI's raw one.
+            "mode": ["type": "verbatim"]
+        ]
         // The reason this integration exists: OpenAI takes vocabulary hints as a free-text
         // `prompt` the model may ignore, Google takes a real list. Docs cap it at 1000 terms
         // but recommend ~100 — ours is a hand-curated 30, so no truncation logic.
