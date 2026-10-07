@@ -1388,7 +1388,8 @@ final class DictationEngine {
                 return ""
             }
             if let pending { PendingDictationStore.shared.remove(pending) }
-            clearNotice()
+            // Clears the watchdog's "slow" notice — but not the fallback one, which must stay readable.
+            if (noticeHoldUntil ?? .distantPast) < Date() { clearNotice() }
             AppLogger.log("[DictationEngine] Batch transcription completed (\(text.count) chars)")
             // Started only after the primary is done: the inserted text must never wait on a
             // comparison the user isn't reading yet.
