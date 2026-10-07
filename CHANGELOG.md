@@ -2,7 +2,7 @@
 
 ## Nevydané
 
-- Keď Gemini prepis zlyhá (výpadok na strane Google, denný limit), diktovanie sa dokončí cez OpenAI, ak máš jeho kľúč — namiesto chyby.
+- Keď Gemini prepis zlyhá (výpadok na strane Google, denný limit), diktovanie sa dokončí cez OpenAI, ak máš jeho kľúč — namiesto chyby; pilulka to na pár sekúnd oznámi.
 - Dvojité stlačenie skratky pri zastavení už omylom nespustí nové diktovanie (počas 1 s po zastavení sa skratka ignoruje).
 - Pilulku diktovania sa dá znova posúvať myšou; klik počas nahrávania ju už neskryje (diktovanie zrušíš ⌘⇧X).
 - Diktovanie sa vloží aj do appiek ako Claude, Slack či Arc, kde sa text predtým občas nevložil a skončil v pamäti.

@@ -176,6 +176,10 @@ final class DictationEngine {
     /// hints raised mid-dictation) auto-hide so they don't sit on top of an active session.
     private(set) var noticeIsSticky = true
 
+    /// The pill stays up at least until then even if the dictation finishes sooner — a notice
+    /// that flashes for half a second before the paste closes the pill can't be read.
+    var noticeHoldUntil: Date?
+
     func showNotice(_ msg: String, sticky: Bool = true) {
         noticeIsSticky = sticky
         notice = msg
@@ -1360,6 +1364,8 @@ final class DictationEngine {
             do { return try await Self.upload(wav: wav, model: model, keywords: keywords, apiKey: key) }
             catch TranscriptionError.http(let code, _) where !fallbackKey.isEmpty {
                 AppLogger.log("[DictationEngine] Gemini HTTP \(code) — prepisujem cez gpt-transcribe")
+                self.showNotice("Gemini je nedostupný — prepisujem cez záložné OpenAI.", sticky: false)
+                self.noticeHoldUntil = Date().addingTimeInterval(3.5)
                 return try await Self.upload(wav: wav, model: "gpt-transcribe", keywords: keywords, apiKey: fallbackKey)
             }
         }

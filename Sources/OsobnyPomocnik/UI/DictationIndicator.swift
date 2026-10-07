@@ -82,6 +82,12 @@ final class DictationIndicatorController: NSWindowController, NSWindowDelegate {
             AppLogger.log("[Indicator] hide() ← \(caller) ignorované — beží nové diktovanie")
             return
         }
+        if caller != "tap", let until = e.noticeHoldUntil, until > Date() {
+            DispatchQueue.main.asyncAfter(deadline: .now() + until.timeIntervalSinceNow) { [weak self] in
+                self?.hide(from: caller)
+            }
+            return
+        }
         AppLogger.log("[Indicator] hide() ← \(caller) | isRecording=\(e.isRecording) isMicReady=\(e.isMicReady) btNeg=\(e.btNegotiating) err=\(e.connectionError ?? "nil")")
         window?.orderOut(nil)
     }
