@@ -455,6 +455,12 @@ final class DictationEngine {
     private(set) var lastSmartIssues: [String] = []
     private(set) var lastSmartCategory: AppCategory = .generic
     private(set) var lastWasSmart = false
+    /// Smart úprava označeného textu (2026-10-08): text selected in the target app when the
+    /// dictation started. Used only if the dictation ends with Smart — then the speech is the
+    /// edit instruction for it. Plain ⌘⇧D ignores it.
+    private var capturedSelection: String?
+    /// The last result is an edit of selected text — always reviewed, original = the selection.
+    private(set) var lastWasSelectionEdit = false
     private var capturedAppName:    String = ""
     private var capturedBundleID:   String = ""
     /// App the finished dictation was aimed at — read by AppDelegate to avoid pasting a very
@@ -722,6 +728,7 @@ final class DictationEngine {
 
         isSmartMode        = false  // decided by the STOP shortcut — see stopAndTranscribe(smart:)
         capturedScreenshotJPEG = nil
+        capturedSelection  = nil
         capturedProfile    = nil
         capturedCategory   = .generic
         capturedAppName    = ""
@@ -760,6 +767,13 @@ final class DictationEngine {
                   bundleID: NSWorkspace.shared.frontmostApplication?.bundleIdentifier, windowTitle: nil
               )
             : nil
+        // Read now, synchronously: whether it's used is only known at stop (Smart), but by then
+        // the user may have clicked elsewhere. Smart-only, like the screenshot below.
+        if RemoteConfig.shared.smartDictationAllowed, let front = NSWorkspace.shared.frontmostApplication,
+           front.processIdentifier != ProcessInfo.processInfo.processIdentifier {
+            capturedSelection = FocusValidator.selectedText(pid: front.processIdentifier)
+            if let sel = capturedSelection { AppLogger.log("[DictationEngine] označený text: \(sel.count) znakov") }
+        }
         if realtimeModel == .live, transcriptionMode == .realtime {
             AppLogger.log("[DictationEngine] Session profile: \(sessionProfile?.displayName ?? "—"), keywords: \(sessionProfile?.transcriptionKeywords.count ?? 0)")
         }
@@ -1063,6 +1077,7 @@ final class DictationEngine {
         liveText        = ""
         accumulatedText = ""
         capturedScreenshotJPEG = nil
+        capturedSelection = nil
         capturedProfile  = nil
         sessionProfile   = nil
         capturedAppName  = ""
@@ -1087,6 +1102,7 @@ final class DictationEngine {
         lastResultIsMarkdown = false
         lastResultNeedsReview = false
         lastWasSmart = false
+        lastWasSelectionEdit = false
         lastTranscriptionLatencyMs = 0  // never let a previous dictation's latency leak into this one
         if smart {
             if liveInsertActive || didLiveInsert {
@@ -1224,7 +1240,8 @@ final class DictationEngine {
         var rewritten: String?
         if isSmartMode {
             if let raw = result, let profile = capturedProfile {
-                AppLogger.log("[DictationEngine] Smart rewrite starting — rawChars=\(raw.count) hasScreenshot=\(capturedScreenshotJPEG != nil) profile=\(profile.displayName)")
+                let selection = capturedSelection
+                AppLogger.log("[DictationEngine] Smart rewrite starting — rawChars=\(raw.count) hasScreenshot=\(capturedScreenshotJPEG != nil) profile=\(profile.displayName) selectionChars=\(selection?.count ?? 0)")
                 let t0 = Date()
                 isRewriting = true
                 do {
@@ -1233,7 +1250,8 @@ final class DictationEngine {
                         screenshotJPEG: capturedScreenshotJPEG,
                         profile: profile,
                         category: capturedCategory,
-                        apiKey: openAIKey
+                        apiKey: openAIKey,
+                        selection: selection
                     )
                     let output = rewrite.text
                     rewritten = output
@@ -1242,32 +1260,42 @@ final class DictationEngine {
                     // much shorter than a genuine language correction of the same sentence.
                     // Keep the model's attempt in history for debugging, but never let it
                     // silently replace what the user actually said.
+                    // Not for a selection edit: the speech was the instruction, its length says
+                    // nothing about the output's — the (forced) review window is the safety net.
                     let rawWords = DictationQualityEngine.normalizeWords(raw).count
                     let outWords = DictationQualityEngine.normalizeWords(output).count
-                    if rawWords > 3, outWords < rawWords / 2 {
+                    if selection == nil, rawWords > 3, outWords < rawWords / 2 {
                         AppLogger.log("[DictationEngine] ⚠️ Smart rewrite looks like a refusal/derail (rawWords=\(rawWords) outWords=\(outWords)) — using raw transcript instead")
                         result = raw
                     } else {
                         result = output
                         lastResultIsMarkdown = rewrite.category.allowsRichText
-                        lastRawTranscript = raw
+                        lastRawTranscript = selection ?? raw   // the review window's "original"
                         lastSmartChanges = rewrite.changes
                         lastSmartTarget = rewrite.target
                         lastSmartIssues = rewrite.issues
                         lastSmartCategory = rewrite.category
                         lastWasSmart = true
-                        lastResultNeedsReview = SmartRewriteEngine.shared.needsReview(rewrite.category)
+                        lastWasSelectionEdit = selection != nil
+                        lastResultNeedsReview = selection != nil || SmartRewriteEngine.shared.needsReview(rewrite.category)
                     }
                     AppLogger.log("[DictationEngine] Smart rewrite done — outChars=\(output.count), \(Int(Date().timeIntervalSince(t0) * 1000))ms")
                 } catch {
                     AppLogger.log("[DictationEngine] ⚠️ Smart rewrite failed, falling back to raw transcript: \(error)")
-                    result = raw
-                    // The raw fallback is deliberately unpunctuated/uncorrected — inserting it
-                    // silently reads as "wrong text got pasted" rather than "network hiccup,
-                    // here's what you actually said". Say so.
-                    let lost = (error as? SmartRewriteEngine.SmartRewriteError).map { if case .lostContent = $0 { true } else { false } } ?? false
-                    showNotice(lost ? "Smart vynechal časť textu — radšej je vložený tvoj pôvodný prepis."
-                                    : "Smart rewrite zlyhalo (sieť/timeout) — vložený je surový prepis bez úprav.", sticky: false)
+                    if selection != nil {
+                        // The raw text is the instruction ("sprav to formálnejšie") — pasting it
+                        // would overwrite the selection with the command itself. Insert nothing.
+                        result = nil
+                        showNotice("Úprava označeného textu zlyhala — označený text ostal bez zmeny.")
+                    } else {
+                        result = raw
+                        // The raw fallback is deliberately unpunctuated/uncorrected — inserting it
+                        // silently reads as "wrong text got pasted" rather than "network hiccup,
+                        // here's what you actually said". Say so.
+                        let lost = (error as? SmartRewriteEngine.SmartRewriteError).map { if case .lostContent = $0 { true } else { false } } ?? false
+                        showNotice(lost ? "Smart vynechal časť textu — radšej je vložený tvoj pôvodný prepis."
+                                        : "Smart rewrite zlyhalo (sieť/timeout) — vložený je surový prepis bez úprav.", sticky: false)
+                    }
                 }
                 isRewriting = false
             } else {
@@ -1294,6 +1322,7 @@ final class DictationEngine {
 
         isSmartMode        = false
         capturedScreenshotJPEG = nil
+        capturedSelection  = nil
         capturedProfile    = nil
         capturedCategory   = .generic
         sessionProfile     = nil

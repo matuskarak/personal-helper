@@ -52,6 +52,27 @@ enum FocusValidator {
         return false
     }
 
+    /// Text selected in `pid`'s focused element right now, or nil (nothing selected, or AX
+    /// can't tell — no ⌘C fallback, it would touch the clipboard). Smart úprava označeného
+    /// textu (2026-10-08) reads it at dictation start, before anything can change the selection.
+    static func selectedText(pid: pid_t) -> String? {
+        let app = AXUIElementCreateApplication(pid)
+        // Read on the hotkey path — a hung app must not stall the start of the recording.
+        AXUIElementSetMessagingTimeout(app, 0.5)
+        var focusedRef: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(app, kAXFocusedUIElementAttribute as CFString, &focusedRef) == .success,
+              let focusedRef, CFGetTypeID(focusedRef) == AXUIElementGetTypeID()
+        else { return nil }
+        let element = focusedRef as! AXUIElement
+        AXUIElementSetMessagingTimeout(element, 0.5)
+        var selRef: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, kAXSelectedTextAttribute as CFString, &selRef) == .success,
+              let text = selRef as? String,
+              !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        else { return nil }
+        return text
+    }
+
     /// On-screen frame of the currently focused UI element, in Quartz global-display
     /// coordinates (origin top-left, Y down — what AX position/size attributes report).
     /// Callers needing AppKit screen coordinates (origin bottom-left, Y up) must flip it.

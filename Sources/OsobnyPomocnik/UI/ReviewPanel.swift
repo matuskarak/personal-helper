@@ -14,7 +14,9 @@ final class ReviewPanelController: NSObject, NSWindowDelegate {
     private var onAction: (String) -> Void = { _ in }
 
     /// `onAction` gets what the user did: inserted | edited | original | cancelled | copied.
-    func present(text: String, original: String, changes: String, markdown: Bool,
+    /// `originalTitle`: an edit of selected text shows the selection there, not a transcript.
+    func present(text: String, original: String, originalTitle: String = "Pôvodný prepis",
+                 changes: String, markdown: Bool,
                  onAction: @escaping (String) -> Void) {
         close(parking: false)
         target = NSWorkspace.shared.frontmostApplication
@@ -53,7 +55,7 @@ final class ReviewPanelController: NSObject, NSWindowDelegate {
         let view = ReviewView(
             editor: scroll, editorHeight: Self.fittedHeight(of: tv),
             targetName: target?.localizedName,
-            original: original, changes: changes,
+            original: original, originalTitle: originalTitle, changes: changes,
             showChanges: engine.reviewShowChanges, showOriginal: engine.reviewShowOriginal,
             onInsert: { [weak self] in
                 guard let self, let tv = self.textView else { return }
@@ -174,6 +176,7 @@ private struct ReviewView: View {
     let editorHeight: CGFloat
     let targetName: String?
     let original: String
+    let originalTitle: String
     let changes: String
     let showChanges: Bool
     let showOriginal: Bool
@@ -252,7 +255,7 @@ private struct ReviewView: View {
                         .font(.system(size: 10, weight: .semibold))
                         .rotationEffect(.degrees(originalExpanded ? 90 : 0))
                         .accessibilityHidden(true)
-                    Text("Pôvodný prepis").font(Theme.bodyBold(12.5))
+                    Text(originalTitle).font(Theme.bodyBold(12.5))
                     Spacer()
                 }
                 .foregroundStyle(Theme.textSecondary)

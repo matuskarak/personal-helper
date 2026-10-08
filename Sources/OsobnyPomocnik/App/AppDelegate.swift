@@ -421,7 +421,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if engine.lastResultNeedsReview {
             AppLogger.log("[AppDelegate] \(label) — Smart výsledok ide do okna kontroly")
             DictationIndicatorController.shared.hide()
+            // A selection edit lands here every time; its paste replaces the still-active selection.
             ReviewPanelController.shared.present(text: text, original: engine.lastRawTranscript,
+                                                 originalTitle: engine.lastWasSelectionEdit ? "Pôvodný označený text" : "Pôvodný prepis",
                                                  changes: engine.lastSmartChanges,
                                                  markdown: engine.lastResultIsMarkdown,
                                                  onAction: { action in
