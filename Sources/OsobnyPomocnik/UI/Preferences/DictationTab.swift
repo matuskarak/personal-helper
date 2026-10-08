@@ -128,6 +128,11 @@ extension PreferencesView {
                 captionRow("Chýba \(DictationEngine.isGemini(dictation.batchModel) ? "Gemini" : "OpenAI") API kľúč — nastavíš ho vo Všeobecné.",
                            color: Theme.warning)
             }
+            rowDivider
+            let other = DictationEngine.isGemini(dictation.batchModel) ? "OpenAI" : "Gemini"
+            toggleRow(title: "Záložný prepis cez \(other)",
+                      subtitle: "Keď model zlyhá (výpadok, limit), nahrávka sa prepíše cez \(other). Treba mať zadané oba kľúče.",
+                      isOn: $dictation.providerFallbackEnabled)
             // Tieňový prepis je len pre Developer mode (druhý model naviac dvojnásobí cenu) —
             // prepínač je v O aplikácii, nie tu, viď AboutTab.
         }

@@ -416,6 +416,12 @@ final class DictationEngine {
         didSet { UserDefaults.standard.set(liveInsertEnabled, forKey: "dictation.liveInsert") }
     }
     // When true, regular Diktovanie (⇧⌘D) always runs in Smart mode (context capture + rewrite).
+    /// Finish a failed transcription on the other provider (Gemini ↔ OpenAI) when both keys
+    /// exist. Off = the user doesn't want their audio going to the other company at all.
+    var providerFallbackEnabled: Bool {
+        didSet { UserDefaults.standard.set(providerFallbackEnabled, forKey: "dictation.providerFallback") }
+    }
+
     var enterAutoStop: Bool {
         didSet { UserDefaults.standard.set(enterAutoStop, forKey: "dictation.enterAutoStop") }
     }
@@ -519,6 +525,7 @@ final class DictationEngine {
         self.batchModel             = UserDefaults.standard.string(forKey: "dictation.batchModel") ?? "gpt-transcribe"
         self.liveInsertEnabled      = UserDefaults.standard.object(forKey: "dictation.liveInsert") as? Bool ?? true
         self.enterAutoStop          = UserDefaults.standard.bool(forKey: "dictation.enterAutoStop")
+        self.providerFallbackEnabled = UserDefaults.standard.object(forKey: "dictation.providerFallback") as? Bool ?? true
         self.shadowCompareEnabled   = UserDefaults.standard.bool(forKey: "dictation.shadowCompare")
         self.silenceTrimABTestEnabled = UserDefaults.standard.bool(forKey: "dictation.silenceTrimABTest")
         self.pillHintsEnabled       = UserDefaults.standard.object(forKey: "indicator.hints") as? Bool ?? true
@@ -1362,9 +1369,10 @@ final class DictationEngine {
         let gemini = Self.isGemini(model)
         let fallback = gemini ? (model: "gpt-transcribe", key: openAIKey, from: "Gemini", to: "OpenAI")
                               : (model: "gemini-3.5-transcribe", key: geminiKey, from: "OpenAI", to: "Gemini")
+        let fallbackOn = providerFallbackEnabled
         let uploadTask = Task {
             do { return try await Self.upload(wav: wav, model: model, keywords: keywords, apiKey: key) }
-            catch TranscriptionError.http(let code, _) where !fallback.key.isEmpty {
+            catch TranscriptionError.http(let code, _) where fallbackOn && !fallback.key.isEmpty {
                 AppLogger.log("[DictationEngine] \(fallback.from) HTTP \(code) — prepisujem cez \(fallback.model)")
                 self.showNotice("\(fallback.from) je nedostupný — prepisujem cez záložné \(fallback.to).", sticky: false)
                 self.noticeHoldUntil = Date().addingTimeInterval(3.5)
