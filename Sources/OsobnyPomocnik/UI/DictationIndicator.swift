@@ -68,7 +68,7 @@ final class DictationIndicatorController: NSWindowController, NSWindowDelegate {
 
     func show(from caller: String = #function) {
         AppLogger.log("[Indicator] show() ← \(caller) | window visible: \(window?.isVisible == true)")
-        if let hv = window?.contentView as? NSHostingView<DictationIndicatorView> { fit(to: hv.fittingSize) }
+        if let hv = window?.contentView as? NSHostingView<DictationIndicatorView> { fit(to: hv.fittingSize, animated: false) }
         reposition()
         window?.orderFront(nil)
         externalAppPIDOverride = nil // one-shot: don't leak into the next, normally-triggered show()
@@ -93,12 +93,36 @@ final class DictationIndicatorController: NSWindowController, NSWindowDelegate {
     }
 
     /// Window = the content's ideal size. NSHostingView's own sizingOptions never resized this
-    /// borderless panel, so the card was silently clipped to the 300 pt init width. Keeps the
-    /// pill's horizontal centre and top edge where they were.
-    func fit(to size: CGSize) {
-        guard let window, size.width > 0, window.frame.size != size else { return }
+    /// borderless panel, so the card was silently clipped to the 300 pt init width.
+    ///
+    /// GeometryReader reports only the FINAL layout size of an animated change, never the
+    /// in-between frames — SwiftUI animates the drawing, not the layout. So the window must not
+    /// try to "follow" the animation: it grows to the target at once (the card then animates
+    /// inside it) and shrinks only after the card's animation has finished (transparent margin
+    /// until then, nothing clipped). The content is pinned top-leading in the window (see
+    /// `body`) and the window keeps its top-left corner, so resizing never moves what is drawn
+    /// — the badge stays put and only the text column slides in/out. Before, the window snapped
+    /// to the new size and re-centred while the card was still animating from its old frame:
+    /// the pill jumped sideways and got clipped on every fold/unfold.
+    private var pendingShrink: DispatchWorkItem?
+
+    func fit(to size: CGSize, animated: Bool = true) {
+        guard let window, size.width > 0 else { return }
+        pendingShrink?.cancel()
+        pendingShrink = nil
+        guard animated, window.isVisible else { setSize(size); return }
+        let now = CGSize(width: max(window.frame.width, size.width), height: max(window.frame.height, size.height))
+        setSize(now)
+        guard now != size else { return }
+        let work = DispatchWorkItem { [weak self] in self?.setSize(size) }
+        pendingShrink = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: work) // > 0.25 s card animation
+    }
+
+    /// Resizes keeping the top-left corner (AppKit's origin is bottom-left).
+    private func setSize(_ size: CGSize) {
+        guard let window, window.frame.size != size else { return }
         var f = window.frame
-        f.origin.x += (f.width - size.width) / 2
         f.origin.y += f.height - size.height
         f.size = size
         isProgrammaticMove = true
@@ -388,8 +412,11 @@ struct DictationIndicatorView: View {
                     .onAppear { DictationIndicatorController.shared.fit(to: g.size) }
                     .onChange(of: g.size) { _, size in DictationIndicatorController.shared.fit(to: size) }
             })
-            // Both the fold and text-driven width changes animate; GeometryReader above reports
-            // the interpolated size every frame, so the window follows the content smoothly.
+            // Pinned to the window's top-left, which `fit(to:)` keeps fixed — a resize then
+            // never shifts the card while it animates (NSHostingView centres by default).
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            // Both the fold and text-driven width changes animate inside the window; the window
+            // itself only jumps to the target size (grow now, shrink after), see `fit(to:)`.
             .animation(Self.anim, value: isCompact)
             .animation(Self.anim, value: columnWidth)
             // Errors no longer auto-dismiss. A 3 s window meant a failure the user wasn't
