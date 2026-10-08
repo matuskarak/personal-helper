@@ -1356,17 +1356,19 @@ final class DictationEngine {
         // the recording is transcribed (and paid for) twice, and this one pastes into
         // whatever is frontmost minutes later (2026-09-24: 91 s late into Claude).
         let model = batchModel, key = batchAPIKey
-        // Any HTTP error from Gemini → finish this dictation on OpenAI rather than fail it, if
-        // that key exists. 2026-10-07: Google answered every request (even an empty one) with
-        // 400 "Thinking is not enabled for this model", and Tier 1 also caps 100 requests/day.
-        let fallbackKey = Self.isGemini(model) ? openAIKey : ""
+        // Any HTTP error from one provider → finish this dictation on the other, if that key
+        // exists. 2026-10-07: Google answered every request (even an empty one) with 400
+        // "Thinking is not enabled for this model" for a day; Tier 1 also caps 100 requests/day.
+        let gemini = Self.isGemini(model)
+        let fallback = gemini ? (model: "gpt-transcribe", key: openAIKey, from: "Gemini", to: "OpenAI")
+                              : (model: "gemini-3.5-transcribe", key: geminiKey, from: "OpenAI", to: "Gemini")
         let uploadTask = Task {
             do { return try await Self.upload(wav: wav, model: model, keywords: keywords, apiKey: key) }
-            catch TranscriptionError.http(let code, _) where !fallbackKey.isEmpty {
-                AppLogger.log("[DictationEngine] Gemini HTTP \(code) — prepisujem cez gpt-transcribe")
-                self.showNotice("Gemini je nedostupný — prepisujem cez záložné OpenAI.", sticky: false)
+            catch TranscriptionError.http(let code, _) where !fallback.key.isEmpty {
+                AppLogger.log("[DictationEngine] \(fallback.from) HTTP \(code) — prepisujem cez \(fallback.model)")
+                self.showNotice("\(fallback.from) je nedostupný — prepisujem cez záložné \(fallback.to).", sticky: false)
                 self.noticeHoldUntil = Date().addingTimeInterval(3.5)
-                return try await Self.upload(wav: wav, model: "gpt-transcribe", keywords: keywords, apiKey: fallbackKey)
+                return try await Self.upload(wav: wav, model: fallback.model, keywords: keywords, apiKey: fallback.key)
             }
         }
         if let pending { primaryUpload = (pending.id, uploadTask) }
