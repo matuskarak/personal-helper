@@ -2,7 +2,7 @@
 
 ## Nevydané
 
-- Úprava označeného textu hlasom: označ text, spusti diktovanie, povedz čo s ním (napr. „sprav to formálnejšie“, „daj to do odrážok“, „pridaj tam, že…“) a ukonči ho Smart skratkou (⌘⇧A) — upravený text sa ukáže v okne kontroly a po vložení nahradí označený text.
+- Úprava označeného textu hlasom: označ text, stlač ⌘⇧A, povedz čo s ním (napr. „sprav to formálnejšie“, „daj to do odrážok“, „pridaj tam, že…“) a znova ⌘⇧A — upravený text sa ukáže v okne kontroly a po vložení nahradí označený text. ⌘⇧A teda diktovanie aj spúšťa.
 - Smart pri odpovedi v e-mailovom vlákne už nepridáva „Ďakujem“, „Majte sa“ či „S pozdravom“, ktoré si nenadiktoval; pri novom e-maile funguje ako doteraz.
 - Pilulka diktovania sa zbaľuje a rozbaľuje plynulo, bez poskakovania a orezania (najmä pri živom vkladaní ⌘⇧S).
 - Keď prepis zlyhá na strane poskytovateľa (výpadok, denný limit), diktovanie sa dokončí cez druhého — Gemini ↔ OpenAI, ak máš zadané oba kľúče — namiesto chyby; pilulka to na pár sekúnd oznámi. Vypnúť sa dá v Nastavenia → Diktovanie.

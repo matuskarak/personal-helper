@@ -347,8 +347,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// nothing at all — Smart is a way of FINISHING a dictation, not a mode of its own.
     func handleSmartStop() {
         let engine = DictationEngine.shared
+        // ⌘⇧A with nothing running starts a dictation (user 2026-10-09: "označím text, ⌘⇧A,
+        // nadiktujem, ⌘⇧A" is easier to grasp than starting with ⌘⇧D). It ends with Smart only
+        // if stopped by ⌘⇧A again — the stop key decides, as before.
         guard engine.isRecording else {
-            AppLogger.log("[AppDelegate] handleSmartStop — ignorované (nebeží diktovanie)")
+            guard RemoteConfig.shared.smartDictationAllowed else { DictationSounds.playRefused(); return }
+            AppLogger.log("[AppDelegate] handleSmartStop — nebeží diktovanie, spúšťam")
+            handleDictate(mode: .batch)
             return
         }
         guard RemoteConfig.shared.smartDictationAllowed else {

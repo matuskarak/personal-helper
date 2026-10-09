@@ -32,19 +32,20 @@ enum SmartTestBench {
         var out = "# Smart test — \(engine.model) — \(Date())\n"
         var rows: [[String: Any]] = []
         // A corpus in dump-in.json (from the prompt bench) replaces the built-in cases.
-        let corpus = read("dump-in.json")?.compactMap { item -> (String, AppCategory, String)? in
+        // Optional "selection" = Smart úprava označeného textu; transcript is then the instruction.
+        let corpus = read("dump-in.json")?.compactMap { item -> (String, AppCategory, String, String?)? in
             guard let id = item["id"] as? String, let t = item["transcript"] as? String,
                   let c = AppCategory(rawValue: item["category"] as? String ?? "") else { return nil }
-            return (id, c, t)
-        } ?? cases.enumerated().map { ("c\($0.offset)", $0.element.0, $0.element.1) }
-        for (id, category, text) in corpus {
+            return (id, c, t, item["selection"] as? String)
+        } ?? cases.enumerated().map { ("c\($0.offset)", $0.element.0, $0.element.1, nil) }
+        for (id, category, text, selection) in corpus {
             let tones: [SmartRewriteEngine.Tone] = [savedTone]
             for tone in tones {
                 engine.tone = tone
                 out += "\n## \(category.rawValue) · \(tone.rawValue)\n\n**Vstup:** \(text)\n\n"
                 do {
                     let r = try await engine.rewrite(transcript: text, screenshotJPEG: nil, profile: profile(category),
-                                                     category: category, apiKey: key)
+                                                     category: category, apiKey: key, selection: selection)
                     out += "**Výstup:**\n\n\(r.text)\n\n_zmeny: \(r.changes) · cieľ: \(r.target) · issues: \(r.issues)_\n"
                     rows.append(["id": id, "out": r.text])
                 } catch {
