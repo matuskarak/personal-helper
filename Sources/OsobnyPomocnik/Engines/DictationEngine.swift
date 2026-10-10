@@ -1158,6 +1158,20 @@ final class DictationEngine {
     /// Stops mic, commits audio buffer, waits for server's completed transcript, then returns it.
     /// `smart` comes from the STOP shortcut: same shortcut as start = raw insert,
     /// Smart shortcut = rewrite with screen context before inserting.
+    /// One numbers-only line per dictation — data for calibrating a future "too far from the
+    /// mic" warning (CLAUDE.md). dBFS RMS of 50 ms frames over the whole recording; `tichá_reč`
+    /// = % of speech frames whose peak is below SilenceTrimmer.threshold (300 ≈ -40.8 dBFS peak),
+    /// i.e. speech the trimmer would treat as silence. `strih` only exists in batch mode.
+    private func logSpeechLevel(micName: String) {
+        guard let s = qualityMonitor.speechLevelSummary() else { return }
+        func db(_ v: Double?) -> String { v.map { String(format: "%.1f", $0) } ?? "–" }
+        let trim = transcriptionMode == .batch ? String(format: "%.1fs", silenceTrimmer.trimmedSeconds) : "–"
+        AppLogger.log(String(format: "[Úroveň reči] '%@' rámce=%d šum=%@ reč_medián=%@ reč_p90=%@ podiel_reči=%.0f%% tichá_reč=%@ strih=%@",
+                             micName, s.frames, db(s.noiseFloorDB), db(s.speechMedianDB), db(s.speechP90DB),
+                             s.speechSharePercent,
+                             s.quietSpeechSharePercent.map { String(format: "%.0f%%", $0) } ?? "–", trim))
+    }
+
     func stopAndTranscribe(smart: Bool = false) async -> String? {
         lastResultIsMarkdown = false
         lastResultNeedsReview = false
@@ -1185,8 +1199,10 @@ final class DictationEngine {
         // shared captured*/isSmartMode state or insert text into whatever's now frontmost.
         let mySessionID = sessionID
         let myBundleID = capturedBundleID  // the next session resets it
+        let micName = captureDevice?.name ?? "?"  // stopAudio() clears captureDevice
 
         stopAudio()
+        logSpeechLevel(micName: micName)
         isTranscribing = true
         let firstInfo = chunkCounter.firstChunkInfo
         let silence = silenceTracker.summary
@@ -2441,6 +2457,149 @@ final class SilenceTrimmer: @unchecked Sendable {
 }
 private let silenceTrimmer = SilenceTrimmer()
 
+/// Logging-only groundwork for a future "si ďaleko od mikrofónu" warning (CLAUDE.md, Rýchlosť —
+/// rozhodnutia 2026-10-10): speech level over the WHOLE recording, pauses excluded. Each 50 ms
+/// frame lands in a fixed 1 dB histogram (RMS dBFS, 0…-100), split by whether the frame's PEAK is
+/// below SilenceTrimmer.threshold — the trimmer compares peak amplitude, so this mirrors it
+/// (per 50 ms frame here vs. per tap chunk in the trimmer — close enough for calibration data).
+/// Fixed storage, allocated once: no array growth, no allocation per buffer. Not thread-safe by
+/// itself — lives under DictationQualityMonitor's lock.
+struct SpeechLevelHistogram {
+    static let bins = 101                 // bin b = RMS in (-(b+1), -b] dBFS; bin 100 = ≤ -100
+    static let speechAboveNoiseDB = 10.0  // speech frame = RMS ≥ noise floor + this
+    static let noisePercentile = 0.10     // noise floor = 10th percentile of all frames
+    static let frameSamples = 1_200       // 50 ms at 24 kHz
+
+    private var loud = [Int](repeating: 0, count: bins)   // frame peak ≥ trimmer threshold
+    private var quiet = [Int](repeating: 0, count: bins)  // frame peak <  trimmer threshold
+    private var pendingSumSquares: Float = 0
+    private var pendingCount = 0
+    private var pendingPeak: Int16 = 0
+
+    mutating func reset() {
+        for i in 0..<Self.bins { loud[i] = 0; quiet[i] = 0 }
+        pendingSumSquares = 0; pendingCount = 0; pendingPeak = 0
+    }
+
+    static func bin(forDB db: Double) -> Int {
+        guard db.isFinite else { return bins - 1 }
+        return min(bins - 1, max(0, Int((-db).rounded(.down))))
+    }
+    /// What a bin reports: its center (1 dB resolution); the open-ended last bin reports -100.
+    static func db(forBin b: Int) -> Double { b >= bins - 1 ? -100 : -(Double(b) + 0.5) }
+
+    mutating func addFrame(rms: Float, peak: Int16) {
+        let b = Self.bin(forDB: 20 * log10(Double(max(rms, 1e-7))))
+        if peak < SilenceTrimmer.threshold { quiet[b] += 1 } else { loud[b] += 1 }
+    }
+
+    /// Feeds raw samples, cut into fixed 50 ms frames (a partial frame carries over to the next call).
+    mutating func record(ptr: UnsafePointer<Int16>, count: Int) {
+        for i in 0..<count {
+            let v = ptr[i]
+            let mag = v == Int16.min ? Int16.max : abs(v)
+            if mag > pendingPeak { pendingPeak = mag }
+            let f = Float(v) / Float(Int16.max)
+            pendingSumSquares += f * f
+            pendingCount += 1
+            if pendingCount == Self.frameSamples {
+                addFrame(rms: sqrt(pendingSumSquares / Float(pendingCount)), peak: pendingPeak)
+                pendingSumSquares = 0; pendingCount = 0; pendingPeak = 0
+            }
+        }
+    }
+
+    struct Summary {
+        var frames: Int
+        var noiseFloorDB: Double
+        var speechMedianDB: Double?
+        var speechP90DB: Double?
+        var speechSharePercent: Double
+        var quietSpeechSharePercent: Double?
+    }
+
+    /// Bin 0 is the LOUDEST, so this walks from the quiet end: `p` = share of frames at or
+    /// below the returned level (nearest-rank).
+    private static func percentile(_ counts: [Int], upToBin last: Int, from first: Int, _ p: Double) -> Double? {
+        var total = 0
+        for b in first...last { total += counts[b] }
+        guard total > 0 else { return nil }
+        let target = max(1, Int((p * Double(total)).rounded(.up)))
+        var cum = 0
+        for b in stride(from: last, through: first, by: -1) {
+            cum += counts[b]
+            if cum >= target { return db(forBin: b) }
+        }
+        return db(forBin: first)
+    }
+
+    func summary() -> Summary? {
+        let all = (0..<Self.bins).map { loud[$0] + quiet[$0] }
+        let frames = all.reduce(0, +)
+        guard frames > 0,
+              let noise = Self.percentile(all, upToBin: Self.bins - 1, from: 0, Self.noisePercentile)
+        else { return nil }
+        // Speech bins: bin center -(b+0.5) ≥ noise + 10 dB  ⇔  b ≤ -(noise + 10) - 0.5.
+        let lastSpeechBin = Int((-(noise + Self.speechAboveNoiseDB) - 0.5).rounded(.down))
+        var speechFrames = 0, quietSpeech = 0
+        if lastSpeechBin >= 0 {
+            for b in 0...min(lastSpeechBin, Self.bins - 1) { speechFrames += all[b]; quietSpeech += quiet[b] }
+        }
+        let hasSpeech = speechFrames > 0
+        return Summary(
+            frames: frames,
+            noiseFloorDB: noise,
+            speechMedianDB: hasSpeech ? Self.percentile(all, upToBin: lastSpeechBin, from: 0, 0.5) : nil,
+            speechP90DB: hasSpeech ? Self.percentile(all, upToBin: lastSpeechBin, from: 0, 0.9) : nil,
+            speechSharePercent: Double(speechFrames) / Double(frames) * 100,
+            quietSpeechSharePercent: hasSpeech ? Double(quietSpeech) / Double(speechFrames) * 100 : nil)
+    }
+
+    #if DEBUG
+    static func selfCheck() {
+        func amp(_ db: Double) -> Float { Float(pow(10, db / 20)) }
+        // 100 frames: 60 noise at -60 dB, 30 loud speech at -20 dB, 10 quiet speech at -35 dB
+        // whose peak (200) is under the trimmer threshold.
+        var h = SpeechLevelHistogram()
+        for _ in 0..<60 { h.addFrame(rms: amp(-60.2), peak: 50) }
+        for _ in 0..<30 { h.addFrame(rms: amp(-20.2), peak: 9000) }
+        for _ in 0..<10 { h.addFrame(rms: amp(-35.2), peak: 200) }
+        let s = h.summary()!
+        assert(s.frames == 100)
+        assert(s.noiseFloorDB == -60.5, "p10 must sit in the noise bin, got \(s.noiseFloorDB)")
+        assert(abs(s.speechSharePercent - 40) < 0.01, "40 of 100 frames are ≥ noise + 10 dB")
+        assert(s.speechMedianDB == -20.5 && s.speechP90DB == -20.5, "got \(String(describing: s.speechMedianDB))")
+        assert(abs((s.quietSpeechSharePercent ?? -1) - 25) < 0.01, "10 of 40 speech frames are under the trimmer threshold")
+        // Median landing in the quieter speech group: 30×-35, 10×-20 → median -35, p90 -20.
+        var h2 = SpeechLevelHistogram()
+        for _ in 0..<60 { h2.addFrame(rms: amp(-70.2), peak: 10) }
+        for _ in 0..<30 { h2.addFrame(rms: amp(-35.2), peak: 200) }
+        for _ in 0..<10 { h2.addFrame(rms: amp(-20.2), peak: 9000) }
+        let s2 = h2.summary()!
+        assert(s2.speechMedianDB == -35.5 && s2.speechP90DB == -20.5,
+               "got \(String(describing: s2.speechMedianDB)) / \(String(describing: s2.speechP90DB))")
+        // Frames just under noise + 10 dB are NOT speech: noise -60.5, frames at -51.2 (center -51.5).
+        var h5 = SpeechLevelHistogram()
+        for _ in 0..<10 { h5.addFrame(rms: amp(-60.2), peak: 50) }
+        for _ in 0..<10 { h5.addFrame(rms: amp(-51.2), peak: 50) }
+        assert(h5.summary()!.speechSharePercent == 0, "a frame 9 dB above noise must not count as speech")
+        // Digital zero: clamps to the -100 bin, no speech, no crash.
+        var h3 = SpeechLevelHistogram()
+        for _ in 0..<20 { h3.addFrame(rms: 0, peak: 0) }
+        let s3 = h3.summary()!
+        assert(s3.noiseFloorDB == -100 && s3.speechSharePercent == 0 && s3.speechMedianDB == nil)
+        // Framing: 2.5 frames of samples → exactly 2 frames counted, the half carries over.
+        var h4 = SpeechLevelHistogram()
+        let samples = [Int16](repeating: 1000, count: frameSamples * 5 / 2)
+        samples.withUnsafeBufferPointer { h4.record(ptr: $0.baseAddress!, count: $0.count) }
+        assert(h4.summary()?.frames == 2)
+        h4.reset()
+        assert(h4.summary() == nil)
+        AppLogger.log("[SpeechLevelHistogram] selfCheck OK")
+    }
+    #endif
+}
+
 /// Passive audio-quality check over the first ~15s of a session — peak level,
 /// clipping, and a noise-floor/SNR estimate (same heuristic as MicTestEngine, minus
 /// the transcript-accuracy part since there's no reference sentence during real
@@ -2468,9 +2627,12 @@ private final class DictationQualityMonitor: @unchecked Sendable {
     private var pendingRun = 0
 
     private var fired = false
+    // Whole-recording speech level (not just the first 15 s) — see SpeechLevelHistogram.
+    private var levels = SpeechLevelHistogram()
 
     func reset() {
         lock.lock()
+        levels.reset()
         windowStart = nil; frameRMS.removeAll(); peak = 0
         clippedSamples = 0; totalSamples = 0; ready = false; fired = false; pendingRun = 0
         lock.unlock()
@@ -2478,6 +2640,7 @@ private final class DictationQualityMonitor: @unchecked Sendable {
 
     func recordChunk(ptr: UnsafePointer<Int16>, count: Int) {
         lock.lock(); defer { lock.unlock() }
+        if count > 0 { levels.record(ptr: ptr, count: count) }
         guard !ready, !fired, count > 0 else { return }
         let now = Date()
         if windowStart == nil { windowStart = now }
@@ -2511,6 +2674,12 @@ private final class DictationQualityMonitor: @unchecked Sendable {
         if let start = windowStart, now.timeIntervalSince(start) >= windowDuration {
             ready = true
         }
+    }
+
+    /// Whole-recording speech level, read once at the end of a dictation (stopAndTranscribe).
+    func speechLevelSummary() -> SpeechLevelHistogram.Summary? {
+        lock.lock(); defer { lock.unlock() }
+        return levels.summary()
     }
 
     /// Non-nil exactly once — the caller (MainActor poll loop) consumes it and moves on.

@@ -35,6 +35,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         AppProfile.selfCheck()
         KeywordSuggestionEngine.selfCheck()
         SilenceTrimmer.selfCheck()
+        SpeechLevelHistogram.selfCheck()
         RichText.selfCheck()
         VoiceCommands.selfCheck()
         #endif
