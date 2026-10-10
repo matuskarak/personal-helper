@@ -331,6 +331,15 @@ final class DictationEngine {
         didSet { UserDefaults.standard.set(silenceTrimABTestEnabled, forKey: "dictation.silenceTrimABTest") }
     }
 
+    /// Dev-only A/B (see CLAUDE.md): every batch dictation is also sent as a lossless FLAC copy
+    /// to the same model, in parallel with the WAV, to measure whether the smaller upload is
+    /// faster without changing the text. Only the WAV result is ever inserted. Doubles the bill.
+    var compressionABTestEnabled: Bool {
+        didSet { UserDefaults.standard.set(compressionABTestEnabled, forKey: "dictation.compressionABTest") }
+    }
+    /// Set when the primary upload had to switch provider — the pair is then not comparable.
+    private var primaryUsedFallback = false
+
     /// Explanatory sub-labels in the pill ("prepis až po zastavení", "Klikni na zatvorenie").
     /// Useful until the shortcuts are muscle memory, then just makes the pill bigger.
     var pillHintsEnabled: Bool {
@@ -534,6 +543,7 @@ final class DictationEngine {
         self.providerFallbackEnabled = UserDefaults.standard.object(forKey: "dictation.providerFallback") as? Bool ?? true
         self.shadowCompareEnabled   = UserDefaults.standard.bool(forKey: "dictation.shadowCompare")
         self.silenceTrimABTestEnabled = UserDefaults.standard.bool(forKey: "dictation.silenceTrimABTest")
+        self.compressionABTestEnabled = UserDefaults.standard.bool(forKey: "dictation.compressionABTest")
         self.pillHintsEnabled       = UserDefaults.standard.object(forKey: "indicator.hints") as? Bool ?? true
     }
 
@@ -1396,9 +1406,38 @@ final class DictationEngine {
         let fallback = gemini ? (model: "gpt-transcribe", key: openAIKey, from: "Gemini", to: "OpenAI")
                               : (model: "gemini-3.5-transcribe", key: geminiKey, from: "OpenAI", to: "Gemini")
         let fallbackOn = providerFallbackEnabled
+        primaryUsedFallback = false
+        // Compression A/B: FLAC is encoded first so both uploads leave at the same moment and
+        // see the same network. Its result never feeds the inserted text.
+        var abTest: CompressionABTest?
+        if compressionABTestEnabled, RemoteConfig.shared.developerModeGranted, !key.isEmpty {
+            let encodeStart = Date()
+            if let flac = AudioCompression.flacData(pcm16: pcmData, sampleRate: 24_000) {
+                abTest = CompressionABTest(flac: flac, encodeMs: Int(Date().timeIntervalSince(encodeStart) * 1000))
+            } else {
+                AppLogger.log("[DictationEngine] ⚠️ A/B kompresie — FLAC kódovanie zlyhalo, variant preskočený")
+            }
+        }
+        let abStart = Date()
+        let flacTask: Task<FlacOutcome, Never>? = abTest.map { ab in
+            Task.detached {
+                let start = Date()
+                do {
+                    let text = try await Self.uploadOnce(wav: ab.flac, model: model, keywords: keywords, apiKey: key, flac: true)
+                    return FlacOutcome(text: text, ms: Int(Date().timeIntervalSince(start) * 1000), error: nil)
+                } catch {
+                    return FlacOutcome(text: nil, ms: Int(Date().timeIntervalSince(start) * 1000),
+                                       error: error.localizedDescription)
+                }
+            }
+        }
+        // Any exit without a recorded pair (failure, empty, cancel) drops the FLAC request.
+        var abHandedOff = false
+        defer { if !abHandedOff { flacTask?.cancel() } }
         let uploadTask = Task {
             do { return try await Self.upload(wav: wav, model: model, keywords: keywords, apiKey: key) }
             catch TranscriptionError.http(let code, _) where fallbackOn && !fallback.key.isEmpty {
+                self.primaryUsedFallback = true
                 AppLogger.log("[DictationEngine] \(fallback.from) HTTP \(code) — prepisujem cez \(fallback.model)")
                 self.showNotice("\(fallback.from) je nedostupný — prepisujem cez záložné \(fallback.to).", sticky: false)
                 self.noticeHoldUntil = Date().addingTimeInterval(3.5)
@@ -1412,6 +1451,7 @@ final class DictationEngine {
             let uploadStart = Date()
             let text = try await uploadTask.value
             lastTranscriptionLatencyMs = Int(Date().timeIntervalSince(uploadStart) * 1000)
+            let wavLatencyMs = Int(Date().timeIntervalSince(abStart) * 1000)
             watchdog.cancel()
             // An empty transcript over audible speech is the model failing to hear it, not the
             // user's silence — keep the recording so it can be retried (possibly on the other
@@ -1431,6 +1471,16 @@ final class DictationEngine {
             // comparison the user isn't reading yet.
             startShadowTranscription(wav: wav, keywords: keywords, seconds: seconds)
             startTrimABTest(rawPCM: rawPCM, keywords: keywords, seconds: seconds)
+            if let abTest, let flacTask {
+                if primaryUsedFallback {
+                    AppLogger.log("[DictationEngine] A/B kompresie — WAV šiel cez záložný model, pár sa nepočíta")
+                } else {
+                    abHandedOff = true
+                    recordCompressionABTest(abTest, flacTask: flacTask, wavText: text, wavBytes: wav.count,
+                                            wavLatencyMs: wavLatencyMs, audioSeconds: Double(pcmData.count) / 48_000,
+                                            model: model, seconds: seconds)
+                }
+            }
             return text
         } catch where uploadTask.isCancelled {
             watchdog.cancel()
@@ -1529,6 +1579,34 @@ final class DictationEngine {
         }
     }
 
+    struct CompressionABTest: Sendable { let flac: Data; let encodeMs: Int }
+    struct FlacOutcome: Sendable { let text: String?; let ms: Int; let error: String? }
+
+    /// Waits for the FLAC half of the compression A/B and files the pair to history. Numbers
+    /// only in the log — the texts stay in local history for comparison.
+    private func recordCompressionABTest(_ ab: CompressionABTest, flacTask: Task<FlacOutcome, Never>,
+                                         wavText: String, wavBytes: Int, wavLatencyMs: Int,
+                                         audioSeconds: Double, model: String, seconds: Int) {
+        let entryID = currentEntryID
+        Task { @MainActor in
+            let r = await flacTask.value
+            var result = CompressionABResult(model: model, audioSeconds: audioSeconds, wavBytes: wavBytes,
+                                             flacBytes: ab.flac.count, encodeMs: ab.encodeMs,
+                                             wavLatencyMs: wavLatencyMs, flacLatencyMs: nil,
+                                             text: r.text, error: r.error, wordDiff: nil)
+            if let flacText = r.text {
+                result.flacLatencyMs = r.ms
+                result.wordDiff = DictationQualityEngine.wordLevenshtein(
+                    DictationQualityEngine.normalizeWords(wavText), DictationQualityEngine.normalizeWords(flacText))
+                // Real second spend on the same model — counted like the shadow's.
+                UsageStore.shared.logDictation(seconds: seconds, text: flacText, model: model)
+            }
+            DictationHistoryStore.shared.attachCompressionTest(to: entryID, result: result)
+            let ratio = Double(ab.flac.count) / Double(max(wavBytes, 1)) * 100
+            AppLogger.log("[DictationEngine] A/B kompresie (\(model)): audio=\(String(format: "%.1f", audioSeconds))s wav=\(wavBytes)B flac=\(ab.flac.count)B (\(Int(ratio.rounded())) %) encode=\(ab.encodeMs)ms latencia wav=\(wavLatencyMs)ms flac=\(result.flacLatencyMs.map { "\($0)ms" } ?? "–") rozdiel slov=\(result.wordDiff.map(String.init) ?? "–")\(r.error == nil ? "" : " (FLAC zlyhal)")")
+        }
+    }
+
     /// Re-uploads a recording whose transcription failed earlier. The text goes to history and
     /// the insert-from-memory slot rather than straight into whatever happens to be focused —
     /// minutes may have passed and the field it was dictated into is probably long gone.
@@ -1607,14 +1685,15 @@ final class DictationEngine {
     /// One transcription, retried on transient failures. Most real-world drops (a DNS blip,
     /// a wifi handover) clear within seconds — a single attempt turned those into a lost
     /// dictation, which is exactly what kept happening.
-    private static func upload(wav: Data, model: String, keywords: [String], apiKey: String) async throws -> String {
+    private static func upload(wav: Data, model: String, keywords: [String], apiKey: String,
+                               flac: Bool = false) async throws -> String {
         var lastError: Error = TranscriptionError.badResponse
         for attempt in 1...3 {
             try Task.checkCancellation()  // a menu retry took this recording over — stop here
             if attempt > 1 { try? await Task.sleep(for: .seconds(attempt == 2 ? 1 : 4)) }
             try Task.checkCancellation()
             do {
-                return try await uploadOnce(wav: wav, model: model, keywords: keywords, apiKey: apiKey)
+                return try await uploadOnce(wav: wav, model: model, keywords: keywords, apiKey: apiKey, flac: flac)
             } catch let error as TranscriptionError where !error.isRetryable {
                 throw error
             } catch {
@@ -1642,9 +1721,12 @@ final class DictationEngine {
         }
     }
 
-    private static func uploadOnce(wav: Data, model: String, keywords: [String], apiKey: String) async throws -> String {
+    /// `flac` = `wav` actually holds FLAC bytes (compression A/B test) — only the declared
+    /// type/filename change, the request is otherwise identical.
+    private static func uploadOnce(wav: Data, model: String, keywords: [String], apiKey: String,
+                                   flac: Bool = false) async throws -> String {
         if isGemini(model) {
-            return try await uploadOnceGemini(wav: wav, model: model, keywords: keywords, apiKey: apiKey)
+            return try await uploadOnceGemini(wav: wav, model: model, keywords: keywords, apiKey: apiKey, flac: flac)
         }
         let boundary = "Boundary-\(UUID().uuidString)"
         var req = URLRequest(url: URL(string: "https://api.openai.com/v1/audio/transcriptions")!)
@@ -1667,8 +1749,8 @@ final class DictationEngine {
         // /v1/audio/transcriptions endpoint for gpt-transcribe (HTTP 200 with `prompt`).
         if !keywords.isEmpty { addField("prompt", keywords.joined(separator: ", ")) }
         body.append("--\(boundary)\r\n".data(using: .utf8)!)
-        body.append("Content-Disposition: form-data; name=\"file\"; filename=\"audio.wav\"\r\n".data(using: .utf8)!)
-        body.append("Content-Type: audio/wav\r\n\r\n".data(using: .utf8)!)
+        body.append("Content-Disposition: form-data; name=\"file\"; filename=\"audio.\(flac ? "flac" : "wav")\"\r\n".data(using: .utf8)!)
+        body.append("Content-Type: audio/\(flac ? "flac" : "wav")\r\n\r\n".data(using: .utf8)!)
         body.append(wav)
         body.append("\r\n--\(boundary)--\r\n".data(using: .utf8)!)
         req.httpBody = body
@@ -1690,7 +1772,8 @@ final class DictationEngine {
 
     /// Same contract as `uploadOnce`, against Google's Interactions API instead of OpenAI's.
     /// Body/response shaping lives in GeminiTranscription; this is just the transport.
-    private static func uploadOnceGemini(wav: Data, model: String, keywords: [String], apiKey: String) async throws -> String {
+    private static func uploadOnceGemini(wav: Data, model: String, keywords: [String], apiKey: String,
+                                         flac: Bool = false) async throws -> String {
         let encoded = wav.base64EncodedString()
         guard encoded.count < GeminiTranscription.maxInlineBase64Chars else { throw TranscriptionError.tooLong }
 
@@ -1698,7 +1781,8 @@ final class DictationEngine {
         req.httpMethod = "POST"
         req.setValue(apiKey, forHTTPHeaderField: "x-goog-api-key")
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        req.httpBody = try GeminiTranscription.requestBody(base64WAV: encoded, model: model, keywords: keywords)
+        req.httpBody = try GeminiTranscription.requestBody(base64WAV: encoded, model: model, keywords: keywords,
+                                                           mimeType: flac ? "audio/flac" : "audio/wav")
 
         let (data, response) = try await batchSession.data(for: req)
         guard let http = response as? HTTPURLResponse else { throw TranscriptionError.badResponse }

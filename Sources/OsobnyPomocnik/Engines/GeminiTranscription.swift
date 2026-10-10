@@ -15,7 +15,9 @@ enum GeminiTranscription {
     /// Files API two-step is the upgrade path.
     static let maxInlineBase64Chars = 19_000_000
 
-    static func requestBody(base64WAV: String, model: String, keywords: [String]) throws -> Data {
+    /// `mimeType` is "audio/flac" only for the dev compression A/B test's second upload.
+    static func requestBody(base64WAV: String, model: String, keywords: [String],
+                            mimeType: String = "audio/wav") throws -> Data {
         var config: [String: Any] = [
             "language_codes": ["sk-SK"],
             // "smart" would strip fillers and reformat — that's the Smart engine's job here,
@@ -29,7 +31,7 @@ enum GeminiTranscription {
 
         return try JSONSerialization.data(withJSONObject: [
             "model": model,
-            "input": [["type": "audio", "data": base64WAV, "mime_type": "audio/wav"]],
+            "input": [["type": "audio", "data": base64WAV, "mime_type": mimeType]],
             "generation_config": ["transcription_config": config]
         ])
     }

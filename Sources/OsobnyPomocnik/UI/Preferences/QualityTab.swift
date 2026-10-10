@@ -28,6 +28,14 @@ extension PreferencesView {
                            primary: [String], shadow: [String])] = []
         var shadowAgreement = 0.0
         var shadowIdentical = 0
+        // Compression A/B (dev-only): WAV vs FLAC on the same audio and model.
+        var compressionCount = 0          // pairs where both requests returned text
+        var compressionFailed = 0         // FLAC request failed
+        var compressionWavMedianMs = 0
+        var compressionFlacMedianMs = 0
+        var compressionSizeRatio = 0.0    // median FLAC/WAV bytes
+        var compressionIdenticalPct = 0
+        var compressionMeanWordDiff = 0.0
 
         /// Only entries logged since quality tracking shipped carry metrics — older history
         /// has no numbers to show, so everything here is computed off that filtered list.
@@ -103,6 +111,20 @@ extension PreferencesView {
             if !shadowPairs.isEmpty {
                 shadowAgreement = shadowPairs.reduce(0) { $0 + $1.agreement } / Double(shadowPairs.count)
             }
+
+            let tests = entries.compactMap(\.compressionTest)
+            let pairs = tests.filter { $0.flacLatencyMs != nil && $0.wordDiff != nil }
+            compressionFailed = tests.count - pairs.count
+            compressionCount = pairs.count
+            if !pairs.isEmpty {
+                func median<T: Comparable>(_ xs: [T]) -> T { xs.sorted()[xs.count / 2] }
+                compressionWavMedianMs = median(pairs.map(\.wavLatencyMs))
+                compressionFlacMedianMs = median(pairs.compactMap(\.flacLatencyMs))
+                compressionSizeRatio = median(pairs.map { Double($0.flacBytes) / Double(max($0.wavBytes, 1)) })
+                let diffs = pairs.compactMap(\.wordDiff)
+                compressionIdenticalPct = diffs.filter { $0 == 0 }.count * 100 / diffs.count
+                compressionMeanWordDiff = Double(diffs.reduce(0, +)) / Double(diffs.count)
+            }
         }
     }
 
@@ -138,6 +160,7 @@ extension PreferencesView {
                 modeUsageCard(stats)
                 modelUsageCard(stats)
                 if remoteConfig.shadowCompareAllowed { shadowCompareCard(stats) }
+                if remoteConfig.developerModeGranted { compressionABCard(stats) }
                 topFillersCard(stats)
                 perAppCard(stats)
                 recentDictationsCard(analyzed)
@@ -201,6 +224,36 @@ extension PreferencesView {
                             }
                     }
                     .padding(.horizontal, 16).padding(.vertical, 10)
+                }
+            }
+        }
+    }
+
+    /// Dev-only: is a FLAC upload faster than WAV with the same text? Numbers only — the FLAC
+    /// transcripts sit in history (`compressionTest.text`) for a closer look.
+    @ViewBuilder
+    func compressionABCard(_ stats: QualityStats) -> some View {
+        if stats.compressionCount + stats.compressionFailed > 0 {
+            card {
+                VStack(alignment: .leading, spacing: 0) {
+                    captionRow("A/B kompresie (WAV vs FLAC) · \(Self.plural(stats.compressionCount, "pár", "páry", "párov"))"
+                               + (stats.compressionFailed > 0 ? " · FLAC zlyhal \(stats.compressionFailed)×" : ""))
+                    if stats.compressionCount > 0 {
+                        rowDivider
+                        HStack(spacing: 0) {
+                            statTile(value: "\(stats.compressionWavMedianMs) ms", label: "medián WAV", color: .primary)
+                            Divider().frame(height: 44)
+                            statTile(value: "\(stats.compressionFlacMedianMs) ms", label: "medián FLAC",
+                                     color: stats.compressionFlacMedianMs < stats.compressionWavMedianMs ? greenDot : .primary)
+                            Divider().frame(height: 44)
+                            statTile(value: "\(Int((stats.compressionSizeRatio * 100).rounded())) %", label: "veľkosť FLAC / WAV", color: .primary)
+                            Divider().frame(height: 44)
+                            statTile(value: "\(stats.compressionIdenticalPct) %", label: "zhodný text", color: .primary)
+                            Divider().frame(height: 44)
+                            statTile(value: String(format: "%.1f", stats.compressionMeanWordDiff), label: "priem. rozdiel slov", color: .primary)
+                        }
+                        .padding(.vertical, 12)
+                    }
                 }
             }
         }

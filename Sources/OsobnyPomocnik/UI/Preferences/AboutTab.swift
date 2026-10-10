@@ -111,6 +111,12 @@ extension PreferencesView {
                                 : "Overí, či strih ticha niekde neorezal reč.",
                               isOn: $dictation.silenceTrimABTestEnabled)
                     rowDivider
+                    toggleRow(title: "A/B test kompresie zvuku",
+                              subtitle: dictation.compressionABTestEnabled
+                                ? "Každé diktovanie po nahraní ide aj ako FLAC — dvojnásobná cena. Výsledky v Kvalite."
+                                : "Zmeria, či FLAC namiesto WAV zrýchli prepis bez straty presnosti.",
+                              isOn: $dictation.compressionABTestEnabled)
+                    rowDivider
                     toggleRow(title: "Tieňový prepis (2. model)",
                               subtitle: dictation.canShadowCompare
                                 ? "Prepíše aj cez \(dictation.shadowModelName), porovnanie v Kvalite. Platíš oba prepisy."

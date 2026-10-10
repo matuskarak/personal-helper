@@ -1,6 +1,23 @@
 import Foundation
 import Observation
 
+/// Compression A/B test (dev-only, see CLAUDE.md): the same audio uploaded a second time as
+/// lossless FLAC to the same model, both requests started at the same moment. `text` is the
+/// FLAC transcript (nil when that request failed — `error` says why); `wordDiff` is the word
+/// edit distance against the WAV transcript after DictationQualityEngine.normalizeWords.
+struct CompressionABResult: Codable {
+    let model: String
+    let audioSeconds: Double
+    let wavBytes: Int
+    let flacBytes: Int
+    let encodeMs: Int
+    let wavLatencyMs: Int
+    var flacLatencyMs: Int?
+    let text: String?
+    let error: String?
+    var wordDiff: Int?
+}
+
 /// Local log of every completed dictation — backs the history browser (Preferences
 /// tab + menu bar dropdown) and, later, the dictation-quality engine. This is
 /// personal data by nature (the user can dictate anything), so it stays local-only,
@@ -32,13 +49,15 @@ struct DictationHistoryEntry: Codable, Identifiable {
     // testing aid, not a shipped feature — see CLAUDE.md.
     var trimTestText: String?
     var trimTestSecondsRemoved: Int?
+    var compressionTest: CompressionABResult?
 
     init(id: UUID = UUID(), date: Date, text: String, appName: String = "", bundleID: String = "",
          category: AppCategory = .generic, seconds: Int = 0,
          rewrittenText: String? = nil, metrics: DictationMetrics? = nil, hasScreenshot: Bool = false,
          mode: String? = nil, smart: Bool? = nil, model: String? = nil,
          shadowText: String? = nil, shadowModel: String? = nil,
-         trimTestText: String? = nil, trimTestSecondsRemoved: Int? = nil) {
+         trimTestText: String? = nil, trimTestSecondsRemoved: Int? = nil,
+         compressionTest: CompressionABResult? = nil) {
         self.id = id; self.date = date; self.text = text
         self.appName = appName; self.bundleID = bundleID; self.category = category
         self.seconds = seconds; self.rewrittenText = rewrittenText; self.metrics = metrics
@@ -46,6 +65,7 @@ struct DictationHistoryEntry: Codable, Identifiable {
         self.mode = mode; self.smart = smart; self.model = model
         self.shadowText = shadowText; self.shadowModel = shadowModel
         self.trimTestText = trimTestText; self.trimTestSecondsRemoved = trimTestSecondsRemoved
+        self.compressionTest = compressionTest
     }
 
     // ponytail: hand-written decode so the added fields don't destroy existing history.
@@ -70,6 +90,7 @@ struct DictationHistoryEntry: Codable, Identifiable {
         shadowModel   = try c.decodeIfPresent(String.self, forKey: .shadowModel)
         trimTestText           = try c.decodeIfPresent(String.self, forKey: .trimTestText)
         trimTestSecondsRemoved = try c.decodeIfPresent(Int.self, forKey: .trimTestSecondsRemoved)
+        compressionTest        = try c.decodeIfPresent(CompressionABResult.self, forKey: .compressionTest)
     }
 }
 
@@ -83,6 +104,8 @@ final class DictationHistoryStore {
     private var parkedShadows: [UUID: (text: String, model: String)] = [:]
     /// Same race, for the silence-trim A/B test — see attachTrimTest.
     private var parkedTrimTests: [UUID: (text: String, secondsRemoved: Int)] = [:]
+    /// Same race, for the compression A/B test — see attachCompressionTest.
+    private var parkedCompressionTests: [UUID: CompressionABResult] = [:]
 
     // ponytail: measured ~755 bytes/entry (150KB / 200 entries) before this change.
     // Uncapped storage was requested to build up a real dataset for the quality-analysis
@@ -132,10 +155,12 @@ final class DictationHistoryStore {
             hasScreenshot: screenshotJPEG != nil, mode: mode, smart: smart, model: model,
             // A shadow that finished before the primary did is parked here waiting for us.
             shadowText: parkedShadows[id]?.text, shadowModel: parkedShadows[id]?.model,
-            trimTestText: parkedTrimTests[id]?.text, trimTestSecondsRemoved: parkedTrimTests[id]?.secondsRemoved
+            trimTestText: parkedTrimTests[id]?.text, trimTestSecondsRemoved: parkedTrimTests[id]?.secondsRemoved,
+            compressionTest: parkedCompressionTests[id]
         ))
         parkedShadows[id] = nil
         parkedTrimTests[id] = nil
+        parkedCompressionTests[id] = nil
         if let entry = entries.last {
             Telemetry.shared.dictation(seconds: seconds, metrics: entry.metrics, model: model, mode: mode,
                                        outcome: "ok", latencyMs: DictationEngine.shared.lastTranscriptionLatencyMs,
@@ -170,6 +195,16 @@ final class DictationHistoryStore {
         }
         entries[index].trimTestText = text
         entries[index].trimTestSecondsRemoved = secondsRemoved
+        save()
+    }
+
+    /// Same race as attachShadow, for the compression A/B test's FLAC result.
+    func attachCompressionTest(to id: UUID, result: CompressionABResult) {
+        guard let index = entries.firstIndex(where: { $0.id == id }) else {
+            parkedCompressionTests[id] = result
+            return
+        }
+        entries[index].compressionTest = result
         save()
     }
 
