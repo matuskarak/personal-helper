@@ -13,5 +13,9 @@
     <!-- Speech recognition -->
     <key>com.apple.security.speech-recognition.client</key>
     <true/>
+
+    <!-- AppleScript: pause/resume Spotify, Music, TV while dictating (AudioDucking) -->
+    <key>com.apple.security.automation.apple-events</key>
+    <true/>
 </dict>
 </plist>

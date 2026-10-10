@@ -377,9 +377,14 @@ extension PreferencesView {
                     .padding(.horizontal, 16).padding(.vertical, 12)
                     .nestedRow()
                 } else {
-                    captionRow("Funguje pre appky, ktoré reagujú na klávesu Prehrať/Pozastaviť (Hudba, Spotify, YouTube).")
+                    captionRow("Spotify, Hudbu a TV pozastaví priamo (macOS sa raz opýta na povolenie), video v prehliadači a ostatné prehrávače klávesou Prehrať/Pozastaviť. Po diktovaní všetko znova pustí.")
                         .nestedRow()
                 }
+                rowDivider
+                toggleRow(title: "Nie pri slúchadlách",
+                          subtitle: "So slúchadlami (Bluetooth, USB, jack) mikrofón hudbu nepočuje, nič sa nestíši ani nepozastaví.",
+                          isOn: $duckAudio.skipWithHeadphones)
+                    .nestedRow()
             }
         }
     }
