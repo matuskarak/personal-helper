@@ -24,8 +24,10 @@ extension PreferencesView {
         var modeTotal = 0
         var modelUsage: [(name: String, count: Int, avgSeconds: Int)] = []
         var modelTotal = 0
+        /// Only the rows the card shows (newest 25) carry word lists; totals use stored numbers.
         var shadowPairs: [(entry: DictationHistoryEntry, agreement: Double,
                            primary: [String], shadow: [String])] = []
+        var shadowCount = 0
         var shadowAgreement = 0.0
         var shadowIdentical = 0
         // Compression A/B (dev-only): WAV vs FLAC on the same audio and model.
@@ -102,15 +104,24 @@ extension PreferencesView {
 
             // Shadow A/B — same audio, two providers. Newest first: the interesting ones are
             // the recent dictations the user still remembers saying.
-            shadowPairs = entries.reversed().compactMap { entry in
-                guard let shadow = entry.shadowText else { return nil }
-                let diff = TranscriptDiff.differences(entry.text, shadow)
-                return (entry, TranscriptDiff.agreement(entry.text, shadow), diff.onlyA, diff.onlyB)
+            // ponytail: per-pair agreement is stored on the entry when the pair forms (and
+            // backfilled once at launch), so this only sums numbers; the word-level diff runs
+            // for the 25 rows on screen. The inline fallback covers the few seconds before the
+            // backfill lands.
+            var agreementSum = 0.0
+            for entry in entries.reversed() {
+                guard let shadow = entry.shadowText else { continue }
+                let stored = entry.shadowAgreement.flatMap { a in entry.shadowIdentical.map { (agreement: a, identical: $0) } }
+                let stats = stored ?? DictationHistoryEntry.shadowStats(text: entry.text, shadow: shadow)
+                shadowCount += 1
+                agreementSum += stats.agreement
+                if stats.identical { shadowIdentical += 1 }
+                if shadowPairs.count < 25 {
+                    let diff = TranscriptDiff.differences(entry.text, shadow)
+                    shadowPairs.append((entry, stats.agreement, diff.onlyA, diff.onlyB))
+                }
             }
-            shadowIdentical = shadowPairs.filter { $0.primary.isEmpty && $0.shadow.isEmpty }.count
-            if !shadowPairs.isEmpty {
-                shadowAgreement = shadowPairs.reduce(0) { $0 + $1.agreement } / Double(shadowPairs.count)
-            }
+            if shadowCount > 0 { shadowAgreement = agreementSum / Double(shadowCount) }
 
             let tests = entries.compactMap(\.compressionTest)
             let pairs = tests.filter { $0.flacLatencyMs != nil && $0.wordDiff != nil }
@@ -193,12 +204,12 @@ extension PreferencesView {
     func shadowCompareCard(_ stats: QualityStats) -> some View {
         if !stats.shadowPairs.isEmpty {
             sectionCard("Porovnanie modelov",
-                        status: "zhoda \(Int((stats.shadowAgreement * 100).rounded())) % · \(Self.plural(stats.shadowPairs.count, "porovnanie", "porovnania", "porovnaní"))",
+                        status: "zhoda \(Int((stats.shadowAgreement * 100).rounded())) % · \(Self.plural(stats.shadowCount, "porovnanie", "porovnania", "porovnaní"))",
                         isExpanded: $qualityShadowExpanded) {
                 VStack(alignment: .leading, spacing: 0) {
                     captionRow("Tá istá nahrávka, dva modely. \(stats.shadowIdentical)× úplne zhodné.")
                     rowDivider
-                    ForEach(Array(stats.shadowPairs.prefix(25).enumerated()), id: \.offset) { index, pair in
+                    ForEach(Array(stats.shadowPairs.enumerated()), id: \.offset) { index, pair in
                         if index > 0 { rowDivider }
                         shadowRow(pair)
                     }

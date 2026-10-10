@@ -42,6 +42,11 @@ struct DictationHistoryEntry: Codable, Identifiable {
     // fields are wiped together by clearShadows().
     var shadowText: String?
     var shadowModel: String?
+    // TranscriptDiff numbers for (text, shadowText), computed once when the pair is formed
+    // (and backfilled once for older pairs) so the Kvalita tab only sums them — diffing ~1,000
+    // pairs word by word on every open of the tab took ~0.25 s on the main thread.
+    var shadowAgreement: Double?
+    var shadowIdentical: Bool?
     // Silence-trim A/B test: the SAME provider/model, but on the untrimmed audio — isolates
     // whether SilenceTrimmer itself lost anything, instead of conflating it with a model
     // difference the way shadowText above does. Only present while dictation.silenceTrimABTest
@@ -56,6 +61,7 @@ struct DictationHistoryEntry: Codable, Identifiable {
          rewrittenText: String? = nil, metrics: DictationMetrics? = nil, hasScreenshot: Bool = false,
          mode: String? = nil, smart: Bool? = nil, model: String? = nil,
          shadowText: String? = nil, shadowModel: String? = nil,
+         shadowAgreement: Double? = nil, shadowIdentical: Bool? = nil,
          trimTestText: String? = nil, trimTestSecondsRemoved: Int? = nil,
          compressionTest: CompressionABResult? = nil) {
         self.id = id; self.date = date; self.text = text
@@ -64,6 +70,7 @@ struct DictationHistoryEntry: Codable, Identifiable {
         self.hasScreenshot = hasScreenshot
         self.mode = mode; self.smart = smart; self.model = model
         self.shadowText = shadowText; self.shadowModel = shadowModel
+        self.shadowAgreement = shadowAgreement; self.shadowIdentical = shadowIdentical
         self.trimTestText = trimTestText; self.trimTestSecondsRemoved = trimTestSecondsRemoved
         self.compressionTest = compressionTest
     }
@@ -88,9 +95,17 @@ struct DictationHistoryEntry: Codable, Identifiable {
         model         = try c.decodeIfPresent(String.self, forKey: .model)
         shadowText    = try c.decodeIfPresent(String.self, forKey: .shadowText)
         shadowModel   = try c.decodeIfPresent(String.self, forKey: .shadowModel)
+        shadowAgreement = try c.decodeIfPresent(Double.self, forKey: .shadowAgreement)
+        shadowIdentical = try c.decodeIfPresent(Bool.self, forKey: .shadowIdentical)
         trimTestText           = try c.decodeIfPresent(String.self, forKey: .trimTestText)
         trimTestSecondsRemoved = try c.decodeIfPresent(Int.self, forKey: .trimTestSecondsRemoved)
         compressionTest        = try c.decodeIfPresent(CompressionABResult.self, forKey: .compressionTest)
+    }
+
+    /// The per-pair numbers the Kvalita tab aggregates — pure, so it can run off the main thread.
+    static func shadowStats(text: String, shadow: String) -> (agreement: Double, identical: Bool) {
+        let diff = TranscriptDiff.differences(text, shadow)
+        return (TranscriptDiff.agreement(text, shadow), diff.onlyA.isEmpty && diff.onlyB.isEmpty)
     }
 }
 
@@ -136,7 +151,22 @@ final class DictationHistoryStore {
 
     func screenshotURL(for id: UUID) -> URL { screenshotsDir.appendingPathComponent("\(id.uuidString).jpg") }
 
-    private init() { load() }
+    // Persistence runs off the main thread: every log/attach* used to re-encode the whole
+    // history (~2 MB, ~1,900 entries) and write it synchronously on main. Now save() only
+    // marks the store dirty; after `saveDelay` the current entries are snapshotted (a value
+    // copy, ~free) and encoded + written atomically on `ioQueue`. Several changes inside the
+    // window → one write. Serial queue = writes land in snapshot order, newest wins.
+    // Nothing is lost on quit: AppDelegate.applicationWillTerminate calls flush(), which
+    // writes synchronously. A crash can lose at most the last `saveDelay` of changes, never
+    // corrupt the file (.atomic = temp file + rename).
+    private let ioQueue = DispatchQueue(label: "sk.matuskarak.osobny-pomocnik.history-save", qos: .utility)
+    private var pendingSave: DispatchWorkItem?
+    private let saveDelay: TimeInterval = 0.7
+
+    private init() {
+        load()
+        backfillShadowStats()
+    }
 
     /// `id` is passed in when the caller needs to reference the entry before it exists —
     /// the shadow transcription finishes on its own schedule and attaches to this id later.
@@ -148,6 +178,7 @@ final class DictationHistoryStore {
         if let screenshotJPEG {
             try? screenshotJPEG.write(to: screenshotURL(for: id), options: .atomic)
         }
+        let parkedStats = parkedShadows[id].map { DictationHistoryEntry.shadowStats(text: text, shadow: $0.text) }
         entries.append(DictationHistoryEntry(
             id: id, date: Date(), text: text, appName: appName, bundleID: bundleID,
             category: category, seconds: seconds, rewrittenText: rewrittenText,
@@ -155,6 +186,7 @@ final class DictationHistoryStore {
             hasScreenshot: screenshotJPEG != nil, mode: mode, smart: smart, model: model,
             // A shadow that finished before the primary did is parked here waiting for us.
             shadowText: parkedShadows[id]?.text, shadowModel: parkedShadows[id]?.model,
+            shadowAgreement: parkedStats?.agreement, shadowIdentical: parkedStats?.identical,
             trimTestText: parkedTrimTests[id]?.text, trimTestSecondsRemoved: parkedTrimTests[id]?.secondsRemoved,
             compressionTest: parkedCompressionTests[id]
         ))
@@ -182,8 +214,11 @@ final class DictationHistoryStore {
             parkedShadows[id] = (text, model)
             return
         }
+        let stats = DictationHistoryEntry.shadowStats(text: entries[index].text, shadow: text)
         entries[index].shadowText = text
         entries[index].shadowModel = model
+        entries[index].shadowAgreement = stats.agreement
+        entries[index].shadowIdentical = stats.identical
         save()
     }
 
@@ -214,6 +249,8 @@ final class DictationHistoryStore {
         for index in entries.indices where entries[index].shadowText != nil {
             entries[index].shadowText = nil
             entries[index].shadowModel = nil
+            entries[index].shadowAgreement = nil
+            entries[index].shadowIdentical = nil
         }
         parkedShadows.removeAll()
         save()
@@ -231,9 +268,70 @@ final class DictationHistoryStore {
         save()
     }
 
+    /// Debounced, background write — see `ioQueue`.
     private func save() {
+        pendingSave?.cancel()
+        let item = DispatchWorkItem { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.pendingSave = nil
+                let snapshot = self.entries, url = self.fileURL
+                self.ioQueue.async { Self.write(snapshot, to: url) }
+            }
+        }
+        pendingSave = item
+        DispatchQueue.main.asyncAfter(deadline: .now() + saveDelay, execute: item)
+    }
+
+    /// Writes any pending change synchronously and waits for an in-flight background write.
+    /// Call before the process exits (applicationWillTerminate) or before anything reads
+    /// dictation-history.json from disk.
+    func flush() {
+        if let item = pendingSave {
+            item.cancel()
+            pendingSave = nil
+            let snapshot = entries, url = fileURL
+            ioQueue.sync { Self.write(snapshot, to: url) }
+        } else {
+            ioQueue.sync {}   // let a write already handed to the queue finish
+        }
+    }
+
+    private nonisolated static func write(_ entries: [DictationHistoryEntry], to url: URL) {
         guard let data = try? JSONEncoder().encode(entries) else { return }
-        try? data.write(to: fileURL, options: .atomic)
+        try? data.write(to: url, options: .atomic)
+    }
+
+    /// One-time fill of shadowAgreement/shadowIdentical for pairs stored before those fields
+    /// existed. Diffing ~1,000 pairs takes a fraction of a second — done off main, then
+    /// merged by id (entries may have changed meanwhile) and persisted via save().
+    private func backfillShadowStats() {
+        let todo = entries.compactMap { e -> (UUID, String, String)? in
+            guard let shadow = e.shadowText, e.shadowAgreement == nil else { return nil }
+            return (e.id, e.text, shadow)
+        }
+        guard !todo.isEmpty else { return }
+        Task.detached(priority: .utility) {
+            var results: [UUID: (agreement: Double, identical: Bool, shadow: String)] = [:]
+            for (id, text, shadow) in todo {
+                let s = DictationHistoryEntry.shadowStats(text: text, shadow: shadow)
+                results[id] = (s.agreement, s.identical, shadow)
+            }
+            let computed = results
+            await MainActor.run {
+                let store = DictationHistoryStore.shared
+                for index in store.entries.indices {
+                    // Skip if the shadow was cleared or replaced while we were computing.
+                    guard let r = computed[store.entries[index].id],
+                          store.entries[index].shadowText == r.shadow,
+                          store.entries[index].shadowAgreement == nil else { continue }
+                    store.entries[index].shadowAgreement = r.agreement
+                    store.entries[index].shadowIdentical = r.identical
+                }
+                store.save()
+                AppLogger.log("[History] shadow stats backfilled for \(computed.count) pairs")
+            }
+        }
     }
 
     private func load() {
@@ -242,6 +340,7 @@ final class DictationHistoryStore {
            let decoded = try? JSONDecoder().decode([DictationHistoryEntry].self, from: legacy) {
             entries = decoded
             save()
+            flush()   // on disk before the only other copy is removed
             UserDefaults.standard.removeObject(forKey: "dictation.history.v1")
             return
         }

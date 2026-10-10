@@ -103,6 +103,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         AppLogger.log("[AppDelegate] applicationWillTerminate")
         axRetryTimer?.invalidate()
         HotkeyManager.shared.stop()
+        // History is saved debounced on a background queue — write whatever is still pending
+        // now. Covers every exit path: Ukončiť, Sparkle relaunch, dev restart, move-to-Applications.
+        DictationHistoryStore.shared.flush()
     }
 
     // MARK: - Accessibility retry
