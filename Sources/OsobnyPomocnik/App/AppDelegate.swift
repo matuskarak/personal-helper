@@ -323,6 +323,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 AppLogger.log("[AppDelegate] handleDictate(\(mode.rawValue)) — ignorované, 1 s po zastavení (dvojité stlačenie)")
                 return
             }
+            // Mic setup now runs off main, so a second press during a slow start reaches us
+            // (before, the frozen main thread swallowed it) — it must not play a second start tone.
+            guard !engine.isStarting else {
+                AppLogger.log("[AppDelegate] handleDictate(\(mode.rawValue)) — ignorované, diktovanie sa práve spúšťa")
+                return
+            }
             // Show the indicator immediately — startRecording() now has a multi-second
             // grace period for slow-to-connect mics (Bluetooth/Continuity), so the user
             // needs feedback that something is happening before that resolves.

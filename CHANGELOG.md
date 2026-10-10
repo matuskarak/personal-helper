@@ -2,6 +2,7 @@
 
 ## Nevydané
 
+- Prvé diktovanie po spustení appky (najmä s AirPods či iným Bluetooth zvukom) sa už nezasekne na pár sekúnd — appka ostane živá a ak mikrofón chvíľu trvá, pilulka ukáže „Pripravujem mikrofón…“.
 - Pozastavenie hudby počas diktovania (Nastavenia → Diktovanie → Ostatné zvuky) konečne funguje: Spotify, Hudbu a TV pozastaví spoľahlivo, video v prehliadači a ostatné prehrávače klávesou Prehrať/Pozastaviť — a po diktovaní všetko znova pustí.
 - Keď máš slúchadlá (Bluetooth, USB, jack), stíšenie aj pozastavenie sa vynechá — mikrofón hudbu nepočuje (dá sa vypnúť).
 - Úprava označeného textu hlasom: označ text, stlač ⌘⇧A, povedz čo s ním (napr. „sprav to formálnejšie“, „daj to do odrážok“, „pridaj tam, že…“) a znova ⌘⇧A — upravený text sa ukáže v okne kontroly a po vložení nahradí označený text. ⌘⇧A teda diktovanie aj spúšťa.

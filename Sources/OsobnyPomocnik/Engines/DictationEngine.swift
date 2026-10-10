@@ -211,6 +211,16 @@ final class DictationEngine {
     // that tore down the first — visible in the UI as "ready" flickering back to
     // "connecting".
     private(set) var isStarting = false
+    /// Set when the mic setup of a start has taken over 0.5 s — the pill then says
+    /// "Pripravujem mikrofón…" instead of looking stuck (first start after launch while macOS
+    /// builds an AirPods/Bluetooth route measured 2.5–5.6 s).
+    private(set) var micSetupSlow = false
+    /// True only while our tap is on `audioEngine.inputNode`. stopAudio() must not touch
+    /// `inputNode` otherwise: its FIRST access instantiates the engine's I/O unit and makes
+    /// macOS build a `CADefaultDeviceAggregate` — synchronously, on main, seconds with a
+    /// Bluetooth route — even when this session records through DeviceCapture and never
+    /// uses the engine at all (2026-10-08 13:54, 2026-10-10 11:27).
+    private var engineTapInstalled = false
 
     private(set) var totalSecondsRecorded: Int {
         didSet { UserDefaults.standard.set(totalSecondsRecorded, forKey: "whisper.usage.seconds") }
@@ -629,7 +639,17 @@ final class DictationEngine {
             return
         }
         isStarting = true
-        defer { isStarting = false }
+        let slowSetupTimer = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(500))
+            guard !Task.isCancelled, let self, self.isStarting else { return }
+            self.micSetupSlow = true
+            AppLogger.log("[DictationEngine] príprava mikrofónu trvá > 0,5 s")
+        }
+        defer {
+            isStarting = false
+            slowSetupTimer.cancel()
+            micSetupSlow = false
+        }
         // Cleared now, not after the device setup below (up to seconds): the previous
         // session's notice otherwise stays in the pill and its 6 s auto-hide closes the pill
         // over the new recording — "second start after 'no text' shows nothing" (2026-09-21).
@@ -685,7 +705,19 @@ final class DictationEngine {
                 connectionError = "Vybrané zariadenie nie je dostupné. Zmeň mikrofón v nastaveniach."
                 throw DictationError.audioSetupFailed
             }
-            guard let capture = DeviceCapture.make(deviceID: device.id) else {
+            // Off main: the format read can block for seconds while macOS sets up the route.
+            let deviceID = device.id
+            let makeStart = Date()
+            guard let made = await AudioDeviceManager.run(on: AudioDeviceManager.setupQueue, timeout: .seconds(8), {
+                DeviceCapture.make(deviceID: deviceID)
+            }) else {
+                AudioHealth.record("⏱️ mikrofón '\(device.name)' neodpovedal do 8 s pri štarte diktovania")
+                connectionError = "Mikrofón '\(device.name)' neodpovedá. Skús to znova; ak to pretrvá, v Termináli spusti: sudo killall coreaudiod"
+                throw DictationError.audioSetupFailed
+            }
+            let makeMs = Int(Date().timeIntervalSince(makeStart) * 1000)
+            if makeMs > 500 { AppLogger.log("[DictationEngine] ⚠️ DeviceCapture.make() trvalo \(makeMs) ms") }
+            guard let capture = made else {
                 AppLogger.log("[DictationEngine] ⚠️ DeviceCapture.make() failed for '\(device.name)'")
                 connectionError = "Mikrofón '\(device.name)' nie je dostupný. Skontroluj pripojenie."
                 throw DictationError.audioSetupFailed
@@ -710,13 +742,32 @@ final class DictationEngine {
             captureIsBluetooth = false
             captureDevice = AudioDeviceManager.defaultInputDevice(in: devices)
             AppLogger.log("[DictationEngine] Using system default microphone")
-            audioEngine.reset()
-            let inputNode = audioEngine.inputNode
-            var fmt = inputNode.outputFormat(forBus: 0)
+            // Engine reads run on the serial setup queue: the first `inputNode` access builds the
+            // I/O unit + default-device aggregate and can block for seconds. Main awaits each read,
+            // so the engine is never touched from two threads at once; installTap/start below and
+            // every later engine call stay on main as before.
+            let engine = UncheckedSendable(audioEngine)
+            let readFormat: @Sendable (Bool) -> UncheckedSendable<AVAudioFormat> = { reset in
+                if reset { engine.value.reset() }
+                return UncheckedSendable(engine.value.inputNode.outputFormat(forBus: 0))
+            }
+            let setupStart = Date()
+            guard var fmt = await AudioDeviceManager.run(on: AudioDeviceManager.setupQueue, timeout: .seconds(8), {
+                readFormat(true)
+            })?.value else {
+                AudioHealth.record("⏱️ systémový mikrofón neodpovedal do 8 s pri štarte diktovania")
+                connectionError = "Mikrofón neodpovedá. Skús to znova; ak to pretrvá, v Termináli spusti: sudo killall coreaudiod"
+                throw DictationError.audioSetupFailed
+            }
+            let setupMs = Int(Date().timeIntervalSince(setupStart) * 1000)
+            if setupMs > 500 { AppLogger.log("[DictationEngine] ⚠️ AVAudioEngine inputNode setup trvalo \(setupMs) ms") }
             let graceDeadline = Date().addingTimeInterval(4.0)
             while (fmt.sampleRate <= 0 || fmt.channelCount <= 0) && Date() < graceDeadline {
                 try? await Task.sleep(for: .milliseconds(150))
-                fmt = inputNode.outputFormat(forBus: 0)
+                guard let next = await AudioDeviceManager.run(on: AudioDeviceManager.setupQueue, timeout: .seconds(2), {
+                    readFormat(false)
+                })?.value else { break }
+                fmt = next
             }
             AppLogger.log("[DictationEngine] Input format (after grace period): \(fmt.sampleRate)Hz, \(fmt.channelCount)ch, \(fmt.commonFormat.rawValue)")
             guard fmt.sampleRate > 0, fmt.channelCount > 0 else {
@@ -887,6 +938,7 @@ final class DictationEngine {
                     _ = batchAudioBuffer.drain()
                     AppLogger.log("[DictationEngine] WS task started, audio tap installing...")
                     let tapQueue = sendQueue
+                    engineTapInstalled = true
                     inputNode.installTap(onBus: 0, bufferSize: 2_400, format: inputFormat) { buf, _ in
                         sendChunkOverWebSocket(
                             buffer: buf, inputSampleRate: tapSampleRate,
@@ -898,6 +950,7 @@ final class DictationEngine {
                     AppLogger.log("[DictationEngine] Batch mode (\(batchModel)) — recording locally, no WebSocket")
                     _ = batchAudioBuffer.drain()
                     _ = rawAudioBuffer.drain()
+                    engineTapInstalled = true
                     inputNode.installTap(onBus: 0, bufferSize: 2_400, format: inputFormat) { buf, _ in
                         accumulateChunkForBatch(
                             buffer: buf, inputSampleRate: tapSampleRate,
@@ -2124,9 +2177,10 @@ final class DictationEngine {
         if let cap = deviceCapture {
             cap.stop()
             deviceCapture = nil
-        } else {
+        } else if engineTapInstalled {
             audioEngine.inputNode.removeTap(onBus: 0)
             if audioEngine.isRunning { audioEngine.stop() }
+            engineTapInstalled = false
         }
         isRecording    = false
         btNegotiating  = false
@@ -2644,4 +2698,11 @@ private extension AVAuthorizationStatus {
         @unknown default:    "unknown"
         }
     }
+}
+
+/// Hands a non-Sendable audio object to the setup queue. Safe only because the caller awaits
+/// the queued work before touching the object again — see the AVAudioEngine setup in startRecording.
+struct UncheckedSendable<T>: @unchecked Sendable {
+    let value: T
+    init(_ value: T) { self.value = value }
 }

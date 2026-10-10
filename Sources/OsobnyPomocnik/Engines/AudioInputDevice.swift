@@ -113,20 +113,32 @@ enum AudioDeviceManager {
     /// The abandoned call runs on its own queue rather than the cooperative pool on purpose: a
     /// blocking call that may take minutes would starve every other task in the app.
     static func inputDevices(timeout: Duration) async -> [AudioInputDevice]? {
-        await withTaskGroup(of: [AudioInputDevice]?.self) { group in
-            group.addTask {
-                await withCheckedContinuation { cont in
-                    DispatchQueue.global(qos: .userInitiated).async { cont.resume(returning: inputDevices()) }
-                }
+        await run(on: .global(qos: .userInitiated), timeout: timeout) { inputDevices() }
+    }
+
+    /// Serial queue for the blocking device/engine setup of a dictation start (DeviceCapture
+    /// format read, first AVAudioEngine inputNode access). Off main so the pill stays alive
+    /// while macOS builds an audio route (measured 2026-10-08/10: 2.5–5.6 s with AirPods /
+    /// Sonos Ace); serial so a timed-out call that is still stuck in the HAL never overlaps
+    /// the next start's call on the same engine.
+    static let setupQueue = DispatchQueue(label: "sk.matuskarak.ozvena.audio-setup", qos: .userInitiated)
+
+    /// Runs blocking `work` on `queue`, returns nil if it didn't finish within `timeout`.
+    ///
+    /// Deliberately a one-shot continuation, not a task group: `withTaskGroup` waits for ALL
+    /// children before returning, and a DispatchQueue job can't be cancelled — so the old
+    /// group-based version only "timed out" once the stuck HAL call itself came back. The
+    /// abandoned work keeps running to completion; its result is dropped.
+    static func run<T: Sendable>(on queue: DispatchQueue, timeout: Duration,
+                                 _ work: @escaping @Sendable () -> T) async -> T? {
+        let once = OneShot()
+        let c = timeout.components
+        let seconds = Double(c.seconds) + Double(c.attoseconds) / 1e18
+        return await withCheckedContinuation { (cont: CheckedContinuation<T?, Never>) in
+            queue.async { let value = work(); if once.claim() { cont.resume(returning: value) } }
+            DispatchQueue.global().asyncAfter(deadline: .now() + seconds) {
+                if once.claim() { cont.resume(returning: nil) }
             }
-            group.addTask {
-                // Cancelled means the enumeration already won — that is the normal path.
-                do { try await Task.sleep(for: timeout) } catch { return nil }
-                return nil
-            }
-            let first = await group.next() ?? nil
-            group.cancelAll()
-            return first
         }
     }
 
@@ -385,4 +397,11 @@ final class DeviceCapture: @unchecked Sendable {
         cap.onBuffer(pcm)
         return noErr
     }
+}
+
+/// First caller of claim() wins — lets a result and a timeout race for one continuation.
+private final class OneShot: @unchecked Sendable {
+    private let lock = NSLock()
+    private var done = false
+    func claim() -> Bool { lock.lock(); defer { lock.unlock() }; if done { return false }; done = true; return true }
 }

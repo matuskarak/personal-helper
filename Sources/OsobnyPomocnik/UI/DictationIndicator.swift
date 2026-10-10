@@ -581,7 +581,8 @@ struct DictationIndicatorView: View {
             message(notice)
             if engine.noticeIsSticky { dismissHint }
         } else if !engine.isMicReady {
-            title(engine.btNegotiating ? "Inicializujem Bluetooth…" : "Pripájam mikrofón…")
+            title(engine.btNegotiating ? "Inicializujem Bluetooth…"
+                  : engine.micSetupSlow ? "Pripravujem mikrofón…" : "Pripájam mikrofón…")
         } else if engine.liveText.isEmpty {
             if engine.isWaitingForServer {
                 title("Čakám na server…")
