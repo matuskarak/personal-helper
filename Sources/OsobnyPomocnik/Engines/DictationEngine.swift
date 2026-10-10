@@ -799,31 +799,28 @@ final class DictationEngine {
             AppLogger.log("[DictationEngine] context capture task finished — profile=\(self.capturedProfile?.displayName ?? "?") hasScreenshot=\(ctx.image != nil)")
         }
 
-        // Reachability probe running ALONGSIDE the recording, not before it: a blocking
-        // pre-flight check would add latency to the one path we spent the most effort
-        // shortening, and it still couldn't promise the network survives the next 10 seconds.
-        // NWPathMonitor is deliberately not used — during the 2026-08-21 outage macOS reported
-        // the path as `satisfied` while DNS was dead, so only a real request tells us anything.
-        // Doubles as a TLS warm-up for the upload that follows.
+        // No more guessing from a separate probe (user 2026-10-10): it raised "API je nedostupné"
+        // while the real connection worked, and every real failure already has its own notice
+        // (socket dropped, upload retries, fallback, "nahrávka uložená"). What stays:
+        // - one HEAD as a TLS warm-up for the upload that follows (batch); only a definite
+        //   "no internet" (-1009) is reported — that one can't be a false alarm;
+        // - realtime: warn only if the REAL socket hasn't answered within 7 s.
         apiProbeTask?.cancel()
         apiProbeTask = Task { [weak self] in
             guard let self else { return }
             let usesGemini = mode == .batch && Self.isGemini(self.batchModel)
             let key = usesGemini ? self.geminiKey : self.openAIKey
-            guard await Self.apiUnreachable(apiKey: key, gemini: usesGemini) else { return }
-            guard !Task.isCancelled, self.isRecording, self.sessionID == mySessionID else { return }
-            // First miss alone isn't enough to warn about — it can be nothing more than this
-            // probe racing the realtime socket's own handshake for the same network path right
-            // at session start (measured 2026-09-12: probe failed, then the same session's
-            // socket connected and completed a 401-char live-insert seconds later). Only warn
-            // once a retry a few seconds later confirms it's still down.
-            try? await Task.sleep(for: .seconds(3))
-            guard !Task.isCancelled, self.isRecording, self.sessionID == mySessionID else { return }
-            guard await Self.apiUnreachable(apiKey: key, gemini: usesGemini) else { return }
+            if mode == .batch {
+                guard await Self.apiUnreachable(apiKey: key, gemini: usesGemini) == NSURLErrorNotConnectedToInternet,
+                      !Task.isCancelled, self.isRecording, self.sessionID == mySessionID else { return }
+                self.showNotice("Si offline — hovor ďalej, nahrávka sa uloží a prepíšeš ju neskôr.", sticky: false)
+                return
+            }
+            try? await Task.sleep(for: .seconds(7))
             guard !Task.isCancelled, self.isRecording, self.sessionID == mySessionID,
                   !self.realtimeServerAnswered else { return }
-            AppLogger.log("[DictationEngine] ⚠️ probe — API nedostupné počas štartu diktovania (potvrdené opakovaným pokusom)")
-            self.showNotice("API je nedostupné — hovor ďalej, nahrávka sa uloží a prepíšeš ju neskôr.", sticky: false)
+            AppLogger.log("[DictationEngine] ⚠️ realtime server neodpovedal do 7 s")
+            self.showNotice("Server neodpovedá — hovor ďalej, nahrávka sa uloží a prepíšeš ju neskôr.", sticky: false)
         }
 
         do {
@@ -1630,20 +1627,18 @@ final class DictationEngine {
 
     /// True only when the endpoint can't be reached at all. A 401 counts as reachable — a bad
     /// key is a different problem, surfaced elsewhere, and not something to warn about here.
-    private static func apiUnreachable(apiKey: String, gemini: Bool = false) async -> Bool {
-        guard !apiKey.isEmpty else { return false }
-        // Must point at the host the upload will actually use — probing OpenAI while the
-        // transcript goes to Google would miss a Google-side outage entirely.
-        // Bare host, no auth: any HTTP answer (404 included) proves DNS+TLS+server are up.
-        // /v1/models with a key was a real API call that sometimes took >4 s on its own
-        // and raised "API je nedostupné" while the socket worked fine (2026-09-12/14).
+    /// Warm-up HEAD; nil = reachable, otherwise the URLError code (logged).
+    private static func apiUnreachable(apiKey: String, gemini: Bool = false) async -> Int? {
+        guard !apiKey.isEmpty else { return nil }
+        // Must point at the host the upload will actually use. Bare host, no auth: any HTTP
+        // answer (404 included) proves DNS+TLS+server are up.
         let url = gemini ? "https://generativelanguage.googleapis.com/" : "https://api.openai.com/"
         var req = URLRequest(url: URL(string: url)!)
         req.httpMethod = "HEAD"
         req.timeoutInterval = 8
-        do { _ = try await batchSession.data(for: req); return false } catch {
-            AppLogger.log("[DictationEngine] probe zlyhal: \((error as NSError).domain) \((error as NSError).code)")
-            return true
+        do { _ = try await batchSession.data(for: req); return nil } catch {
+            AppLogger.log("[DictationEngine] warm-up zlyhal: \((error as NSError).domain) \((error as NSError).code)")
+            return (error as NSError).code
         }
     }
 

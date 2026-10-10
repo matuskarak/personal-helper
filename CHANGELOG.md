@@ -15,7 +15,7 @@
 - Neskorý prepis (pomalý server) sa už nevloží do inej appky, do ktorej si sa medzitým prepol — ostane v pamäti.
 - Nové diktovanie po hláške „model nevrátil žiadny text“ sa už zobrazí správne, pilulka nezmizne.
 - Hlášky v pilulke už nezmiznú predčasne.
-- Menej falošných upozornení „API je nedostupné“.
+- Upozornenie „API je nedostupné“ sa už neukazuje naslepo: pri bežnom diktovaní len keď nie si pripojený k internetu, pri realtime len keď server naozaj neodpovie do 7 s.
 - Dvojklik na čakajúcu nahrávku ju neprepíše dvakrát.
 - Ovládanie čítania: ⏯ (alebo ťuknutie na AirPods) pozastaví/pustí, ⏮ číta od začiatku; ⌘⇧R počas čítania bez nového výberu textu pozastaví/pustí.
 - Smart diktovanie (⌘⇧A) formátuje podľa appky: e-mail dostane oslovenie, odseky, pozdrav a tučne zvýraznené dôležité veci, chat zostane krátky, poznámky majú odrážky. Hlasom stačí povedať „toto zvýrazni“ alebo „dôležité:“. Do Mailu, Gmailu či Notes sa vloží už naformátovaný text.
