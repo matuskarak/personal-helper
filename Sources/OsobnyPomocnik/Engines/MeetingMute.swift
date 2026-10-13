@@ -73,14 +73,21 @@ final class MeetingMute {
     }
 
     /// Posted at the HID level so Discord's global-keybind listener sees it like a real key press.
+    /// Modifier keys go down/up as their own events: hotkey listeners that track modifiers from
+    /// key events (not from the flags on "M") otherwise see a bare M.
     nonisolated private static func pressKeybind() {
-        let m: CGKeyCode = 46   // kVK_ANSI_M
-        let flags: CGEventFlags = [.maskControl, .maskAlternate, .maskShift, .maskCommand]
-        for down in [true, false] {
-            let e = CGEvent(keyboardEventSource: nil, virtualKey: m, keyDown: down)
+        let source = CGEventSource(stateID: .hidSystemState)
+        let mods: [(CGKeyCode, CGEventFlags)] = [(59, .maskControl), (58, .maskAlternate), (56, .maskShift), (55, .maskCommand)]
+        func post(_ key: CGKeyCode, _ down: Bool, _ flags: CGEventFlags) {
+            let e = CGEvent(keyboardEventSource: source, virtualKey: key, keyDown: down)
             e?.flags = flags
             e?.post(tap: .cghidEventTap)
+            usleep(5_000)
         }
+        var flags: CGEventFlags = []
+        for (key, flag) in mods { flags.insert(flag); post(key, true, flags) }
+        post(46, true, flags); post(46, false, flags)   // kVK_ANSI_M
+        for (key, flag) in mods.reversed() { flags.remove(flag); post(key, false, flags) }
     }
 
     /// true = we changed the state (so the caller owns undoing it).
