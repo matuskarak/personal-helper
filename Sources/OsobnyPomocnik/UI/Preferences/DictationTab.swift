@@ -388,7 +388,7 @@ extension PreferencesView {
             }
             rowDivider
             toggleRow(title: "Stlmiť mikrofón v Discorde",
-                      subtitle: "Počas diktovania ťa v hovore nebudú počuť, potom sa mikrofón vráti. Ak si bol stlmený už predtým, nič sa nemení.",
+                      subtitle: "Počas diktovania ťa v hovore nebudú počuť, potom sa mikrofón vráti. Aby to fungovalo aj so zatvoreným oknom Discordu, nastav v Discorde → Nastavenia → Keybinds akciu „Toggle Mute“ na \(MeetingMute.keybindDisplay).",
                       isOn: $meetingMute.discordEnabled)
         }
     }

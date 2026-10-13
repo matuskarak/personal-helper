@@ -11,7 +11,13 @@ import Observation
 /// value is the real state (0/1) — so we SET it, never blindly toggle: already muted → untouched,
 /// and afterwards we unmute only what we muted. Electron builds its AX tree only after
 /// `AXManualAccessibility` is set, hence the short retry on first use.
-/// ponytail: Discord only; Zoom/Teams/Meet go into `targets` the same way once their control is mapped.
+///
+/// Window closed (Discord keeps running in the menu bar — the usual case during a call, measured
+/// 2026-10-13: 0 windows, no AX tree) → fallback: Discord's own GLOBAL keybind "Toggle Mute",
+/// which the user sets to `keybindDisplay` in Discord → Settings → Keybinds. That one only
+/// toggles (state unknown), so it's pressed once at start and once at the end — net zero; if the
+/// user was already muted, the call hears the dictation (said in the settings caption).
+/// ponytail: Discord only; Zoom/Teams/Meet the same way once their control is mapped.
 @Observable
 @MainActor
 final class MeetingMute {
@@ -22,6 +28,9 @@ final class MeetingMute {
     }
 
     private var muteTask: Task<Bool, Never>?
+    private var toggledByKey = false
+
+    static let keybindDisplay = "⌃⌥⇧⌘M"
 
     private init() {
         discordEnabled = UserDefaults.standard.object(forKey: "dictation.muteDiscord") as? Bool ?? true
@@ -31,11 +40,22 @@ final class MeetingMute {
         guard discordEnabled, muteTask == nil,
               let pid = NSRunningApplication.runningApplications(withBundleIdentifier: "com.hnc.Discord").first?.processIdentifier
         else { return }
-        muteTask = Task.detached(priority: .userInitiated) { Self.setMuted(true, pid: pid) }
+        if Self.hasWindow(pid: pid) {
+            muteTask = Task.detached(priority: .userInitiated) { Self.setMuted(true, pid: pid) }
+        } else {
+            Self.pressKeybind()
+            toggledByKey = true
+            AppLogger.log("[MeetingMute] Discord bez okna — stlačená skratka Toggle Mute \(Self.keybindDisplay)")
+        }
     }
 
     /// Same choke point as AudioDucking.restore() — every recording exit path runs it.
     func restore() {
+        if toggledByKey {
+            toggledByKey = false
+            Self.pressKeybind()
+            AppLogger.log("[MeetingMute] Discord — skratka Toggle Mute späť")
+        }
         guard let task = muteTask else { return }
         muteTask = nil
         Task.detached(priority: .userInitiated) {
@@ -43,6 +63,23 @@ final class MeetingMute {
                   let pid = NSRunningApplication.runningApplications(withBundleIdentifier: "com.hnc.Discord").first?.processIdentifier
             else { return }
             _ = Self.setMuted(false, pid: pid)
+        }
+    }
+
+    nonisolated private static func hasWindow(pid: pid_t) -> Bool {
+        let app = AXUIElementCreateApplication(pid)
+        AXUIElementSetMessagingTimeout(app, 0.3)
+        return !children(app, kAXWindowsAttribute).isEmpty
+    }
+
+    /// Posted at the HID level so Discord's global-keybind listener sees it like a real key press.
+    nonisolated private static func pressKeybind() {
+        let m: CGKeyCode = 46   // kVK_ANSI_M
+        let flags: CGEventFlags = [.maskControl, .maskAlternate, .maskShift, .maskCommand]
+        for down in [true, false] {
+            let e = CGEvent(keyboardEventSource: nil, virtualKey: m, keyDown: down)
+            e?.flags = flags
+            e?.post(tap: .cghidEventTap)
         }
     }
 
