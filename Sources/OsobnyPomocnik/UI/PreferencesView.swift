@@ -108,6 +108,7 @@ struct PreferencesView: View {
     @State var google       = GoogleCloudTTSEngine.shared
     @State var dictation    = DictationEngine.shared
     @State var duckAudio    = AudioDucking.shared
+    @State var meetingMute  = MeetingMute.shared
     @State var profileStore = AppProfileStore.shared
     @State var rewriteEngine = SmartRewriteEngine.shared
     @AppStorage("ui.expanded.visionPromptExpanded") var visionPromptExpanded = false

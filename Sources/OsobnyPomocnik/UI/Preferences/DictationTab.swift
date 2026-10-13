@@ -386,6 +386,10 @@ extension PreferencesView {
                           isOn: $duckAudio.skipWithHeadphones)
                     .nestedRow()
             }
+            rowDivider
+            toggleRow(title: "Stlmiť mikrofón v Discorde",
+                      subtitle: "Počas diktovania ťa v hovore nebudú počuť, potom sa mikrofón vráti. Ak si bol stlmený už predtým, nič sa nemení.",
+                      isOn: $meetingMute.discordEnabled)
         }
     }
 

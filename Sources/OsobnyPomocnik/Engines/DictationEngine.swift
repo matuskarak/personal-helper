@@ -786,6 +786,7 @@ final class DictationEngine {
         sessionID += 1
         let mySessionID = sessionID
         AudioDucking.shared.startDucking()
+        MeetingMute.shared.start()
 
         isSmartMode        = false  // decided by the STOP shortcut — see stopAndTranscribe(smart:)
         capturedScreenshotJPEG = nil
@@ -2190,6 +2191,7 @@ final class DictationEngine {
     private func stopAudio() {
         AppLogger.log("[DictationEngine] 🔴 stopAudio() | session #\(sessionID) isMicReady=\(isMicReady) btNeg=\(btNegotiating) chunks=\(chunkCounter.sent) err=\(connectionError ?? "nil")")
         AudioDucking.shared.restore()
+        MeetingMute.shared.restore()
         if let cap = deviceCapture {
             cap.stop()
             deviceCapture = nil
