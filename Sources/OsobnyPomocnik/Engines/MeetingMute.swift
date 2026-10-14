@@ -187,7 +187,14 @@ final class MeetingMute {
             for child in children(e) { if let hit = walk(child, depth + 1) { return hit } }
             return nil
         }
-        for window in windows(app) { if let hit = walk(window, 0) { cachedWindow = window; return hit } }
+        let listed = windows(app)
+        for window in listed { if let hit = walk(window, 0) { cachedWindow = window; return hit } }
+        // Discord has several windows (a 33 pt strip, overlays…) — finding one of them isn't finding
+        // the main one (2026-10-14: "nenájdený" twice). Search everything the token scan reaches.
+        for window in remoteTokenWindows(app) where !listed.contains(where: { CFEqual($0, window) }) {
+            visited = 0
+            if let hit = walk(window, 0) { cachedWindow = window; return hit }
+        }
         return nil
     }
 
