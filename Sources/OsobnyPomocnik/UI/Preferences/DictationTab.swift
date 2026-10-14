@@ -386,10 +386,13 @@ extension PreferencesView {
                           isOn: $duckAudio.skipWithHeadphones)
                     .nestedRow()
             }
-            rowDivider
-            toggleRow(title: "Stlmiť mikrofón v Discorde",
-                      subtitle: "Počas diktovania ťa v hovore nebudú počuť, potom sa mikrofón vráti. Okno Discordu nechaj otvorené alebo minimalizované (⌘M) — so zatvoreným oknom to nejde.",
-                      isOn: $meetingMute.discordEnabled)
+            // Beta, Developer mode only (user 2026-10-14) — see MeetingMute.
+            if RemoteConfig.shared.developerModeGranted {
+                rowDivider
+                toggleRow(title: "Stlmiť mikrofón v Discorde (beta)",
+                          subtitle: "Počas diktovania ťa v hovore nebudú počuť, potom sa mikrofón vráti. Okno Discordu môže byť na inej ploche alebo minimalizované, len nie zatvorené.",
+                          isOn: $meetingMute.discordEnabled)
+            }
         }
     }
 

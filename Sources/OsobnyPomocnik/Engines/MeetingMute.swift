@@ -44,7 +44,7 @@ final class MeetingMute {
     }
 
     func start() {
-        guard discordEnabled else { return }
+        guard discordEnabled, RemoteConfig.shared.developerModeGranted else { return }   // beta, dev only
         guard let pid = Self.discordPID() else { return }   // Discord not running — nothing to do
         Self.queue.async {
             guard !Self.mutedByUs else { return }
