@@ -46,7 +46,7 @@ final class AudioDucking {
     /// The async pause (osascript + key verification) — restore() waits for it, so a very short
     /// dictation can't resume before the pause has even happened.
     private var pauseTask: Task<PauseState, Never>?
-    struct PauseState { var scripted: [String] = []; var sentKey = false }
+    struct PauseState { var scripted: [String] = []; var sentKey = false; var alsoDuck = false }
 
     private static let crashRecoveryKey = "dictation.duckAudioCrashRecovery"
 
@@ -65,7 +65,12 @@ final class AudioDucking {
         }
         switch mode {
         case .duck:  duckVolume()
-        case .pause: pauseTask = Task { await Self.pausePlaying() }
+        case .pause:
+            pauseTask = Task {
+                let state = await Self.pausePlaying()
+                if state.alsoDuck { duckVolume() }
+                return state
+            }
         }
     }
 
@@ -75,8 +80,13 @@ final class AudioDucking {
     func restore() {
         if let task = pauseTask {
             pauseTask = nil
-            Task { await Self.resume(await task.value) }
+            // Volume too, after the task — it may have ducked after this call (alsoDuck).
+            Task { await Self.resume(await task.value); restoreVolume() }
         }
+        restoreVolume()
+    }
+
+    private func restoreVolume() {
         if let vol = savedVolume, let dev = savedDeviceID {
             setVolume(vol, device: dev)
             AppLogger.log("[AudioDucking] 🔊 restore — device=\(dev) to=\(Int(vol * 100))%")
@@ -220,6 +230,11 @@ final class AudioDucking {
         // on every dictation (and the key could then start a paused video). Measured 2026-10-10:
         // Discord, Beeper. ponytail: prefix list, extend when another one shows up in the log.
         let others = before.subtracting(scriptable).filter { id in !alwaysOpen.contains { id.hasPrefix($0) } }
+        // The key reaches only the one "now playing" app (Arc + YouTube Music app 2026-10-14:
+        // one kept playing). Two or more such apps → also lower the volume. Pausing browser
+        // tabs via AppleScript JS was tried: walking Arc's windows hung for >30 s.
+        let apps = Set(others.map { $0.lowercased().components(separatedBy: ".helper").first ?? $0 })
+        state.alsoDuck = apps.count > 1
         if !others.isEmpty {
             sendMediaPlayPauseKey()
             try? await Task.sleep(for: .milliseconds(700))
@@ -237,7 +252,7 @@ final class AudioDucking {
                 AppLogger.log("[AudioDucking] ↩️ kláves spustil iné prehrávanie (\(started.sorted().joined(separator: ", "))) — vrátené")
             }
         }
-        AppLogger.log("[AudioDucking] ⏸ pause — výstup: \(before.sorted().joined(separator: ", ")) | AppleScript: \(state.scripted.joined(separator: ", ")) | kláves: \(state.sentKey)")
+        AppLogger.log("[AudioDucking] ⏸ pause — výstup: \(before.sorted().joined(separator: ", ")) | AppleScript: \(state.scripted.joined(separator: ", ")) | kláves: \(state.sentKey)\(state.alsoDuck ? " | + stíšenie (viac prehrávačov)" : "")")
         return state
     }
 
