@@ -48,14 +48,13 @@ final class MeetingMute {
         guard let pid = Self.discordPID() else { return }   // Discord not running — nothing to do
         Self.queue.async {
             guard !Self.mutedByUs else { return }
+            // Not in a call (no open mic) = nobody to hide the dictation from (user 2026-10-14).
+            // Muted in a call may also show no open mic — then there's nothing to do either.
+            guard Self.discordUsesMic() else { AppLogger.log("[MeetingMute] Discord: nie si v hovore — nič nerobím"); return }
             guard Self.hasWindow(pid: pid) else {
-                // Discord runs all day; only worth a word when it's actually in a call (mic open).
-                let inCall = Self.discordUsesMic()
-                AppLogger.log("[MeetingMute] Discord: okno nenájdené (v hovore: \(inCall))")
-                if inCall {
-                    DispatchQueue.main.async {
-                        DictationEngine.shared.showNotice("Discord má zatvorené okno — mikrofón v ňom nestlmím. Okno len minimalizuj (⌘M).", sticky: false)
-                    }
+                AppLogger.log("[MeetingMute] Discord: okno nenájdené (v hovore: true)")
+                DispatchQueue.main.async {
+                    DictationEngine.shared.showNotice("Discord má zatvorené okno — mikrofón v ňom nestlmím. Okno len minimalizuj (⌘M).", sticky: false)
                 }
                 return
             }
