@@ -13,7 +13,8 @@ import Observation
 /// and afterwards we unmute only what we muted. Electron builds its AX tree only after
 /// `AXManualAccessibility` is set, hence the short retry on first use.
 ///
-/// Needs the Discord window to exist — open or minimized (⌘M) both work, verified 2026-10-14.
+/// Needs the Discord window to exist — open, minimized (⌘M) or on another Space / full screen
+/// (via AXMainWindow, see `windows`) all work, verified 2026-10-14.
 /// Closed (red ×, Discord keeps running in the menu bar) = no AX tree at all, and the global
 /// keybind route is dead too: Discord reads its keybinds from the HID device, so synthetic key
 /// events (⌃O posted at HID level, with and without separate modifier events) never reach it
@@ -63,7 +64,21 @@ final class MeetingMute {
     nonisolated private static func hasWindow(pid: pid_t) -> Bool {
         let app = AXUIElementCreateApplication(pid)
         AXUIElementSetMessagingTimeout(app, 0.3)
-        return !children(app, kAXWindowsAttribute).isEmpty
+        return !windows(app).isEmpty
+    }
+
+    /// AXWindows lists only windows on the CURRENT Space — Discord in full screen or on another
+    /// desktop returned [] (2026-10-14), yet AXMainWindow/AXFocusedWindow still hand it over.
+    nonisolated private static func windows(_ app: AXUIElement) -> [AXUIElement] {
+        var result = children(app, kAXWindowsAttribute)
+        for attr in [kAXMainWindowAttribute, kAXFocusedWindowAttribute] {
+            var v: AnyObject?
+            guard AXUIElementCopyAttributeValue(app, attr as CFString, &v) == .success, let v,
+                  CFGetTypeID(v) == AXUIElementGetTypeID() else { continue }
+            let w = v as! AXUIElement
+            if !result.contains(where: { CFEqual($0, w) }) { result.append(w) }
+        }
+        return result
     }
 
     /// Any Discord process (helpers included) with a running input stream = in a call.
@@ -128,7 +143,7 @@ final class MeetingMute {
             for child in children(e) { if let hit = walk(child, depth + 1) { return hit } }
             return nil
         }
-        for window in children(app, kAXWindowsAttribute) { if let hit = walk(window, 0) { return hit } }
+        for window in windows(app) { if let hit = walk(window, 0) { return hit } }
         return nil
     }
 
