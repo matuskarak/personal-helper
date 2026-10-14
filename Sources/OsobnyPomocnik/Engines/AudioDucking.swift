@@ -249,6 +249,7 @@ final class AudioDucking {
                 state.sentKey = true
             } else {
                 sendMediaPlayPauseKey()
+                state.alsoDuck = true   // what was playing still plays (2026-10-14, Arc + paused YT Music)
                 AppLogger.log("[AudioDucking] ↩️ kláves spustil iné prehrávanie (\(started.sorted().joined(separator: ", "))) — vrátené")
             }
         }
