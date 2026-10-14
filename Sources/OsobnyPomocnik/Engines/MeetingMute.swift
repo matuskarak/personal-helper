@@ -1,5 +1,6 @@
 import AppKit
 import ApplicationServices
+import CoreAudio
 import Observation
 
 /// Mutes the user's microphone in Discord while dictating and unmutes it afterwards — so the
@@ -12,11 +13,11 @@ import Observation
 /// and afterwards we unmute only what we muted. Electron builds its AX tree only after
 /// `AXManualAccessibility` is set, hence the short retry on first use.
 ///
-/// Window closed (Discord keeps running in the menu bar — the usual case during a call, measured
-/// 2026-10-13: 0 windows, no AX tree) → fallback: Discord's own GLOBAL keybind "Toggle Mute",
-/// which the user sets to `keybindDisplay` in Discord → Settings → Keybinds. That one only
-/// toggles (state unknown), so it's pressed once at start and once at the end — net zero; if the
-/// user was already muted, the call hears the dictation (said in the settings caption).
+/// Needs the Discord window to exist — open or minimized (⌘M) both work, verified 2026-10-14.
+/// Closed (red ×, Discord keeps running in the menu bar) = no AX tree at all, and the global
+/// keybind route is dead too: Discord reads its keybinds from the HID device, so synthetic key
+/// events (⌃O posted at HID level, with and without separate modifier events) never reach it
+/// (measured 2026-10-14). Then the pill says so instead of failing silently.
 /// ponytail: Discord only; Zoom/Teams/Meet the same way once their control is mapped.
 @Observable
 @MainActor
@@ -28,9 +29,6 @@ final class MeetingMute {
     }
 
     private var muteTask: Task<Bool, Never>?
-    private var toggledByKey = false
-
-    static let keybindDisplay = "⌃⌥⇧⌘M"
 
     private init() {
         discordEnabled = UserDefaults.standard.object(forKey: "dictation.muteDiscord") as? Bool ?? true
@@ -40,22 +38,18 @@ final class MeetingMute {
         guard discordEnabled, muteTask == nil,
               let pid = NSRunningApplication.runningApplications(withBundleIdentifier: "com.hnc.Discord").first?.processIdentifier
         else { return }
-        if Self.hasWindow(pid: pid) {
-            muteTask = Task.detached(priority: .userInitiated) { Self.setMuted(true, pid: pid) }
-        } else {
-            Self.pressKeybind()
-            toggledByKey = true
-            AppLogger.log("[MeetingMute] Discord bez okna — stlačená skratka Toggle Mute \(Self.keybindDisplay)")
+        guard Self.hasWindow(pid: pid) else {
+            // Discord runs all day; only worth a word when it's actually in a call (mic open).
+            guard Self.discordUsesMic() else { return }
+            AppLogger.log("[MeetingMute] Discord v hovore bez okna — mikrofón sa nedá stlmiť")
+            DictationEngine.shared.showNotice("Discord má zatvorené okno — mikrofón v ňom nestlmím. Okno len minimalizuj (⌘M).", sticky: false)
+            return
         }
+        muteTask = Task.detached(priority: .userInitiated) { Self.setMuted(true, pid: pid) }
     }
 
     /// Same choke point as AudioDucking.restore() — every recording exit path runs it.
     func restore() {
-        if toggledByKey {
-            toggledByKey = false
-            Self.pressKeybind()
-            AppLogger.log("[MeetingMute] Discord — skratka Toggle Mute späť")
-        }
         guard let task = muteTask else { return }
         muteTask = nil
         Task.detached(priority: .userInitiated) {
@@ -72,22 +66,26 @@ final class MeetingMute {
         return !children(app, kAXWindowsAttribute).isEmpty
     }
 
-    /// Posted at the HID level so Discord's global-keybind listener sees it like a real key press.
-    /// Modifier keys go down/up as their own events: hotkey listeners that track modifiers from
-    /// key events (not from the flags on "M") otherwise see a bare M.
-    nonisolated private static func pressKeybind() {
-        let source = CGEventSource(stateID: .hidSystemState)
-        let mods: [(CGKeyCode, CGEventFlags)] = [(59, .maskControl), (58, .maskAlternate), (56, .maskShift), (55, .maskCommand)]
-        func post(_ key: CGKeyCode, _ down: Bool, _ flags: CGEventFlags) {
-            let e = CGEvent(keyboardEventSource: source, virtualKey: key, keyDown: down)
-            e?.flags = flags
-            e?.post(tap: .cghidEventTap)
-            usleep(5_000)
+    /// Any Discord process (helpers included) with a running input stream = in a call.
+    nonisolated private static func discordUsesMic() -> Bool {
+        let system = AudioObjectID(kAudioObjectSystemObject)
+        var address = AudioObjectPropertyAddress(mSelector: kAudioHardwarePropertyProcessObjectList,
+                                                 mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
+        var size: UInt32 = 0
+        guard AudioObjectGetPropertyDataSize(system, &address, 0, nil, &size) == noErr, size > 0 else { return false }
+        var ids = [AudioObjectID](repeating: 0, count: Int(size) / MemoryLayout<AudioObjectID>.size)
+        guard AudioObjectGetPropertyData(system, &address, 0, nil, &size, &ids) == noErr else { return false }
+        return ids.contains { id in
+            var running: UInt32 = 0, bundle: CFString = "" as CFString
+            var a = AudioObjectPropertyAddress(mSelector: kAudioProcessPropertyIsRunningInput,
+                                               mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
+            var s = UInt32(MemoryLayout<UInt32>.size)
+            guard AudioObjectGetPropertyData(id, &a, 0, nil, &s, &running) == noErr, running != 0 else { return false }
+            a.mSelector = kAudioProcessPropertyBundleID
+            s = UInt32(MemoryLayout<CFString>.size)
+            guard AudioObjectGetPropertyData(id, &a, 0, nil, &s, &bundle) == noErr else { return false }
+            return (bundle as String).hasPrefix("com.hnc.Discord")
         }
-        var flags: CGEventFlags = []
-        for (key, flag) in mods { flags.insert(flag); post(key, true, flags) }
-        post(46, true, flags); post(46, false, flags)   // kVK_ANSI_M
-        for (key, flag) in mods.reversed() { flags.remove(flag); post(key, false, flags) }
     }
 
     /// true = we changed the state (so the caller owns undoing it).
@@ -107,7 +105,13 @@ final class MeetingMute {
         }
         guard (value != 0) != muted else { return false }   // already in the wanted state
         AXUIElementPerformAction(control, kAXPressAction as CFString)
-        let now = intValue(control).map { $0 != 0 }
+        // Discord applies the press asynchronously (~0.3–0.8 s) and ignores a second press that
+        // comes too soon — read back until it changes, never press again blindly.
+        var now = intValue(control).map { $0 != 0 }
+        for _ in 0..<15 where now != muted {
+            Thread.sleep(forTimeInterval: 0.1)
+            now = intValue(control).map { $0 != 0 }
+        }
         AppLogger.log("[MeetingMute] Discord \(muted ? "🔇 stlmený" : "🎙 odstlmený") (overené: \(now.map { $0 == muted ? "áno" : "NIE" } ?? "?"))")
         return now == muted
     }
