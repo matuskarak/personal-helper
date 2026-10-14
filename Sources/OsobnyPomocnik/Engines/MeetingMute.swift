@@ -29,33 +29,46 @@ final class MeetingMute {
         didSet { UserDefaults.standard.set(discordEnabled, forKey: "dictation.muteDiscord") }
     }
 
-    private var muteTask: Task<Bool, Never>?
+    /// Every Discord action runs here, in order — a restore and the next start (⌘⇧X then ⌘⇧D
+    /// 2 s later, 2026-10-14) must never overlap. The two vars below are touched only on it.
+    nonisolated private static let queue = DispatchQueue(label: "sk.matuskarak.osobny-pomocnik.meeting-mute")
+    nonisolated(unsafe) private static var mutedByUs = false
+    nonisolated(unsafe) private static var cachedWindow: AXUIElement?
 
     private init() {
         discordEnabled = UserDefaults.standard.object(forKey: "dictation.muteDiscord") as? Bool ?? true
     }
 
-    func start() {
-        guard discordEnabled, muteTask == nil,
-              let pid = NSRunningApplication.runningApplications(withBundleIdentifier: "com.hnc.Discord").first?.processIdentifier
-        else { return }
-        guard Self.hasWindow(pid: pid) else {
-            // Discord runs all day; only worth a word when it's actually in a call (mic open).
-            guard Self.discordUsesMic() else { return }
-            AppLogger.log("[MeetingMute] Discord v hovore bez okna — mikrofón sa nedá stlmiť")
-            DictationEngine.shared.showNotice("Discord má zatvorené okno — mikrofón v ňom nestlmím. Okno len minimalizuj (⌘M).", sticky: false)
-            return
-        }
-        muteTask = Task.detached(priority: .userInitiated) { Self.setMuted(true, pid: pid) }
+    private static func discordPID() -> pid_t? {
+        NSRunningApplication.runningApplications(withBundleIdentifier: "com.hnc.Discord").first?.processIdentifier
     }
 
-    /// Same choke point as AudioDucking.restore() — every recording exit path runs it.
+    func start() {
+        guard discordEnabled else { return }
+        guard let pid = Self.discordPID() else { return }   // Discord not running — nothing to do
+        Self.queue.async {
+            guard !Self.mutedByUs else { return }
+            guard Self.hasWindow(pid: pid) else {
+                // Discord runs all day; only worth a word when it's actually in a call (mic open).
+                let inCall = Self.discordUsesMic()
+                AppLogger.log("[MeetingMute] Discord: okno nenájdené (v hovore: \(inCall))")
+                if inCall {
+                    DispatchQueue.main.async {
+                        DictationEngine.shared.showNotice("Discord má zatvorené okno — mikrofón v ňom nestlmím. Okno len minimalizuj (⌘M).", sticky: false)
+                    }
+                }
+                return
+            }
+            Self.mutedByUs = Self.setMuted(true, pid: pid)
+        }
+    }
+
+    /// Same choke point as AudioDucking.restore() — every recording exit path (stop, ⌘⇧X, error) runs it.
     func restore() {
-        guard let task = muteTask else { return }
-        muteTask = nil
-        Task.detached(priority: .userInitiated) {
-            guard await task.value,
-                  let pid = NSRunningApplication.runningApplications(withBundleIdentifier: "com.hnc.Discord").first?.processIdentifier
+        Self.queue.async {
+            guard Self.mutedByUs else { return }
+            Self.mutedByUs = false
+            guard let pid = NSRunningApplication.runningApplications(withBundleIdentifier: "com.hnc.Discord").first?.processIdentifier
             else { return }
             _ = Self.setMuted(false, pid: pid)
         }
@@ -71,6 +84,8 @@ final class MeetingMute {
     /// desktop returned [] (2026-10-14), yet AXMainWindow/AXFocusedWindow still hand it over.
     nonisolated private static func windows(_ app: AXUIElement) -> [AXUIElement] {
         var result = children(app, kAXWindowsAttribute)
+        // A window element stays valid while the window lives — reuse the last one found.
+        if let w = cachedWindow, string(w, kAXRoleAttribute) == kAXWindowRole as String { result.append(w) }
         for attr in [kAXMainWindowAttribute, kAXFocusedWindowAttribute] {
             var v: AnyObject?
             guard AXUIElementCopyAttributeValue(app, attr as CFString, &v) == .success, let v,
@@ -78,7 +93,33 @@ final class MeetingMute {
             let w = v as! AXUIElement
             if !result.contains(where: { CFEqual($0, w) }) { result.append(w) }
         }
+        if result.isEmpty { result = remoteTokenWindows(app) }
         return result
+    }
+
+    /// Last resort (AltTab's technique): AX elements built from a remote token (pid + element id)
+    /// reach windows the public attributes don't list. Private API — fine outside the App Store;
+    /// if the symbol is ever gone, dlsym returns nil and this just finds nothing.
+    nonisolated private static func remoteTokenWindows(_ app: AXUIElement) -> [AXUIElement] {
+        typealias Fn = @convention(c) (CFData) -> Unmanaged<AXUIElement>?
+        guard let sym = dlsym(UnsafeMutableRawPointer(bitPattern: -2), "_AXUIElementCreateWithRemoteToken") else { return [] }
+        let create = unsafeBitCast(sym, to: Fn.self)
+        var pid: pid_t = 0
+        AXUIElementGetPid(app, &pid)
+        var found: [AXUIElement] = []
+        for id: UInt64 in 0..<2000 {
+            var token = Data(count: 20)
+            token.withUnsafeMutableBytes { p in
+                p.storeBytes(of: pid, toByteOffset: 0, as: pid_t.self)
+                p.storeBytes(of: Int32(0), toByteOffset: 4, as: Int32.self)
+                p.storeBytes(of: Int32(0x636f636f), toByteOffset: 8, as: Int32.self)   // "coco"
+                p.storeBytes(of: id, toByteOffset: 12, as: UInt64.self)
+            }
+            if let el = create(token as CFData)?.takeRetainedValue(),
+               string(el, kAXRoleAttribute) == kAXWindowRole as String { found.append(el) }
+        }
+        AppLogger.log("[MeetingMute] záložné hľadanie okna: \(found.count)")
+        return found
     }
 
     /// Any Discord process (helpers included) with a running input stream = in a call.
@@ -118,7 +159,10 @@ final class MeetingMute {
             AppLogger.log("[MeetingMute] Discord: prepínač Mute nenájdený (okno zatvorené?)")
             return false
         }
-        guard (value != 0) != muted else { return false }   // already in the wanted state
+        guard (value != 0) != muted else {   // already in the wanted state — leave it alone
+            AppLogger.log("[MeetingMute] Discord už je \(muted ? "stlmený" : "odstlmený") — nič nemením")
+            return false
+        }
         AXUIElementPerformAction(control, kAXPressAction as CFString)
         // Discord applies the press asynchronously (~0.3–0.8 s) and ignores a second press that
         // comes too soon — read back until it changes, never press again blindly.
@@ -143,7 +187,7 @@ final class MeetingMute {
             for child in children(e) { if let hit = walk(child, depth + 1) { return hit } }
             return nil
         }
-        for window in windows(app) { if let hit = walk(window, 0) { return hit } }
+        for window in windows(app) { if let hit = walk(window, 0) { cachedWindow = window; return hit } }
         return nil
     }
 

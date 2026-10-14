@@ -2,7 +2,7 @@
 
 ## Nevydané
 
-- Počas diktovania sa automaticky stlmí tvoj mikrofón v Discorde a po diktovaní sa vráti — v hovore ťa nepočujú (Nastavenia → Diktovanie → Ostatné zvuky). Okno Discordu musí byť otvorené alebo minimalizované (⌘M), nie zatvorené — inak ťa pilulka upozorní.
+- Počas diktovania sa automaticky stlmí tvoj mikrofón v Discorde a po diktovaní sa vráti — v hovore ťa nepočujú (Nastavenia → Diktovanie → Ostatné zvuky). Funguje aj s Discordom na inej ploche či obrazovke; po zrušení diktovania (⌘⇧X) ťa odmutuje a ďalšie diktovanie ťa spoľahlivo znova stlmí.
 - Appka po diktovaní nezadrháva pri ukladaní histórie (ukladá sa na pozadí) a karta Kvalita v Nastaveniach sa otvára okamžite aj pri veľkej histórii.
 - Prvé diktovanie po spustení appky (najmä s AirPods či iným Bluetooth zvukom) sa už nezasekne na pár sekúnd — appka ostane živá a ak mikrofón chvíľu trvá, pilulka ukáže „Pripravujem mikrofón…“.
 - Pozastavenie hudby počas diktovania (Nastavenia → Diktovanie → Ostatné zvuky) konečne funguje: Spotify, Hudbu a TV pozastaví spoľahlivo, video v prehliadači a ostatné prehrávače klávesou Prehrať/Pozastaviť — a po diktovaní všetko znova pustí.
