@@ -3,7 +3,7 @@
 ## Nevydané
 
 - Smart beží na novších modeloch (GPT-6 Luna alebo Gemini 3.8 Flash, voľba v Nastavenia → Diktovanie → Smart) — staré modely OpenAI 14. 1. 2027 končia. Smart je presnejší (nevynechá mená, čísla ani dni, splní „vymaž poslednú vetu“), lacnejší, a funguje aj keď máš len jeden z kľúčov OpenAI / Gemini. Návrhy kľúčových slov idú cez ten istý model.
-- Menu ukazuje, akú verziu máš, a keď je nová, ponúka „Aktualizovať na …“ až do inštalácie — aj keď okno s ponukou zavrieš.
+- Menu ukazuje, akú verziu máš, a keď je nová, ponúka „Aktualizovať na …“ až do inštalácie — aj keď okno s ponukou zavrieš; v Nastaveniach svieti „Nová verzia“. Okno aktualizácie je po slovensky a novinky sú v ňom ako zoznam.
 - Prompt „Kontext zo screenshotu“ sa dá jedným klikom vrátiť na predvolený.
 - Appka po diktovaní nezadrháva pri ukladaní histórie (ukladá sa na pozadí) a karta Kvalita v Nastaveniach sa otvára okamžite aj pri veľkej histórii.
 - Prvé diktovanie po spustení appky (najmä s AirPods či iným Bluetooth zvukom) sa už nezasekne na pár sekúnd — appka ostane živá a ak mikrofón chvíľu trvá, pilulka ukáže „Pripravujem mikrofón…“.

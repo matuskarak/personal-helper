@@ -243,10 +243,44 @@ struct PreferencesView: View {
                 }
             }
             Spacer()
+            if let version = UpdaterController.shared.availableVersion {
+                updateBanner(version)
+            }
         }
         .padding(.horizontal, 10)
         .padding(.top, 20)
+        .padding(.bottom, 12)
         .frame(width: 190)
+    }
+
+    /// Shown at the bottom of the sidebar (every tab) while Sparkle knows about a newer
+    /// version the user hasn't installed — the menu bar alert alone was easy to miss.
+    func updateBanner(_ version: String) -> some View {
+        Button {
+            NSApp.activate(ignoringOtherApps: true)
+            UpdaterController.shared.checkForUpdates()
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "arrow.down.circle.fill")
+                    .font(.system(size: 16))
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Nová verzia \(version)")
+                        .font(Theme.body(12.5).weight(.semibold))
+                    Text("Kliknutím aktualizuješ")
+                        .font(Theme.body(11))
+                        .opacity(0.85)
+                }
+                Spacer(minLength: 0)
+            }
+            .foregroundStyle(.white)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .background(RoundedRectangle(cornerRadius: 7).fill(accent))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain).pointingHandCursor()
+        .focusEffectDisabled()
+        .accessibilityLabel("Dostupná nová verzia \(version), aktualizovať")
     }
 
     /// Diktovanie's row both opens it AND toggles whether História/Kvalita show below it —

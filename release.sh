@@ -5,6 +5,8 @@
 # Použitie:
 #   ./release.sh <verzia> [poznámky k vydaniu]
 #   ./release.sh 0.2.0 "Nová sekcia Prehľad, oprava BT mikrofónu"
+#   Viac bodov = viac riadkov (napr. riadky z CHANGELOG „Nevydané“, s „- “ alebo bez) —
+#   v okne aktualizácie sa ukážu ako zoznam.
 #
 # Robí: bump verzie v Info.plist → release build → zip → appcast.xml
 #       → GitHub Release (asset) → commit + push appcast.
@@ -55,7 +57,14 @@ echo "🔨 Release build…"
 echo "🤐 Zip…"
 rm -f "$RELEASES_DIR/$ZIP_NAME"
 ditto -c -k --sequesterRsrc --keepParent "$BUNDLE" "$RELEASES_DIR/$ZIP_NAME"
-echo "$NOTES" > "$RELEASES_DIR/$BUNDLE_NAME-$VERSION.txt"
+# HTML bez DOCTYPE/body → generate_appcast ho vloží priamo do appcastu (CDATA), Sparkle ho
+# vykreslí ako zoznam. Starší .txt cez releaseNotesLink sa zobrazoval ako jeden súvislý odsek.
+{
+    echo "<ul>"
+    printf '%s\n' "$NOTES" | sed -e 's/^[[:space:]]*[-•*][[:space:]]*//' -e '/^[[:space:]]*$/d' \
+        -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g' -e 's#.*#  <li>&</li>#'
+    echo "</ul>"
+} > "$RELEASES_DIR/$BUNDLE_NAME-$VERSION.html"
 
 # Notarizácia — beží len keď existuje uložený notarytool profil (jednorazovo:
 # xcrun notarytool store-credentials "notary-profile" --apple-id … --team-id … --password …).
@@ -79,10 +88,8 @@ echo "📰 Appcast…"
 ./.sparkle-tools/bin/generate_appcast "$RELEASES_DIR" \
     --download-url-prefix "https://github.com/$REPO/releases/download/$RELEASE_TAG/"
 cp "$RELEASES_DIR/appcast.xml" appcast.xml
-# sparkle:releaseNotesLink points at this file at the repo ROOT (raw.githubusercontent.com/.../master/…) —
-# it has to be committed there, not just left in the gitignored releases/ dir, or every release's
-# notes link 404s in the Sparkle update dialog (true of every past release before this fix).
-cp "$RELEASES_DIR/$BUNDLE_NAME-$VERSION.txt" "$BUNDLE_NAME-$VERSION.txt"
+# Poznámky sú vložené v appcaste (HTML vyššie). Staršie verzie odkazujú cez releaseNotesLink na
+# .txt v koreni repa — tie súbory tam musia ostať.
 
 echo "🚀 GitHub Release…"
 gh release view "$RELEASE_TAG" --repo "$REPO" >/dev/null 2>&1 \
@@ -92,7 +99,7 @@ gh release upload "$RELEASE_TAG" "$RELEASES_DIR/$ZIP_NAME" --repo "$REPO" --clob
 gh release upload "$RELEASE_TAG" "$DMG_DIR/$DMG_NAME" --repo "$REPO" --clobber
 
 echo "📤 Commit + push appcast…"
-git add "$INFO_PLIST" appcast.xml "$BUNDLE_NAME-$VERSION.txt"
+git add "$INFO_PLIST" appcast.xml
 git commit -m "Release v$VERSION"
 git push
 
