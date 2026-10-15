@@ -21,6 +21,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     private var diagnosticsItem     = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     private var ocrItem             = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     private var realtimeItem        = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+    private var updateItem          = NSMenuItem(title: "", action: nil, keyEquivalent: "")
 
     override init() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
@@ -111,8 +112,9 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         menu.addItem(NSMenuItem(title: "Nastavenia…", action: #selector(openPreferences), keyEquivalent: ",")
             .configured { $0.target = self })
 
-        menu.addItem(NSMenuItem(title: "Skontrolovať aktualizácie…", action: #selector(checkForUpdates), keyEquivalent: "")
-            .configured { $0.target = self })
+        updateItem.action = #selector(checkForUpdates)
+        updateItem.target = self
+        menu.addItem(updateItem)
 
         menu.addItem(.separator())
 
@@ -229,6 +231,16 @@ final class MenuBarController: NSObject, NSMenuDelegate {
             historyMenu.addItem(clearItem)
         }
         historySubmenuItem.submenu = historyMenu
+
+        // Update — a found update stays visible here even after its Sparkle alert was dismissed
+        if let version = UpdaterController.shared.availableVersion {
+            updateItem.title = "Aktualizovať na \(version)…"
+            updateItem.image = NSImage(systemSymbolName: "arrow.down.circle.fill", accessibilityDescription: nil)
+        } else {
+            let current = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
+            updateItem.title = "Skontrolovať aktualizácie… (máš \(current))"
+            updateItem.image = nil
+        }
 
         // Pending (failed) recordings
         let pendingItems = PendingDictationStore.shared.pending
