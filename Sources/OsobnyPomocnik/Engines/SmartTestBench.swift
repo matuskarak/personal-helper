@@ -27,7 +27,6 @@ enum SmartTestBench {
     static func run() async {
         guard RemoteConfig.shared.developerModeGranted else { return }
         let engine = SmartRewriteEngine.shared
-        let key = DictationEngine.shared.openAIKey
         let savedTone = engine.tone
         defer { engine.tone = savedTone }
         var out = "# Smart test — \(engine.model) — \(Date())\n"
@@ -46,7 +45,7 @@ enum SmartTestBench {
                 out += "\n## \(category.rawValue) · \(tone.rawValue)\n\n**Vstup:** \(text)\n\n"
                 do {
                     let r = try await engine.rewrite(transcript: text, screenshotJPEG: nil, profile: profile(category),
-                                                     category: category, apiKey: key, selection: selection)
+                                                     category: category, selection: selection)
                     out += "**Výstup:**\n\n\(r.text)\n\n_zmeny: \(r.changes) · cieľ: \(r.target) · issues: \(r.issues)_\n"
                     rows.append(["id": id, "out": r.text])
                 } catch {

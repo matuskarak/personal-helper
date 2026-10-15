@@ -2,6 +2,8 @@
 
 ## Nevydané
 
+- Smart beží na novších modeloch (GPT-6 Luna alebo Gemini 3.8 Flash, voľba v Nastavenia → Diktovanie → Smart) — staré modely OpenAI 14. 1. 2027 končia. Smart je presnejší (nevynechá mená, čísla ani dni, splní „vymaž poslednú vetu“), lacnejší, a funguje aj keď máš len jeden z kľúčov OpenAI / Gemini. Návrhy kľúčových slov idú cez ten istý model.
+- Prompt „Kontext zo screenshotu“ sa dá jedným klikom vrátiť na predvolený.
 - Appka po diktovaní nezadrháva pri ukladaní histórie (ukladá sa na pozadí) a karta Kvalita v Nastaveniach sa otvára okamžite aj pri veľkej histórii.
 - Prvé diktovanie po spustení appky (najmä s AirPods či iným Bluetooth zvukom) sa už nezasekne na pár sekúnd — appka ostane živá a ak mikrofón chvíľu trvá, pilulka ukáže „Pripravujem mikrofón…“.
 - Pozastavenie hudby počas diktovania (Nastavenia → Diktovanie → Ostatné zvuky) konečne funguje: Spotify, Hudbu a TV pozastaví spoľahlivo, video v prehliadači a ostatné prehrávače klávesou Prehrať/Pozastaviť — a po diktovaní všetko znova pustí.

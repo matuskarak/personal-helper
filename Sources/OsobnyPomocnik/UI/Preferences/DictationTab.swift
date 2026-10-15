@@ -163,12 +163,14 @@ extension PreferencesView {
             }
             rowDivider
             pickerRow(title: "Model", selection: $smartModelInput) {
-                Text("gpt-4.1 (odporúčaný)").tag("gpt-4.1")
-                Text("gpt-4.1-mini (lacnejší, horšie formátuje)").tag("gpt-4.1-mini")
-                Text("gpt-4o").tag("gpt-4o")
-                Text("gpt-4o-mini (najlacnejší, slabý na formátovanie)").tag("gpt-4o-mini")
+                ForEach(SmartRewriteEngine.models, id: \.id) { Text($0.label).tag($0.id) }
             }
             .onChange(of: smartModelInput) { _, v in rewriteEngine.model = v }
+            // Shown only when the guard swaps the model — the user should know which one runs.
+            if let used = rewriteEngine.resolved(openAIKey: dictation.openAIKey, geminiKey: dictation.geminiKey)?.model,
+               used != smartModelInput {
+                captionRow("Pre zvolený model chýba API kľúč — Smart použije \(SmartRewriteEngine.models.first { $0.id == used }?.label ?? used).")
+            }
             rowDivider
             toggleRow(title: "Kontext zo screenshotu",
                       subtitle: "Model vidí obrazovku a podľa nej opraví prepis.",
@@ -185,7 +187,10 @@ extension PreferencesView {
                         Button(visionPromptExpanded ? "Zobraziť menej" : "Zobraziť viac") { visionPromptExpanded.toggle() }
                             .buttonStyle(.plain).pointingHandCursor().font(Theme.body(11)).foregroundStyle(accent)
                         Spacer()
-                        Text("Vymazaním sa vráti predvolený.").font(Theme.body(11)).foregroundStyle(Theme.textSecondary)
+                        if rewriteEngine.visionPromptOverride != SmartRewriteEngine.defaultVisionPreamble {
+                            Button("Obnoviť predvolený") { rewriteEngine.visionPromptOverride = SmartRewriteEngine.defaultVisionPreamble }
+                                .buttonStyle(.plain).pointingHandCursor().font(Theme.body(11)).foregroundStyle(accent)
+                        }
                     }
                 }
                 .padding(.horizontal, 16).padding(.vertical, 12)
@@ -405,10 +410,10 @@ extension PreferencesView {
             Label("Navrhnúť z histórie", systemImage: "sparkles").font(Theme.body(11))
         }
         .buttonStyle(.borderedProminent).controlSize(.small).tint(accent)
-        .disabled(!dictation.hasOpenAIKey)
-        .help(dictation.hasOpenAIKey
-              ? "Zanalyzuje históriu diktovaní za posledných 30 dní (OpenAI, gpt-4o-mini) a navrhne nové kľúčové slová na schválenie."
-              : "Chýba OpenAI API kľúč (Nastavenia → Všeobecné).")
+        .disabled(!dictation.hasOpenAIKey && !dictation.hasGeminiKey)
+        .help(dictation.hasOpenAIKey || dictation.hasGeminiKey
+              ? "Zanalyzuje históriu diktovaní za posledných 30 dní (rovnaký model ako Smart) a navrhne nové kľúčové slová na schválenie."
+              : "Chýba OpenAI aj Gemini API kľúč (Nastavenia → Všeobecné).")
         .accessibilityHint("Zanalyzuje históriu diktovaní a navrhne nové kľúčové slová na schválenie")
     }
 

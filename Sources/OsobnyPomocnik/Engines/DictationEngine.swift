@@ -1327,7 +1327,6 @@ final class DictationEngine {
                         screenshotJPEG: capturedScreenshotJPEG,
                         profile: profile,
                         category: capturedCategory,
-                        apiKey: openAIKey,
                         selection: selection
                     )
                     let output = rewrite.text

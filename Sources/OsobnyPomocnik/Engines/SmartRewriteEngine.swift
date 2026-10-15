@@ -10,8 +10,45 @@ import Observation
 final class SmartRewriteEngine {
     static let shared = SmartRewriteEngine()
 
+    /// The user's choice; `resolved()` decides what actually runs.
     var model: String {
         didSet { UserDefaults.standard.set(model, forKey: "smart.model") }
+    }
+
+    /// gpt-4.x retire 2027-01-14 (OpenAI notice 2026-10-14). Bench 2026-10-15 (Vyvoj/smart-bench,
+    /// 38 diktovaní × 2): Luna + `accuracyRule` 1 chyba / 2,6 s / $0,45 na 1 000; Gemini 3.8 Flash
+    /// ~0 skutočných / 3,1 s / ~$5,50. Both without reasoning — it only added latency.
+    static let models: [(id: String, label: String)] = [
+        ("gpt-6-luna", "GPT-6 Luna · OpenAI (odporúčaný)"),
+        ("gemini-3.8-flash", "Gemini 3.8 Flash · Google"),
+    ]
+    static func isGemini(_ model: String) -> Bool { model.hasPrefix("gemini") }
+
+    /// Guard (user 2026-10-15): the chosen model if its provider's key exists, otherwise the other
+    /// provider's model — a user with only one key still gets Smart. nil = no key at all.
+    func resolved(openAIKey: String = DictationEngine.shared.openAIKey,
+                  geminiKey: String = DictationEngine.shared.geminiKey) -> (model: String, key: String)? {
+        let key = { (m: String) in Self.isGemini(m) ? geminiKey : openAIKey }
+        if !key(model).isEmpty { return (model, key(model)) }
+        guard let other = Self.models.map(\.id).first(where: { !key($0).isEmpty }) else { return nil }
+        return (other, key(other))
+    }
+
+    static func selfCheck() {
+        let e = SmartRewriteEngine.shared, saved = e.model
+        defer { e.model = saved }
+        e.model = "gpt-6-luna"
+        assert(e.resolved(openAIKey: "o", geminiKey: "g")! == ("gpt-6-luna", "o"))
+        assert(e.resolved(openAIKey: "", geminiKey: "g")! == ("gemini-3.8-flash", "g"))
+        e.model = "gemini-3.8-flash"
+        assert(e.resolved(openAIKey: "o", geminiKey: "")! == ("gpt-6-luna", "o"))
+        assert(e.resolved(openAIKey: "", geminiKey: "") == nil)
+    }
+
+    /// Same Chat Completions body for both — Gemini through its OpenAI-compatible endpoint.
+    static func endpoint(for model: String) -> URL {
+        URL(string: isGemini(model) ? "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
+                                    : "https://api.openai.com/v1/chat/completions")!
     }
 
     /// Master switch for the vision-context preamble below — off means the system prompt
@@ -25,7 +62,12 @@ final class SmartRewriteEngine {
     /// text rather than a placeholder that vanishes on focus. Falls back to the built-in default
     /// in `rewrite()` only if a user explicitly clears it to blank.
     var visionPromptOverride: String {
-        didSet { UserDefaults.standard.set(visionPromptOverride, forKey: "smart.visionPromptOverride") }
+        // Stored only when edited — an untouched one follows the built-in default as it improves
+        // (before, the field's binding could freeze an old default into UserDefaults forever).
+        didSet {
+            if visionPromptOverride == Self.defaultVisionPreamble { UserDefaults.standard.removeObject(forKey: "smart.visionPromptOverride") }
+            else { UserDefaults.standard.set(visionPromptOverride, forKey: "smart.visionPromptOverride") }
+        }
     }
 
     /// Debug/tuning opt-in: also save the screenshot sent to the vision model into the
@@ -155,10 +197,30 @@ final class SmartRewriteEngine {
     Pokyn z <instruction> má prednosť pred všetkými pravidlami vyššie.
     """
 
+    /// Bench 2026-10-15: without it the cheap models dropped facts (a weekday, a name's form),
+    /// ignored „vymaž poslednú vetu“ and cut "som tester…" from AI prompts — Luna 12 → 1 error,
+    /// also on 10 new dictations it was not tuned on. Harmless for Gemini (2+6 → 1+4, rest = checker).
+    static let accuracyRule = """
+    KONTROLA PRESNOSTI (platí vždy):
+    1. Mená a oslovenia prepíš presne v tvare, ako boli nadiktované (zdrobneniny a tvary mien nemeň). \
+    Čísla, sumy, dátumy, časy a dni v týždni prenes VŠETKY a nemeň ich hodnotu ani poradie číslic.
+    2. Pokyn „vymaž/zmaž/vyhoď poslednú vetu“ (aj voľnejšie, napr. „to posledné vymaž“) = odstráň celú \
+    vetu alebo myšlienku vyslovenú TESNE PRED pokynom, vrátane jej pokračovania spojeného cez „takže“, \
+    „a“, „lebo“. Text za pokynom ponechaj.
+    3. Vymenovanie „po prvé…, po druhé…, po tretie…“ v e-maile, dokumente či poznámkach daj ako odrážky \
+    a slová „po prvé/po druhé“ vynechaj. V chate ho nechaj ako vetu.
+    4. V prompte pre AI zachovaj, kto je používateľ a pre koho výstup je (napr. „som účtovník“, \
+    „pracujem v marketingu“, „pre začiatočníkov“) — je to kontext pre AI, nie vata.
+    5. Pred výstupom porovnaj výsledok s <text_to_correct>: každé meno, číslo, deň a požiadavka \
+    z originálu v ňom musí byť (okrem toho, čo odstránil hlasový pokyn).
+    """
+
     private init() {
         // gpt-4.1: prompt bench 2026-09-28 (22 diktovaní × 2) — 0 chýb; gpt-4.1-mini 14, gpt-5-mini 13,
         // gpt-4o-mini 32 (malé písmená, „- -“ odrážky, pokyny v texte, ignorovaný tón).
-        self.model = UserDefaults.standard.string(forKey: "smart.model") ?? "gpt-4.1"
+        // Anything not in the list (gpt-4.1 & co. retiring 2027-01-14) moves to the default.
+        let storedModel = UserDefaults.standard.string(forKey: "smart.model") ?? ""
+        self.model = Self.models.contains { $0.id == storedModel } ? storedModel : Self.models[0].id
         self.visionPromptEnabled = UserDefaults.standard.object(forKey: "smart.visionPromptEnabled") as? Bool ?? true
         // Nil OR empty stored value → seed with the default text so the field always shows
         // real, editable text instead of a blank box (an older build could've persisted "").
@@ -181,7 +243,9 @@ final class SmartRewriteEngine {
     /// `selection` (2026-10-08): text the user had selected — then `transcript` is a spoken
     /// instruction for editing it ("sprav to formálnejšie", "daj to do odrážok"), not new text.
     func requestBody(transcript: String, screenshotJPEG: Data?, profile: AppProfile,
-                     category: AppCategory, selection: String? = nil) -> (body: [String: Any], marked: String) {
+                     category: AppCategory, selection: String? = nil,
+                     model: String? = nil) -> (body: [String: Any], marked: String) {
+        let model = model ?? resolved()?.model ?? self.model
         // Candidate spoken commands flagged by the app, examples right before the text.
         let marked = selection == nil ? VoiceCommands.mark(transcript) : transcript
         var content: [[String: Any]] = [
@@ -231,7 +295,7 @@ final class SmartRewriteEngine {
         let threadRule = selection == nil && screenshotJPEG != nil && (category == .email || category == .generic)
             ? Self.emailThreadRule : nil
         let parts: [String?] = selection == nil
-            ? [hardRule, preamble, category.formattingRules, tone.rule, promptRules, signatureRule, threadRule, profileRules]
+            ? [hardRule, preamble, category.formattingRules, tone.rule, promptRules, signatureRule, threadRule, profileRules, Self.accuracyRule]
             // Editing a selection: no tone/prompt-tuning/signature — the spoken instruction decides.
             : [Self.editRule, category.formattingRules, profileRules, Self.editFormatRule]
         let systemPrompt = parts.compactMap { $0 }.joined(separator: "\n\n")
@@ -305,7 +369,10 @@ final class SmartRewriteEngine {
                 ]
             ],
             // An edit returns the whole selection (Slovak ≈ 3 chars per token) — don't cut it short.
-            "max_tokens": max(2500, (selection?.count ?? 0) / 2 + 500),
+            "max_completion_tokens": max(2500, (selection?.count ?? 0) / 2 + 500),
+            // Luna/Gemini reason by default (+1–2 s, no quality gain in the bench); temperature 0
+            // is only accepted together with "none".
+            "reasoning_effort": "none",
             "temperature": 0
         ]
         return (body, marked)
@@ -316,13 +383,14 @@ final class SmartRewriteEngine {
         screenshotJPEG: Data?,   // pre-encoded by DictationEngine's capture task — see capturedScreenshotJPEG
         profile: AppProfile,
         category: AppCategory,
-        apiKey: String,
         selection: String? = nil   // see requestBody — transcript is then the edit instruction
     ) async throws -> Result {
+        guard let (model, apiKey) = resolved() else { throw SmartRewriteError.noKey }
+        if model != self.model { AppLogger.log("[SmartRewriteEngine] \(self.model) nemá kľúč — používam \(model)") }
         let (body, marked) = requestBody(transcript: transcript, screenshotJPEG: screenshotJPEG,
-                                         profile: profile, category: category, selection: selection)
+                                         profile: profile, category: category, selection: selection, model: model)
 
-        var req = URLRequest(url: URL(string: "https://api.openai.com/v1/chat/completions")!)
+        var req = URLRequest(url: Self.endpoint(for: model))
         req.httpMethod = "POST"
         req.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -402,6 +470,7 @@ final class SmartRewriteEngine {
         case apiError(Int, String)
         case refused(String)
         case lostContent
+        case noKey
 
         var errorDescription: String? {
             switch self {
@@ -409,6 +478,7 @@ final class SmartRewriteEngine {
             case .apiError(let c, let m): "API chyba \(c): \(m)"
             case .refused(let reason):    "Model odmietol prepis: \(reason)"
             case .lostContent:            "Model vynechal časť textu."
+            case .noKey:                  "Smart potrebuje OpenAI alebo Gemini API kľúč."
             }
         }
     }

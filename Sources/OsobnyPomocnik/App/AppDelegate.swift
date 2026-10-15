@@ -38,6 +38,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         SpeechLevelHistogram.selfCheck()
         RichText.selfCheck()
         VoiceCommands.selfCheck()
+        SmartRewriteEngine.selfCheck()
         #endif
         // Assets are bundled by build-app.sh, not SPM — one line tells a tester's log whether they arrived.
         let fontsOK = ["AtkinsonHyperlegible-Regular", "BricolageGrotesque-SemiBold"].allSatisfy { NSFont(name: $0, size: 12) != nil }

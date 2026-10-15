@@ -30,7 +30,7 @@ enum KeywordSuggestionEngine {
 
         var errorDescription: String? {
             switch self {
-            case .noKey:             "OpenAI API kľúč nie je nastavený (Nastavenia → Všeobecné)."
+            case .noKey:             "Chýba OpenAI aj Gemini API kľúč (Nastavenia → Všeobecné)."
             case .notEnoughHistory:  "Zatiaľ nemáš dosť histórie diktovaní na zmysluplný návrh."
             case .http(let c, let m): "OpenAI API chyba \(c): \(m.prefix(160))"
             case .badResponse:       "Neočakávaná odpoveď servera."
@@ -41,8 +41,8 @@ enum KeywordSuggestionEngine {
     /// Analyzes the last `days` of dictation history and returns suggestions the user hasn't
     /// already covered. Never modifies any keyword field itself.
     static func suggest(days: Int = 30) async throws -> [KeywordSuggestion] {
-        let key = DictationEngine.shared.openAIKey
-        guard !key.isEmpty else { throw SuggestionError.noKey }
+        // Same model + key guard as Smart (gpt-4o-mini retires 2027-01-14).
+        guard let (model, key) = SmartRewriteEngine.shared.resolved() else { throw SuggestionError.noKey }
 
         let cutoff = Date().addingTimeInterval(-Double(days) * 86_400)
         let entries = DictationHistoryStore.shared.entries
@@ -83,9 +83,9 @@ enum KeywordSuggestionEngine {
         AppLogger.log("[KeywordSuggestion] vstup: \(entries.count) záznamov za \(days) dní, použitých \(used) znakov")
 
         let existingBlock = existingBlockText(existingGlobal: existingGlobal, profiles: profiles)
-        let body = requestBody(transcript: transcript, existingBlock: existingBlock, profileNames: profiles.map(\.displayName))
+        let body = requestBody(transcript: transcript, existingBlock: existingBlock, profileNames: profiles.map(\.displayName), model: model)
 
-        var req = URLRequest(url: URL(string: "https://api.openai.com/v1/chat/completions")!)
+        var req = URLRequest(url: SmartRewriteEngine.endpoint(for: model))
         req.httpMethod = "POST"
         req.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -122,7 +122,7 @@ enum KeywordSuggestionEngine {
         return lines.joined(separator: "\n")
     }
 
-    private static func requestBody(transcript: String, existingBlock: String, profileNames: [String]) -> [String: Any] {
+    private static func requestBody(transcript: String, existingBlock: String, profileNames: [String], model: String) -> [String: Any] {
         let systemPrompt = """
         Analyzuješ históriu diktovaní z hlasového asistenta a navrhuješ NOVÉ kľúčové slová, ktoré \
         pomôžu prepisovaciemu modelu (Whisper/GPT-transcribe) rozpoznávať vlastné mená, názvy \
@@ -163,7 +163,8 @@ enum KeywordSuggestionEngine {
         """
 
         return [
-            "model": "gpt-4o-mini",
+            "model": model,
+            "reasoning_effort": "none",
             "temperature": 0,
             "messages": [
                 ["role": "system", "content": systemPrompt],
@@ -212,7 +213,7 @@ enum KeywordSuggestionEngine {
                     ]
                 ]
             ],
-            "max_tokens": 2000
+            "max_completion_tokens": 2000
         ]
     }
 
