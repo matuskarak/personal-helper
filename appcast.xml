@@ -3,6 +3,36 @@
     <channel>
         <title>OsobnyPomocnik</title>
         <item>
+            <title>0.5.0</title>
+            <pubDate>Thu, 15 Oct 2026 14:08:50 +0200</pubDate>
+            <sparkle:version>7</sparkle:version>
+            <sparkle:shortVersionString>0.5.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <description><![CDATA[<ul>
+  <li>Smart beží na nových modeloch (GPT-6 Luna alebo Gemini 3.8 Flash) — presnejší, lacnejší a funguje aj len s jedným kľúčom (OpenAI alebo Gemini).</li>
+  <li>Smart formátuje podľa appky: e-mail s oslovením a odsekmi (vo vlákne bez zbytočných „Ďakujem / S pozdravom“), chat krátko, poznámky v odrážkach. Vlastný podpis a voľba tónu.</li>
+  <li>Hlasové pokyny v Smart („toto zvýrazni“, „nový odsek“, „vymaž poslednú vetu“) sa vykonajú a neostanú v texte.</li>
+  <li>Úprava označeného textu hlasom: označ text, ⌘⇧A, povedz čo s ním, ⌘⇧A.</li>
+  <li>Kontrola pred vložením: výsledok Smart si môžeš najprv pozrieť a upraviť v okne.</li>
+  <li>Smart v AI chatoch (ChatGPT, Claude…) prompt len učeše a prispôsobí typu modelu, nesplní ho.</li>
+  <li>Počas diktovania sa dá hudba pozastaviť alebo stíšiť (Nastavenia → Diktovanie → Ostatné zvuky); pri slúchadlách sa nič nemení.</li>
+  <li>Keď prepis u jedného poskytovateľa zlyhá, dokončí sa cez druhého (ak máš oba kľúče).</li>
+  <li>Spoľahlivejšie vkladanie (Claude, Slack, Arc), plynulejšia pilulka, rýchle prvé diktovanie po štarte, menej falošných hlášok.</li>
+  <li>Čítanie: nastavenie hlasitosti, ⏯ / ťuknutie na AirPods pozastaví, ⌘⇧R počas čítania pozastaví/pustí.</li>
+  <li>Aktualizácie: menu ukazuje tvoju verziu a dostupnú aktualizáciu, v Nastaveniach svieti „Nová verzia“, okno je po slovensky.</li>
+</ul>
+]]></description>
+            <enclosure url="https://github.com/matuskarak/personal-helper/releases/download/builds/Ozvena-0.5.0.zip" length="3739550" type="application/octet-stream" sparkle:edSignature="YPUM956/jeQSAdeu92wzLh3qGrAI8PUlqV6Pz+sQpy+jIaVsws8Sky8j7ASHOrhzN9j4FAbeA2WfgmopKnghDw=="/>
+            <sparkle:deltas>
+                <enclosure url="https://github.com/matuskarak/personal-helper/releases/download/builds/Ozvena7-6.delta" sparkle:deltaFrom="6" length="806490" type="application/octet-stream" sparkle:deltaFromSparkleExecutableSize="977712" sparkle:deltaFromSparkleLocales="de,he,ar,el,ja,fa,uk" sparkle:edSignature="mm0kwMIXQw+sKbOLZ6CKJU6tFgEjMpMHsq9mGREwwAckiMqnUMuQm0QcWBRD2CB8ODzMkRDF+wOIQ6XiUThEBA=="/>
+                <enclosure url="https://github.com/matuskarak/personal-helper/releases/download/builds/Ozvena7-5.delta" sparkle:deltaFrom="5" length="1272098" type="application/octet-stream" sparkle:deltaFromSparkleExecutableSize="977712" sparkle:deltaFromSparkleLocales="de,he,ar,el,ja,fa,uk" sparkle:edSignature="bTqvqRpmnf7hrXRufnE5mSzhbsT407DOfH1LUq2V2c5cf65lFbJVQ0PyBP02cOT4suYLpA0+deayGlEhXdgeDA=="/>
+                <enclosure url="https://github.com/matuskarak/personal-helper/releases/download/builds/Ozvena7-4.delta" sparkle:deltaFrom="4" length="1272782" type="application/octet-stream" sparkle:deltaFromSparkleExecutableSize="977712" sparkle:deltaFromSparkleLocales="de,he,ar,el,ja,fa,uk" sparkle:edSignature="CLo7PwNGAf1aLBGZJjdlsw6ii1ZLm5EqrQiDYs/h7P3YdCMHoOPS3nfdRBg05ZcY4Sj05qPoIxM9c+a6sRsGCg=="/>
+                <enclosure url="https://github.com/matuskarak/personal-helper/releases/download/builds/Ozvena7-3.delta" sparkle:deltaFrom="3" length="1641030" type="application/octet-stream" sparkle:deltaFromSparkleExecutableSize="977712" sparkle:deltaFromSparkleLocales="de,he,ar,el,ja,fa,uk" sparkle:edSignature="8/9FG+MiTuiXhRCMcuSjcotzCtwdY46fERziQ1j24juigCIysdPqPsUvaR8y6jALcYxf8j6NvPy3wjidnch7Cg=="/>
+                <enclosure url="https://github.com/matuskarak/personal-helper/releases/download/builds/Ozvena7-2.delta" sparkle:deltaFrom="2" length="1638326" type="application/octet-stream" sparkle:deltaFromSparkleExecutableSize="977712" sparkle:deltaFromSparkleLocales="de,he,ar,el,ja,fa,uk" sparkle:edSignature="uyZKuomFXhK63G7lb+CKMEhzWaO5/16TZWh4qjJ8dFxNgqXuXHdRaLg/AmEMuXzCH4ntGJluiOM+VLJ58im1Cg=="/>
+            </sparkle:deltas>
+        </item>
+        <item>
             <title>0.4.2</title>
             <pubDate>Sat, 19 Sep 2026 14:10:36 +0200</pubDate>
             <sparkle:version>6</sparkle:version>
@@ -31,20 +61,6 @@
                 <enclosure url="https://github.com/matuskarak/personal-helper/releases/download/builds/OsobnyPomocnik5-4.delta" sparkle:deltaFrom="4" length="348418" type="application/octet-stream" sparkle:deltaFromSparkleExecutableSize="977712" sparkle:deltaFromSparkleLocales="de,he,ar,el,ja,fa,uk" sparkle:edSignature="AutEBd7QV2dRUbY3/9X73NDTsgt+yMHBWxCL3G+1hzFKKAZzDnoB1OHm2uAIpECNBCq6OGW+b/y3x4D3Gk80Bg=="/>
                 <enclosure url="https://github.com/matuskarak/personal-helper/releases/download/builds/OsobnyPomocnik5-3.delta" sparkle:deltaFrom="3" length="1387374" type="application/octet-stream" sparkle:deltaFromSparkleExecutableSize="977712" sparkle:deltaFromSparkleLocales="de,he,ar,el,ja,fa,uk" sparkle:edSignature="o/jUIrc5R0NhULe73XNqaWuCTqFIVxrNjiBxufSBJWXtfZooDzzZeDWI4O216wYhp2A0LMfWkhKc/KX84aaMAQ=="/>
                 <enclosure url="https://github.com/matuskarak/personal-helper/releases/download/builds/OsobnyPomocnik5-2.delta" sparkle:deltaFrom="2" length="1402822" type="application/octet-stream" sparkle:deltaFromSparkleExecutableSize="977712" sparkle:deltaFromSparkleLocales="de,he,ar,el,ja,fa,uk" sparkle:edSignature="Dv0q5TzBd2+QR8koyJzx/GwIugnikSAuvVKSXJVzENuLoGOe47TtFJSL47W1USfuc/6HTPrclXhGoA2fAHjvDw=="/>
-            </sparkle:deltas>
-        </item>
-        <item>
-            <title>0.4.0</title>
-            <pubDate>Mon, 14 Sep 2026 12:37:45 +0200</pubDate>
-            <sparkle:version>4</sparkle:version>
-            <sparkle:shortVersionString>0.4.0</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <sparkle:releaseNotesLink>https://raw.githubusercontent.com/matuskarak/personal-helper/master/OsobnyPomocnik-0.4.0.txt</sparkle:releaseNotesLink>
-            <enclosure url="https://github.com/matuskarak/personal-helper/releases/download/builds/OsobnyPomocnik-0.4.0.zip" length="3368491" type="application/octet-stream" sparkle:edSignature="8Z529RWBgViUr7SAZnV2qeKJOYzx8QH65bT2Ld/nMf12Qq4miDJP4V3QKmRBWUPO4A3NA2O3BZexmkrDuan+AA=="/>
-            <sparkle:deltas>
-                <enclosure url="https://github.com/matuskarak/personal-helper/releases/download/builds/OsobnyPomocnik4-3.delta" sparkle:deltaFrom="3" length="1354342" type="application/octet-stream" sparkle:deltaFromSparkleExecutableSize="977712" sparkle:deltaFromSparkleLocales="de,he,ar,el,ja,fa,uk" sparkle:edSignature="q4PxHDq58NEtJJ8DWmMf6XI9GVojP5V3iF+Wu8sg+l4i0C83NJxxiT8/GCqkUjWOyp9kbrco4ThAEt0ZGb85BQ=="/>
-                <enclosure url="https://github.com/matuskarak/personal-helper/releases/download/builds/OsobnyPomocnik4-2.delta" sparkle:deltaFrom="2" length="1382098" type="application/octet-stream" sparkle:deltaFromSparkleExecutableSize="977712" sparkle:deltaFromSparkleLocales="de,he,ar,el,ja,fa,uk" sparkle:edSignature="L8X/UPd8992kTQHZV9330OYOYBON/ZS4/AdqxXglW6M3EnmMMSyhcpbzJUcto7kGtp8yqvp0F/+YTBm1Fn9XAA=="/>
             </sparkle:deltas>
         </item>
     </channel>
