@@ -9,7 +9,8 @@ import Foundation
 ///   exact request bodies Smart would send → dump-out.json (the baseline to vary)
 /// - `ozvena://benchRun`    — reads run-in.json [{id, body}] (any Chat Completions body),
 ///   sends them with the stored OpenAI key → run-out.json [{id, status, content, ms}].
-///   The key stays in the app; the bench only proxies to api.openai.com.
+///   The key stays in the app; the bench only proxies to api.openai.com — or, with
+///   "provider": "gemini" on the item, to Gemini's OpenAI-compatible endpoint with the Gemini key.
 @MainActor
 enum SmartTestBench {
     private static let dir = FileManager.default.homeDirectoryForCurrentUser
@@ -76,7 +77,7 @@ enum SmartTestBench {
     static func proxy() async {
         guard RemoteConfig.shared.developerModeGranted,
               let items = read("run-in.json") else { return }
-        let key = DictationEngine.shared.openAIKey
+        let openAIKey = DictationEngine.shared.openAIKey, geminiKey = DictationEngine.shared.geminiKey
         var results: [[String: Any]] = []
         // ponytail: batches of 6 in parallel, enough to stay under rate limits for a bench
         for chunk in stride(from: 0, to: items.count, by: 6).map({ Array(items[$0..<min($0 + 6, items.count)]) }) {
@@ -84,8 +85,12 @@ enum SmartTestBench {
                 for item in chunk {
                     guard let body = item["body"], let data = try? JSONSerialization.data(withJSONObject: body) else { continue }
                     let id = item["id"] as? String ?? "?"
+                    let gemini = item["provider"] as? String == "gemini"
+                    let key = gemini ? geminiKey : openAIKey
+                    let url = gemini ? "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
+                                     : "https://api.openai.com/v1/chat/completions"
                     group.addTask {
-                        var req = URLRequest(url: URL(string: "https://api.openai.com/v1/chat/completions")!, timeoutInterval: 90)
+                        var req = URLRequest(url: URL(string: url)!, timeoutInterval: 90)
                         req.httpMethod = "POST"
                         req.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
                         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
