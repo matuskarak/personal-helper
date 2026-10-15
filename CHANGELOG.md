@@ -2,6 +2,8 @@
 
 ## Nevydané
 
+## 0.5.0
+
 - Smart beží na novších modeloch (GPT-6 Luna alebo Gemini 3.8 Flash, voľba v Nastavenia → Diktovanie → Smart) — staré modely OpenAI 14. 1. 2027 končia. Smart je presnejší (nevynechá mená, čísla ani dni, splní „vymaž poslednú vetu“), lacnejší, a funguje aj keď máš len jeden z kľúčov OpenAI / Gemini. Návrhy kľúčových slov idú cez ten istý model.
 - Menu ukazuje, akú verziu máš, a keď je nová, ponúka „Aktualizovať na …“ až do inštalácie — aj keď okno s ponukou zavrieš; v Nastaveniach svieti „Nová verzia“. Okno aktualizácie je po slovensky a novinky sú v ňom ako zoznam.
 - Prompt „Kontext zo screenshotu“ sa dá jedným klikom vrátiť na predvolený.
@@ -30,7 +32,6 @@
 - Smart tón „Uhladiť“ spoľahlivejšie vyhodí výplňové slová (teda, vlastne, nejakých…); v e-maile je poďakovanie s rozlúčkou v jednom riadku a text pod oslovením začína malým písmenom.
 - Čítanie má nastavenie hlasitosti (Nastavenia → Čítanie), pri hlase Google sa mení hneď počas čítania.
 - Smart formátuje spoľahlivejšie: zachová „približne“ pri sumách a termínoch, aj zdvorilé „prosím“; keď sa v reči opravíš („v utorok, nie, v stredu“), ostane len oprava; „S pozdravom“ a meno sú pod sebou; otázka pre AI ostane otázkou; funguje „vymaž poslednú vetu“; menej zbytočného tučného v poznámkach.
-- Smart má predvolený model gpt-4.1 — v teste na 28 diktovaniach jediný bez chýb vo formátovaní (lacnejšie modely písali malé písmená, zdvojené odrážky a nechávali pokyny v texte).
 - Keď server OpenAI na chvíľu zlyhá, Smart to automaticky skúsi ešte raz.
 - Prehľad ukazuje, koľko ticha sa z nahrávok vystrihlo a koľko sa tým ušetrilo na prepise.
 - Kontrola pred vložením (Smart): voliteľne sa výsledok najprv ukáže v okne, kde ho upravíš, vložíš (⌘↩), vložíš pôvodný prepis alebo zrušíš. V nastaveniach si zvolíš nikdy / len v AI chatoch / vždy a či chceš vidieť, čo AI zmenila, a pôvodný text.
