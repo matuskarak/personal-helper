@@ -13,3 +13,7 @@ backup-pred-*/
 # whoever clones the repo to build/run the tool. Code comments referencing Vyvoj/*.md assume
 # it's present on this machine; see CLAUDE.md.
 Vyvoj/
+
+# Interné poznámky — len lokálne, nikdy na GitHub (scripts/github-guard.py to aj vynúti)
+CLAUDE.md
+ROADMAP.md

@@ -46,6 +46,12 @@ RELEASE_TAG="builds" # one durable release — every version's zip uploaded here
 
 mkdir -p "$RELEASES_DIR" "$DMG_DIR"
 
+# Strážca GitHubu — repo je verejné. Kontrola PRED buildom a uploadom (pre-push hook by
+# zastavil až push, keď už je zip na GitHube). Pri náleze sa nič nevydá.
+./scripts/install-git-hooks.sh >/dev/null
+git fetch -q origin
+python3 scripts/github-guard.py --range origin/master..HEAD
+
 echo "🔢 Verzia $VERSION…"
 /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" "$INFO_PLIST"
 CURRENT_BUILD=$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$INFO_PLIST")
@@ -90,6 +96,10 @@ echo "📰 Appcast…"
 cp "$RELEASES_DIR/appcast.xml" appcast.xml
 # Poznámky sú vložené v appcaste (HTML vyššie). Staršie verzie odkazujú cez releaseNotesLink na
 # .txt v koreni repa — tie súbory tam musia ostať.
+
+echo "🛡  Kontrola balíka pred uploadom…"
+python3 scripts/github-guard.py --bundle "$RELEASES_DIR/$ZIP_NAME"
+python3 scripts/github-guard.py --bundle "$BUNDLE"
 
 echo "🚀 GitHub Release…"
 gh release view "$RELEASE_TAG" --repo "$REPO" >/dev/null 2>&1 \

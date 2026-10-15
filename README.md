@@ -73,7 +73,6 @@ Väčšina je **lokálna** (žiadny cloud okrem priamych OpenAI/Google API volan
 
 **Backlog / otvorené:** GDPR-ready opt-in zber dát od testerov, Developer ID + notarizácia (po zápise do Apple Developer Programu — pipeline je pripravená), licencovanie + platby, predplatiteľský backend (batch proxy + licencie možno na PHP hostingu, realtime WS proxy na Cloudflare Workers/VPS), hover-to-read, karaoke zvýrazňovanie (blokované vo WebKit/Chromium), fáza 2 enginu na analýzu diktovania.
 
-Detailný changelog, rozhodnutia a technické poznámky (prečo `turn_detection` musí byť `null` pri `gpt-live-transcribe`, prečo karaoke nejde vo WebKite, brainstorm filtrovania audia...) sú v Notion stránke **[🧑‍🦯 Osobný pomocník](https://example.invalid/removed)** — tento README je technický prehľad kódu, Notion je produktový/rozhodovací log.
 
 ## Build & run
 
